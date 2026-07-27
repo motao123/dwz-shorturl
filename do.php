@@ -7,7 +7,7 @@
 @time:2026-07-27
 @copyright:陌涛
 */
-include './includes/api.inc.php';
+include __DIR__ . '/includes/api.inc.php';
 $uid = htmlspecialchars($_GET['uid']);
 // 校验短码格式（6-8位，a-z0-5）
 if ($uid && !preg_match('/^[a-z0-5]{6,8}$/', $uid)) {

@@ -7,7 +7,7 @@
 @time:2026-07-27
 @copyright:陌涛
 */
-include './includes/api.inc.php';
+include __DIR__ . '/includes/api.inc.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     if (!headers_sent()) header('HTTP/1.1 405 Method Not Allowed');

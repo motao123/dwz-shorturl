@@ -4,8 +4,8 @@
  * 展示短链总数、累计点击、热门短链与最近创建的短链。
  */
 define('IN_CRONLITE', true);
-define('SYSTEM_ROOT', dirname(__FILE__) . '/');
-define('ROOT', dirname(SYSTEM_ROOT) . '/');
+define('SYSTEM_ROOT', __DIR__ . '/includes/');
+define('ROOT', __DIR__ . '/');   // stats.php 位于项目根目录
 
 require(ROOT . 'config.php');
 if (!isset($port)) $port = '3306';
@@ -28,7 +28,7 @@ function dispUrl($u) {
     if ($dec !== false && base64_encode($dec) === $u && filter_var($dec, FILTER_VALIDATE_URL)) return $dec;
     return $u;
 }
-function shortUrl($base, $uid) { return $base . $uid; }
+function shortUrlLink($base, $uid) { return $base . $uid; }
 
 $totalLinks = (int)$DB->count("SELECT COUNT(*) FROM wjoy_log");
 $totalClicks = (int)$DB->count("SELECT COALESCE(SUM(clicks),0) FROM wjoy_log");
@@ -77,7 +77,7 @@ header('Content-Type: text/html; charset=utf-8');
       <tr><td colspan="4" class="empty">暂无数据</td></tr>
     <?php else: foreach ($top as $r): ?>
       <tr>
-        <td><a href="<?php echo htmlspecialchars(shortUrl($base, $r['uid'])); ?>" target="_blank"><?php echo htmlspecialchars($r['uid']); ?></a></td>
+        <td><a href="<?php echo htmlspecialchars(shortUrlLink($base, $r['uid'])); ?>" target="_blank"><?php echo htmlspecialchars($r['uid']); ?></a></td>
         <td class="url"><a href="<?php echo htmlspecialchars(dispUrl($r['longurl'])); ?>" target="_blank" title="<?php echo htmlspecialchars(dispUrl($r['longurl'])); ?>"><?php echo htmlspecialchars(dispUrl($r['longurl'])); ?></a></td>
         <td><?php echo (int)$r['clicks']; ?></td>
         <td><?php echo htmlspecialchars($r['created_at']); ?></td>
@@ -94,7 +94,7 @@ header('Content-Type: text/html; charset=utf-8');
       <tr><td colspan="4" class="empty">暂无数据</td></tr>
     <?php else: foreach ($recent as $r): ?>
       <tr>
-        <td><a href="<?php echo htmlspecialchars(shortUrl($base, $r['uid'])); ?>" target="_blank"><?php echo htmlspecialchars($r['uid']); ?></a></td>
+        <td><a href="<?php echo htmlspecialchars(shortUrlLink($base, $r['uid'])); ?>" target="_blank"><?php echo htmlspecialchars($r['uid']); ?></a></td>
         <td class="url"><a href="<?php echo htmlspecialchars(dispUrl($r['longurl'])); ?>" target="_blank" title="<?php echo htmlspecialchars(dispUrl($r['longurl'])); ?>"><?php echo htmlspecialchars(dispUrl($r['longurl'])); ?></a></td>
         <td><?php echo (int)$r['clicks']; ?></td>
         <td><?php echo htmlspecialchars($r['created_at']); ?></td>

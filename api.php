@@ -7,7 +7,7 @@
 @time:2026-07-27
 @copyright:陌涛
 */
-include './includes/api.inc.php';
+include __DIR__ . '/includes/api.inc.php';
 
 $longurl = isset($_GET['url']) ? $_GET['url'] : (isset($_POST['url']) ? $_POST['url'] : '');
 $format = isset($_GET['format']) ? $_GET['format'] : (isset($_POST['format']) ? $_POST['format'] : '');
