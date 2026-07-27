@@ -226,7 +226,7 @@ $public_base_url = 'https://example.com/short';
 - `assets/app.js`
 - `assets/qrcode.min.js`
 
-页面使用相对 URL，因此根目录和子目录部署均可工作。`index.html` 当前通过 `?v=2.1.0` 引用 CSS、JavaScript 与二维码脚本。Nginx 示例会缓存静态资源 7 天；更新资源后应同步提升查询版本（例如 `v=2.1.1`），并按需刷新 CDN/反向代理缓存。若部署后仍看到旧界面，先确认新 `index.html` 已生效，再清理边缘缓存或执行浏览器强制刷新。
+页面使用相对 URL，因此根目录和子目录部署均可工作。`index.html` 当前通过 `?v=2.2.0` 引用 CSS、JavaScript 与二维码脚本。Nginx 示例会缓存静态资源 7 天；更新资源后应同步提升查询版本（例如 `v=2.2.1`），并按需刷新 CDN/反向代理缓存。若部署后仍看到旧界面，先确认新 `index.html` 已生效，再清理边缘缓存或执行浏览器强制刷新。
 
 ## API
 
