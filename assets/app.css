@@ -566,7 +566,8 @@ textarea[aria-invalid="true"] {
 }
 
 .batch-form {
-  position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 .batch-form .field-group {
@@ -588,15 +589,14 @@ textarea[aria-invalid="true"] {
 }
 
 .batch-form .button {
-  position: absolute;
-  right: 0;
-  bottom: -60px;
+  align-self: flex-end;
+  margin-top: 20px;
   min-width: 140px;
   min-height: 48px;
 }
 
 .batch-results {
-  margin-top: 80px;
+  margin-top: 32px;
   padding-top: 24px;
   border-top: 1px solid var(--line);
 }
@@ -924,8 +924,7 @@ body.dialog-open {
   }
 
   .batch-form .button {
-    position: static;
-    width: 100%;
+    align-self: stretch;
     margin-top: 16px;
   }
 
