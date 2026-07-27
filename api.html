@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>API 文档 - 短网址</title>
+  <meta name="robots" content="noindex, nofollow">
+  <style>
+:root{color-scheme:light;--ink:#111827;--strong:#09090b;--muted:#6b7280;--line:#e8e8ec;--surface:#fff;--soft:#f8f8fa;--page:#fafafb;--code-bg:#f4f4f5;--success:#16a34a;--danger:#dc2626;--radius:10px}
+*{box-sizing:border-box}
+body{margin:0;min-width:320px;color:var(--ink);background:var(--page);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,"PingFang SC","Microsoft YaHei",sans-serif;font-size:15px;line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:var(--strong);text-underline-offset:3px}
+a:focus-visible{outline:2px solid var(--strong);outline-offset:2px}
+.shell{width:100%;max-width:960px;margin:0 auto;padding:0 clamp(16px,4vw,40px)}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:20px 0;border-bottom:1px solid var(--line)}
+.topbar a{display:inline-flex;align-items:center;gap:8px;color:var(--strong);font-weight:650;text-decoration:none;font-size:14px}
+.topbar a:hover{color:var(--muted)}
+.badge{padding:4px 10px;background:var(--soft);border:1px solid var(--line);border-radius:999px;font-size:11px;font-weight:600;color:var(--muted)}
+h1{margin:48px 0 8px;font-size:clamp(28px,4vw,38px);font-weight:800;letter-spacing:-.035em;color:var(--strong)}
+.intro{color:var(--muted);margin:0 0 40px;font-size:16px}
+h2{margin:56px 0 16px;font-size:22px;font-weight:700;color:var(--strong);letter-spacing:-.02em;padding-bottom:10px;border-bottom:1px solid var(--line)}
+h3{margin:32px 0 12px;font-size:17px;font-weight:650;color:var(--strong)}
+p{margin:12px 0}
+code{font-family:"SF Mono","Fira Code",Consolas,monospace;font-size:13px;background:var(--code-bg);padding:2px 6px;border-radius:4px}
+pre{background:var(--code-bg);border:1px solid var(--line);border-radius:var(--radius);padding:16px 20px;overflow-x:auto;font-size:13px;line-height:1.6;margin:16px 0}
+pre code{background:none;padding:0}
+table{width:100%;border-collapse:collapse;font-size:13px;margin:16px 0}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);background:var(--soft);font-weight:600;white-space:nowrap}
+td code{font-size:12px}
+.method{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;font-family:monospace;letter-spacing:.03em}
+.method-post{background:#dbeafe;color:#1d4ed8}
+.method-get{background:#dcfce7;color:#15803d}
+.note{padding:14px 18px;background:var(--soft);border:1px solid var(--line);border-radius:var(--radius);margin:16px 0;font-size:13px;color:var(--muted)}
+.note strong{color:var(--strong)}
+ul,ol{padding-left:20px}
+li{margin:6px 0}
+.footer{margin:80px 0 40px;padding-top:24px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;text-align:center}
+@media(max-width:600px){table{font-size:12px}th,td{padding:8px 6px}pre{padding:12px;font-size:12px}}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <a href="./">← 返回首页</a>
+    <span class="badge">API Reference</span>
+  </div>
+
+  <h1>API 文档</h1>
+  <p class="intro">短网址服务提供 RESTful 风格的 HTTP 接口，支持单条生成、批量生成、短链跳转与统计查询。</p>
+
+  <h2>概述</h2>
+  <ul>
+    <li>所有生成接口均为 <code>application/x-www-form-urlencoded</code> 的 <strong>POST-only</strong> 接口。GET 或其他方法返回 HTTP 405 和 <code>Allow: POST</code> 头。</li>
+    <li>成功响应默认返回 JSON（<code>Content-Type: application/json; charset=utf-8</code>）。</li>
+    <li>短链 URL 由服务端配置 <code>$public_base_url</code> 决定，格式为 <code>{base_url}/{short_code}</code>。</li>
+    <li>部署在子目录时，所有路径自动适配相对 URL。</li>
+  </ul>
+
+  <h2>单条生成：<span class="method method-post">POST</span> api.php</h2>
+
+  <h3>请求参数</h3>
+  <table>
+    <thead><tr><th>参数</th><th>必填</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>url</code></td><td>是</td><td>目标网址。仅接受 http/https，最长 2048 字节，不可含控制字符或 URL 凭据</td></tr>
+      <tr><td><code>custom</code></td><td>否</td><td>自定义短码，6–8 位 <code>[a-z0-5]</code>。留空则自动生成</td></tr>
+      <tr><td><code>expire</code></td><td>否</td><td>有效天数：<code>0</code>(永久) / <code>1</code> / <code>7</code> / <code>30</code> / <code>365</code>，默认 <code>0</code></td></tr>
+      <tr><td><code>format</code></td><td>否</td><td>设为 <code>txt</code> 时返回纯文本短链（成功）或错误文本（失败）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>curl 示例</h3>
+  <pre><code>curl -X POST https://1.xk7.cn/api.php \
+  -d "url=https://example.com/long-page" \
+  -d "custom=mylink" \
+  -d "expire=30"</code></pre>
+
+  <h3>成功响应 (HTTP 200)</h3>
+  <pre><code>{
+  "code": "mylink",
+  "msg": "success",
+  "result": 1,
+  "short_url": "https://1.xk7.cn/mylink",
+  "state": "created"
+}</code></pre>
+
+  <p><code>state</code> 取值：</p>
+  <table>
+    <thead><tr><th>值</th><th>含义</th></tr></thead>
+    <tbody>
+      <tr><td><code>created</code></td><td>新建短链</td></tr>
+      <tr><td><code>existing</code></td><td>相同目标 URL 已存在，返回已有短码</td></tr>
+      <tr><td><code>renewed</code></td><td>已有短链已过期，续期后返回</td></tr>
+    </tbody>
+  </table>
+
+  <h2>批量生成：<span class="method method-post">POST</span> batch.php</h2>
+
+  <h3>请求参数</h3>
+  <table>
+    <thead><tr><th>参数</th><th>必填</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>urls</code></td><td>是</td><td>换行分隔的 URL 列表。最多 100 行，原始 body 最长 210000 字节</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note"><strong>注意：</strong>批量接口不支持 <code>custom</code> 和 <code>expire</code> 参数，所有短链均使用随机短码且永久有效。</div>
+
+  <h3>curl 示例</h3>
+  <pre><code>curl -X POST https://1.xk7.cn/batch.php \
+  --data-urlencode "urls=https://example.com/a
+https://example.com/b
+https://example.com/c"</code></pre>
+
+  <h3>成功响应 (HTTP 200)</h3>
+  <p>返回 JSON 数组，每个元素独立表示成功或失败：</p>
+  <pre><code>[
+  {
+    "url": "https://example.com/a",
+    "code": "abc123",
+    "short_url": "https://1.xk7.cn/abc123",
+    "msg": "success",
+    "result": 1
+  },
+  {
+    "url": "http://127.0.0.1/",
+    "code": null,
+    "short_url": "",
+    "msg": "url host not allowed",
+    "result": 10004
+  }
+]</code></pre>
+
+  <div class="note"><strong>请求级错误</strong>（空列表、超 100 条、body 过大、限流、方法错误）返回单个 JSON 对象而非数组，HTTP 状态码非 200。</div>
+
+  <h2>短链跳转：<span class="method method-get">GET</span> /{code}</h2>
+
+  <p>通过 Web 服务器重写规则，<code>/{6-8位短码}</code> 映射到 <code>do.php?uid={code}</code>。</p>
+
+  <table>
+    <thead><tr><th>HTTP 状态</th><th>条件</th></tr></thead>
+    <tbody>
+      <tr><td><strong>302</strong></td><td>短码有效且未过期，重定向到目标 URL，同时点击计数 +1</td></tr>
+      <tr><td><strong>404</strong></td><td>短码格式无效或不存在</td></tr>
+      <tr><td><strong>410</strong></td><td>短链已过期，或目标 URL 未通过安全校验</td></tr>
+      <tr><td><strong>500</strong></td><td>数据库查询异常</td></tr>
+    </tbody>
+  </table>
+
+  <p>所有跳转响应携带缓存控制头：</p>
+  <pre><code>Cache-Control: no-store, private, max-age=0
+Pragma: no-cache
+Expires: 0</code></pre>
+
+  <h2>统计页：<span class="method method-get">GET</span> stats.php</h2>
+
+  <p>私有统计页面，需通过请求头传递 Token 认证：</p>
+  <table>
+    <thead><tr><th>Header</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>X-Stats-Token: &lt;token&gt;</code></td><td>主要认证方式</td></tr>
+      <tr><td><code>Authorization: Bearer &lt;token&gt;</code></td><td>备选认证方式</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note"><strong>安全机制：</strong>当 <code>$stats_enabled = false</code> 或 <code>$stats_token</code> 为空时，stats.php 对所有请求返回 404，绝不泄露统计功能的存在。Token 比较使用 <code>hash_equals()</code> 防止时序攻击。</div>
+
+  <p>页面展示内容：</p>
+  <ul>
+    <li>短链总数</li>
+    <li>累计点击总数</li>
+    <li>点击量 Top 10</li>
+    <li>最近创建的 20 条短链</li>
+  </ul>
+
+  <p>安全响应头：</p>
+  <pre><code>Cache-Control: no-store
+X-Robots-Tag: noindex, nofollow
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer</code></pre>
+
+  <h2>HTTP 状态码与业务错误码</h2>
+
+  <table>
+    <thead><tr><th>HTTP</th><th>result</th><th>含义</th></tr></thead>
+    <tbody>
+      <tr><td>200</td><td>1</td><td>成功</td></tr>
+      <tr><td>400</td><td>10001</td><td>URL 或 URL 列表为空</td></tr>
+      <tr><td>400</td><td>10002</td><td>URL 过长、格式/协议/端口无效、含控制字符或凭据</td></tr>
+      <tr><td>400</td><td>10004</td><td>目标主机不允许（私有/保留地址/DNS 解析失败）</td></tr>
+      <tr><td>405</td><td>10010</td><td>请求方法不允许（仅接受 POST）</td></tr>
+      <tr><td>409</td><td>10007</td><td>自定义短码已被其他 URL 占用</td></tr>
+      <tr><td>409</td><td>10013</td><td>该 URL 已有短链，不能改用其他自定义短码</td></tr>
+      <tr><td>413</td><td>10011</td><td>批量请求 body 超过 210000 字节</td></tr>
+      <tr><td>422</td><td>10006</td><td>自定义短码格式不合法</td></tr>
+      <tr><td>422</td><td>10008</td><td>有效期不在允许值集合内</td></tr>
+      <tr><td>422</td><td>10012</td><td>批量 URL 超过 100 条</td></tr>
+      <tr><td>429</td><td>10005</td><td>触发速率限制，响应含 <code>Retry-After: 60</code></td></tr>
+      <tr><td>500</td><td>10003</td><td>数据库写入/续期失败</td></tr>
+      <tr><td>500</td><td>10009</td><td>自动短码碰撞重试耗尽（12 次）</td></tr>
+      <tr><td>503</td><td>10000</td><td>数据库不可用</td></tr>
+    </tbody>
+  </table>
+
+  <p>错误响应 JSON 格式：</p>
+  <pre><code>{"code": 0, "msg": "rate limit exceeded", "result": 10005}</code></pre>
+
+  <h2>速率限制</h2>
+
+  <table>
+    <thead><tr><th>接口</th><th>限制</th><th>窗口</th><th>计费</th></tr></thead>
+    <tbody>
+      <tr><td>api.php</td><td>20 次</td><td>60 秒</td><td>每次请求 cost = 1</td></tr>
+      <tr><td>batch.php</td><td>100 次</td><td>60 秒</td><td>cost = URL 条数</td></tr>
+    </tbody>
+  </table>
+
+  <ul>
+    <li>基于客户端 IP 的文件锁滑动窗口计数器。</li>
+    <li>仅当 <code>REMOTE_ADDR</code> 匹配 <code>$trusted_proxies</code> 配置时才信任 <code>X-Forwarded-For</code> 头。</li>
+    <li>限流目录不可写时请求直接失败（fail-closed）。</li>
+  </ul>
+
+  <h2>SSRF 防护</h2>
+
+  <p>在创建和跳转两个阶段均执行目标 URL 安全校验：</p>
+  <ul>
+    <li>仅接受 <code>http</code> / <code>https</code> 协议</li>
+    <li>拒绝含 URL 凭据（<code>user:pass@host</code>）的地址</li>
+    <li>拒绝控制字符、非法端口</li>
+    <li>拒绝 <code>localhost</code>、<code>*.local</code> 主机名</li>
+    <li>DNS 解析后拒绝所有私有/保留 IPv4/IPv6 地址</li>
+    <li>DNS 解析失败直接拒绝</li>
+  </ul>
+
+  <div class="note"><strong>建议：</strong>SSRF 校验为应用层防护，建议同时在主机/容器层面配置出站防火墙规则作为纵深防御。</div>
+
+  <h2>配置项</h2>
+
+  <table>
+    <thead><tr><th>变量</th><th>默认值</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>$public_base_url</code></td><td><code>'https://s.example.com'</code></td><td>API 响应中 short_url 的基础地址</td></tr>
+      <tr><td><code>$trusted_proxies</code></td><td><code>array()</code></td><td>允许信任 X-Forwarded-For 的上游 IP/CIDR 列表</td></tr>
+      <tr><td><code>$rate_limit_dir</code></td><td><code>__DIR__.'/logs/ratelimit'</code></td><td>限流计数器文件存储目录</td></tr>
+      <tr><td><code>$stats_enabled</code></td><td><code>false</code></td><td>是否启用统计页</td></tr>
+      <tr><td><code>$stats_token</code></td><td><code>''</code></td><td>统计页认证 Token（启用时必须非空）</td></tr>
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <p>© 2020–2026 <a href="https://imotao.com/">陌涛</a> · <a href="https://github.com/motao123/dwz-shorturl">获取源码</a></p>
+  </div>
+</div>
+</body>
+</html>
