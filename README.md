@@ -10,8 +10,16 @@ dwz-shorturl 是一款基于 PHP + MySQL 的短网址服务，提供简洁 API �
 - 数据库错误不再 `die` 纯文本，统一返回 JSON 错误并记录日志
 - 前端一键复制、加载态、真实错误提示
 - 前端资源本地化（Bootstrap、favicon）
+- 一键安装脚本 `setup.php`：自动建库、导入表结构、生成 `config.php`
+- 短链统计页 `stats.php`：查看短链总数、累计点击、热门与最近短链
 
 ### 安装
+
+**方式一（推荐，一键）**：浏览器访问 `setup.php`，填写数据库信息后自动完成「创建数据库 → 导入 `install.sql` → 生成 `config.php`」。
+CLI 同样可用：`php setup.php --host=127.0.0.1 --port=3306 --user=root --pwd=密码 --db=Imotao`。
+> ⚠️ 安装完成后请删除 `setup.php`，避免被他人重新写入配置。
+
+**方式二（手动）**：
 1. 上传全部文件至站点根目录。
 2. 将 `install.sql` 导入到 MySQL，创建表 `wjoy_log`（含 `url_hash` 唯一索引、`clicks`、`created_at` 等字段）。
    > 若已存在旧表，请先 `DROP TABLE wjoy_log;` 再导入，或手动 `ALTER` 增加新字段。
@@ -52,6 +60,14 @@ location / {
 ### 日志
 - 运行错误写入 `logs/php_error.log`（已在 `.gitignore` 中忽略）。
 - 限流计数写入 `logs/ratelimit/`。
+
+### 统计页
+访问 `stats.php` 查看短链运营数据：
+- 短链总数、累计点击（概览卡片）
+- 热门短链 Top 10（按点击数排序，可点击跳转到短链或目标地址）
+- 最近创建 20 条
+
+> 短链跳转时由 `do.php` 累加 `clicks`；旧表中无该字段时静默忽略，不影响跳转。
 
 ### 首发（1.0）
 - 接口路径统一为 `/api.php`
