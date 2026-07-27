@@ -4,42 +4,47 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="generator" content="Imotao">
-  <meta name="theme-color" content="#fafafa">
+  <meta name="theme-color" content="#fafafb">
   <title>短网址生成 - Imotao</title>
   <meta name="keywords" content="缩短网址,网址压缩,网址缩短,短网址,短域名,短地址,短URL,免费缩短网址,短链接生成器,短网址生成,免费缩址,域名伪装,域名转向,网站推广,短链接,长网址变短网址">
   <meta name="description" content="免费专业的网址缩短服务，支持自定义短码、有效期、二维码与批量生成。">
-  <link rel="stylesheet" href="./assets/app.css?v=2.2.0">
+  <link rel="stylesheet" href="./assets/app.css?v=2.3.0">
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
 
   <header class="site-header">
-    <a class="brand" href="./" aria-label="短网址首页">
-      <span class="brand-mark" aria-hidden="true">↗</span>
-      <span>短网址</span>
-    </a>
-    <span class="header-note"><span class="status-dot" aria-hidden="true"></span>轻量服务 · 无需注册</span>
+    <div class="header-left">
+      <a class="brand" href="./" aria-label="短网址首页">
+        <span class="brand-mark" aria-hidden="true">↗</span>
+        <span>短网址</span>
+      </a>
+      <nav class="header-nav" aria-label="主导航">
+        <a href="./">首页</a>
+        <a href="https://github.com/motao123/dwz-shorturl#api" target="_blank" rel="noopener">API</a>
+        <a href="https://github.com/motao123/dwz-shorturl#readme" target="_blank" rel="noopener">文档</a>
+        <a href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+    <div class="header-right">
+      <span class="header-note"><span class="status-dot" aria-hidden="true"></span>在线</span>
+    </div>
   </header>
 
   <main id="main" class="page-shell">
     <section class="hero" aria-labelledby="page-title">
       <p class="eyebrow">SHORT URL SERVICE</p>
-      <h1 id="page-title">把长链接，变成<br><span>更好分享的短网址。</span></h1>
-      <p class="hero-copy">粘贴目标网址即可生成短链，也可以设置专属短码和有效期。轻量、快速，不需要注册。</p>
-      <ul class="feature-list" aria-label="服务能力">
-        <li><span aria-hidden="true">01</span><strong>专属短码</strong><small>创建便于识别和分享的链接</small></li>
-        <li><span aria-hidden="true">02</span><strong>灵活有效期</strong><small>永久、按天或按年管理</small></li>
-        <li><span aria-hidden="true">03</span><strong>批量处理</strong><small>一次生成最多 100 条短链</small></li>
-      </ul>
+      <h1 id="page-title">创建你的短链接</h1>
+      <p class="hero-copy">永久免费 · 无需注册 · 秒级生成</p>
     </section>
 
     <section class="tool-card" aria-labelledby="single-title">
       <div class="section-heading">
         <div>
-          <p class="section-kicker">单条生成</p>
-          <h2 id="single-title">创建你的短链接</h2>
+          <p class="section-kicker">生成短链</p>
+          <h2 id="single-title">粘贴网址，立即缩短</h2>
         </div>
-          <span class="privacy-note"><span aria-hidden="true">●</span> 无需注册</span>
+        <span class="privacy-note"><span aria-hidden="true">●</span> 无需注册</span>
       </div>
 
       <form id="shorten-form" novalidate>
@@ -80,6 +85,29 @@
       </form>
     </section>
 
+    <div class="feature-grid" aria-label="核心能力">
+      <div class="feature-card">
+        <div class="feature-icon" aria-hidden="true">⚡</div>
+        <strong>秒级生成</strong>
+        <small>响应速度 &lt;100ms，即粘即用</small>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" aria-hidden="true">🔒</div>
+        <strong>永久有效</strong>
+        <small>默认永不过期，也可按天设置</small>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" aria-hidden="true">✏️</div>
+        <strong>自定义短码</strong>
+        <small>6–8 位专属后缀，便于记忆</small>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon" aria-hidden="true">📦</div>
+        <strong>批量生成</strong>
+        <small>一次处理最多 100 条链接</small>
+      </div>
+    </div>
+
     <section class="batch-section" aria-labelledby="batch-title">
       <div class="section-heading compact">
         <div>
@@ -92,7 +120,7 @@
       <form id="batch-form" class="batch-form" novalidate>
         <div class="field-group">
           <label for="batchInput">网址列表 <span>每行一个</span></label>
-          <textarea id="batchInput" name="urls" rows="6" maxlength="210000" required placeholder="https://example.com/page-one&#10;https://example.com/page-two" aria-describedby="batch-help"></textarea>
+          <textarea id="batchInput" name="urls" rows="10" maxlength="210000" required placeholder="https://example.com/page-one&#10;https://example.com/page-two&#10;https://example.com/page-three" aria-describedby="batch-help"></textarea>
           <div class="field-meta">
             <span id="batch-help">批量生成使用随机短码且永久有效。</span>
             <span id="batch-count" aria-live="polite">0 / 100</span>
@@ -140,7 +168,7 @@
     </section>
   </div>
 
-  <script src="./assets/qrcode.min.js?v=2.2.0"></script>
-  <script src="./assets/app.js?v=2.2.0"></script>
+  <script src="./assets/qrcode.min.js?v=2.3.0"></script>
+  <script src="./assets/app.js?v=2.3.0"></script>
 </body>
 </html>
