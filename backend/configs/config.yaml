@@ -1,0 +1,29 @@
+server:
+  port: 8080
+  mode: release
+database:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: ""
+  dbname: dwz_admin
+  charset: utf8mb4
+redis:
+  addr: 127.0.0.1:6379
+  password: ""
+  db: 0
+jwt:
+  secret: "change-me-to-random-32-bytes!!"
+  access_expiry: 2h
+  refresh_expiry: 168h
+public:
+  base_url: "https://1.xk7.cn"
+  trusted_proxies: []
+rate_limit:
+  single_max: 20
+  single_window: 60
+  batch_max: 100
+  batch_window: 60
+log:
+  level: info
+  file: ""

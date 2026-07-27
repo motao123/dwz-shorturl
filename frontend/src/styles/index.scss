@@ -1,0 +1,271 @@
+/* ============================================================
+   DWZ 短网址管理后台 — 全局设计基线
+   配色：深 petrol 墨青 + 琥珀信号色 + 蓝灰纸面
+   字体：Manrope (正文/西文) · JetBrains Mono (短码/数字)
+   ============================================================ */
+
+:root {
+  /* 品牌色板 */
+  --dwz-ink: #0c2a30;          // 深墨青（侧栏底）
+  --dwz-ink-2: #10363e;        // 墨青浮层
+  --dwz-petrol: #0e6e75;       // 主操作色
+  --dwz-petrol-strong: #0a565c;
+  --dwz-amber: #f5a623;        // 信号强调色
+  --dwz-amber-deep: #d18a10;
+  --dwz-paper: #f2f5f7;        // 内容底
+  --dwz-line: #dfe7ea;
+  --dwz-text: #1f3238;
+  --dwz-text-dim: #6b7f86;
+  --dwz-good: #16a34a;
+  --dwz-warn: #d97706;
+  --dwz-bad: #dc2626;
+
+  /* 字体栈 */
+  --dwz-font-body: 'Manrope', 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei',
+    'Helvetica Neue', Arial, sans-serif;
+  --dwz-font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+
+  /* Element Plus 主题覆盖 */
+  --el-color-primary: var(--dwz-petrol);
+  --el-color-primary-dark-2: var(--dwz-petrol-strong);
+  --el-color-primary-light-3: #3d8d92;
+  --el-color-primary-light-5: #7fb4b7;
+  --el-color-primary-light-7: #b7d5d6;
+  --el-color-primary-light-8: #d3e6e7;
+  --el-color-primary-light-9: #ebf4f4;
+  --el-font-family: var(--dwz-font-body);
+  --el-border-radius-base: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--dwz-font-body);
+  color: var(--dwz-text);
+  background: var(--dwz-paper);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ---------- 通用工具类 ---------- */
+
+.mono {
+  font-family: var(--dwz-font-mono);
+  letter-spacing: -0.01em;
+}
+
+/* 页面骨架：头部 + 内容卡片 */
+.app-page {
+  padding: 22px 26px 30px;
+  animation: dwz-rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.app-page__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.app-page__title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--dwz-ink);
+}
+
+.app-page__title small {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--dwz-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dwz-text-dim);
+}
+
+.app-page__desc {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--dwz-text-dim);
+}
+
+.app-card {
+  background: #ffffff;
+  border: 1px solid var(--dwz-line);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(12, 42, 48, 0.04);
+}
+
+/* 筛选工具条 */
+.app-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 16px 16px 4px;
+}
+
+.app-toolbar .el-input,
+.app-toolbar .el-select {
+  width: auto;
+}
+
+.app-toolbar__spacer {
+  flex: 1;
+}
+
+.app-table-wrap {
+  padding: 8px 16px 6px;
+}
+
+.app-pager {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 16px 16px;
+}
+
+/* ---------- 表格质感 ---------- */
+
+.el-table {
+  --el-table-border-color: var(--dwz-line);
+  --el-table-header-bg-color: #f7fafb;
+  --el-table-row-hover-bg-color: #f0f7f7;
+  font-size: 13.5px;
+}
+
+.el-table th.el-table__cell {
+  font-weight: 700;
+  color: var(--dwz-ink);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+}
+
+/* ---------- 按钮质感 ---------- */
+
+.el-button {
+  font-weight: 600;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease,
+    border-color 0.15s ease, color 0.15s ease;
+}
+
+.el-button:active {
+  transform: translateY(1px) scale(0.99);
+}
+
+.el-button--primary {
+  box-shadow: 0 2px 6px rgba(14, 110, 117, 0.25);
+}
+
+/* ---------- 卡片 ---------- */
+
+.el-card {
+  border: 1px solid var(--dwz-line);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(12, 42, 48, 0.04);
+}
+
+/* ---------- 弹窗 ---------- */
+
+.el-dialog {
+  border-radius: 14px;
+}
+
+.el-dialog__header {
+  border-bottom: 1px solid var(--dwz-line);
+  margin-right: 0;
+  padding: 16px 20px;
+}
+
+.el-dialog__title {
+  font-weight: 800;
+  color: var(--dwz-ink);
+}
+
+.el-dialog__body {
+  padding: 22px 20px;
+}
+
+.el-dialog__footer {
+  border-top: 1px solid var(--dwz-line);
+  padding: 12px 20px;
+}
+
+/* ---------- NProgress 品牌化 ---------- */
+
+#nprogress .bar {
+  background: var(--dwz-amber) !important;
+  height: 3px !important;
+  box-shadow: 0 0 8px rgba(245, 166, 35, 0.6);
+}
+
+#nprogress .peg {
+  box-shadow: 0 0 10px var(--dwz-amber), 0 0 5px var(--dwz-amber) !important;
+}
+
+/* ---------- 滚动条 ---------- */
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c3d2d6;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9fb6bc;
+  background-clip: content-box;
+  border: 2px solid transparent;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- 动效 ---------- */
+
+@keyframes dwz-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dwz-fade-enter-active,
+.dwz-fade-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.dwz-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.dwz-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}

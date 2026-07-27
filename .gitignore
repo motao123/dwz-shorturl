@@ -3,3 +3,5 @@
 config.php
 logs/
 *.log
+frontend/dist
+backend/dwz-admin.exe

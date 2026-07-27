@@ -1,0 +1,97 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: dwz-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - DWZ_SERVER_PORT=8080
+      - DWZ_SERVER_MODE=release
+      - DWZ_DATABASE_HOST=mysql
+      - DWZ_DATABASE_PORT=3306
+      - DWZ_DATABASE_USER=dwz
+      - DWZ_DATABASE_PASSWORD=${DB_PASSWORD:-dwz_secret_2026}
+      - DWZ_DATABASE_DBNAME=dwz_admin
+      - DWZ_REDIS_ADDR=redis:6379
+      - DWZ_REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - DWZ_JWT_SECRET=${JWT_SECRET:-change-me-in-production-32bytes!}
+      - DWZ_JWT_ACCESS_EXPIRY=2h
+      - DWZ_JWT_REFRESH_EXPIRY=168h
+      - DWZ_PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-https://1.xk7.cn}
+      - DWZ_LOG_LEVEL=info
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dwz-net
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: dwz-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - dwz-net
+
+  mysql:
+    image: mysql:8.0
+    container_name: dwz-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root_secret_2026}
+      - MYSQL_DATABASE=dwz_admin
+      - MYSQL_USER=dwz
+      - MYSQL_PASSWORD=${DB_PASSWORD:-dwz_secret_2026}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ../backend/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+      - ./scripts/seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-buffer-pool-size=256M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root_secret_2026}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - dwz-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: dwz-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru ${REDIS_PASSWORD:+--requirepass $REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - dwz-net
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  dwz-net:
+    driver: bridge
