@@ -210,16 +210,23 @@ $public_base_url = 'https://example.com/short';
 
 如果使用面板生成的 Nginx 配置，应把这些规则合入**实际生效的 server 块**，并保留面板自己的 PHP-FPM 参数；不要把根目录示例原样覆盖到子目录部署。
 
-## 首页静态资源与缓存刷新
+## 首页设计与静态资源缓存
 
-现代首页由以下本地资源组成：
+首页与私有统计页采用浅色、克制的开发者工具视觉。设计约束来自长亭百智云模板库当前的 **Shadcn** 模板（通用设计 / 极简主义 / 工程工具）：
+
+- 模板详情：<https://baizhi.cloud/landing/design-prompt/detail/shadcn>
+- 完整提示词：项目根目录 [`DESIGN.md`](DESIGN.md)
+
+项目仅迁移该模板的设计语言与组件规则，不复制来源品牌的商标、图片、文案或业务界面。实现继续使用原生 HTML、CSS 和 JavaScript，不依赖外部字体、UI 框架或构建工具。
+
+首页由以下本地资源组成：
 
 - `index.html`
 - `assets/app.css`
 - `assets/app.js`
 - `assets/qrcode.min.js`
 
-页面使用相对 URL，因此根目录和子目录部署均可工作。`index.html` 当前通过 `?v=2.0.0` 引用 CSS、JavaScript 与二维码脚本。Nginx 示例会缓存静态资源 7 天；更新资源后应同步提升查询版本（例如 `v=2.0.1`），并按需刷新 CDN/反向代理缓存。若部署后仍看到旧界面，先确认新 `index.html` 已生效，再清理边缘缓存或执行浏览器强制刷新。
+页面使用相对 URL，因此根目录和子目录部署均可工作。`index.html` 当前通过 `?v=2.1.0` 引用 CSS、JavaScript 与二维码脚本。Nginx 示例会缓存静态资源 7 天；更新资源后应同步提升查询版本（例如 `v=2.1.1`），并按需刷新 CDN/反向代理缓存。若部署后仍看到旧界面，先确认新 `index.html` 已生效，再清理边缘缓存或执行浏览器强制刷新。
 
 ## API
 

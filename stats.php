@@ -147,50 +147,74 @@ header('Content-Type: text/html; charset=utf-8');
 <meta name="robots" content="noindex,nofollow">
 <title>短链统计 - dwz-shorturl</title>
 <style>
-body{font-family:system-ui,-apple-system,"PingFang SC",sans-serif;max-width:880px;margin:32px auto;padding:0 16px;color:#222}h1{font-size:20px;margin-bottom:4px}a{color:#1565c0;text-decoration:none}.cards{display:flex;gap:12px;margin:16px 0;flex-wrap:wrap}.card{flex:1;min-width:160px;background:#f5f7fa;border:1px solid #e3e8ef;border-radius:10px;padding:16px}.card .n{font-size:26px;font-weight:700;color:#1b5e20}.card .t{font-size:13px;color:#607d8b;margin-top:4px}table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #eee;vertical-align:top}th{color:#607d8b;font-weight:600}td.url{max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sec{margin-top:28px}.back{display:inline-block;margin-top:18px;font-size:13px}.empty{color:#999}
+:root{color-scheme:light;--ink:#111827;--strong:#09090b;--muted:#606775;--line:#e4e4e7;--surface:#fff;--soft:#f4f4f5;--page:#fafafa;--success:#15803d;--radius:8px}
+*{box-sizing:border-box}body{margin:0;min-width:320px;color:var(--ink);background:var(--page);font-family:Geist,Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI","PingFang SC",sans-serif;font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}a{color:var(--strong);text-underline-offset:3px}a:focus-visible{outline:2px solid var(--strong);outline-offset:2px}.shell{width:min(960px,calc(100% - 32px));margin:0 auto;padding:28px 0 40px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding-bottom:18px;border-bottom:1px solid var(--line)}.brand{display:inline-flex;align-items:center;gap:9px;color:var(--strong);font-weight:650;text-decoration:none}.brand-mark{display:grid;width:30px;height:30px;place-items:center;color:#fff;background:var(--strong);border-radius:7px}.eyebrow{margin:34px 0 5px;color:var(--muted);font:600 11px/1.4 "SFMono-Regular",Consolas,monospace;letter-spacing:.1em;text-transform:uppercase}h1{margin:0;color:var(--strong);font-size:clamp(28px,5vw,38px);line-height:1.2;letter-spacing:-.035em}.intro{margin:8px 0 0;color:var(--muted)}.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:24px 0}.card{padding:18px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 1px 2px rgba(0,0,0,.04)}.metric{color:var(--strong);font-size:28px;font-weight:700;letter-spacing:-.03em}.metric-label{margin-top:2px;color:var(--muted);font-size:12px}.section{margin-top:16px;padding:20px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 1px 2px rgba(0,0,0,.04)}.section h2{margin:0 0 14px;color:var(--strong);font-size:16px}.table-wrap{max-width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:6px}.table-wrap:focus-visible{outline:2px solid var(--strong);outline-offset:2px}table{width:100%;min-width:720px;border-collapse:collapse;font-size:12px}caption{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}tbody tr:last-child td{border-bottom:0}th{color:var(--muted);background:var(--soft);font-size:11px;font-weight:600;white-space:nowrap}.code{font-family:"SFMono-Regular",Consolas,monospace;font-weight:600}.url{max-width:360px;overflow-wrap:anywhere}.number{text-align:right;font-variant-numeric:tabular-nums}.date{white-space:nowrap;font-variant-numeric:tabular-nums}.empty{color:var(--muted);text-align:center}.back{display:inline-flex;min-height:40px;align-items:center;margin-top:18px;padding:0 13px;color:var(--strong);background:var(--surface);border:1px solid #d4d4d8;border-radius:var(--radius);font-weight:600;text-decoration:none}.back:hover{background:var(--soft)}
+@media(max-width:520px){.shell{padding-top:18px}.cards{grid-template-columns:1fr}.section{padding:16px}.eyebrow{margin-top:26px}}
 </style>
 </head>
 <body>
-<h1>短链统计</h1>
-<div class="cards">
-  <div class="card"><div class="n"><?php echo $totalLinks; ?></div><div class="t">短链总数</div></div>
-  <div class="card"><div class="n"><?php echo $totalClicks; ?></div><div class="t">累计点击</div></div>
-</div>
+<div class="shell">
+  <header class="topbar">
+    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true">↗</span><span>短网址</span></a>
+    <span>运营统计</span>
+  </header>
 
-<div class="sec">
-  <h3>热门短链（点击 Top 10）</h3>
-  <table>
-    <tr><th>短链</th><th>目标地址（查询参数已隐藏）</th><th>点击</th><th>创建时间</th></tr>
-    <?php if (empty($top)): ?>
-      <tr><td colspan="4" class="empty">暂无数据</td></tr>
-    <?php else: foreach ($top as $row): $label = redactUrl($row['longurl']); ?>
-      <tr>
-        <td><a href="<?php echo html(shortUrlLink($base, $row['uid'])); ?>" target="_blank" rel="noopener noreferrer"><?php echo html($row['uid']); ?></a></td>
-        <td class="url" title="<?php echo html($label); ?>"><?php echo html($label); ?></td>
-        <td><?php echo (int) $row['clicks']; ?></td>
-        <td><?php echo html($row['created_at']); ?></td>
-      </tr>
-    <?php endforeach; endif; ?>
-  </table>
-</div>
+  <main>
+    <p class="eyebrow">PRIVATE ANALYTICS</p>
+    <h1>短链统计</h1>
+    <p class="intro">查看短链规模、累计点击和近期创建情况。目标网址中的查询参数已隐藏。</p>
 
-<div class="sec">
-  <h3>最近创建（20 条）</h3>
-  <table>
-    <tr><th>短链</th><th>目标地址（查询参数已隐藏）</th><th>点击</th><th>创建时间</th></tr>
-    <?php if (empty($recent)): ?>
-      <tr><td colspan="4" class="empty">暂无数据</td></tr>
-    <?php else: foreach ($recent as $row): $label = redactUrl($row['longurl']); ?>
-      <tr>
-        <td><a href="<?php echo html(shortUrlLink($base, $row['uid'])); ?>" target="_blank" rel="noopener noreferrer"><?php echo html($row['uid']); ?></a></td>
-        <td class="url" title="<?php echo html($label); ?>"><?php echo html($label); ?></td>
-        <td><?php echo (int) $row['clicks']; ?></td>
-        <td><?php echo html($row['created_at']); ?></td>
-      </tr>
-    <?php endforeach; endif; ?>
-  </table>
-</div>
+    <div class="cards" aria-label="统计摘要">
+      <div class="card"><div class="metric"><?php echo $totalLinks; ?></div><div class="metric-label">短链总数</div></div>
+      <div class="card"><div class="metric"><?php echo $totalClicks; ?></div><div class="metric-label">累计点击</div></div>
+    </div>
 
-<a class="back" href="index.html">返回生成页</a>
+    <section class="section" aria-labelledby="top-title">
+      <h2 id="top-title">热门短链（点击 Top 10）</h2>
+      <div class="table-wrap" tabindex="0" role="region" aria-labelledby="top-title">
+        <table>
+          <caption>点击量最高的十条短链</caption>
+          <thead><tr><th scope="col">短链</th><th scope="col">目标地址（查询参数已隐藏）</th><th scope="col" class="number">点击</th><th scope="col">创建时间</th></tr></thead>
+          <tbody>
+          <?php if (empty($top)): ?>
+            <tr><td colspan="4" class="empty">暂无数据</td></tr>
+          <?php else: foreach ($top as $row): $label = redactUrl($row['longurl']); ?>
+            <tr>
+              <td class="code"><a href="<?php echo html(shortUrlLink($base, $row['uid'])); ?>" target="_blank" rel="noopener noreferrer"><?php echo html($row['uid']); ?></a></td>
+              <td class="url"><?php echo html($label); ?></td>
+              <td class="number"><?php echo (int) $row['clicks']; ?></td>
+              <td class="date"><?php echo html($row['created_at']); ?></td>
+            </tr>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="recent-title">
+      <h2 id="recent-title">最近创建（20 条）</h2>
+      <div class="table-wrap" tabindex="0" role="region" aria-labelledby="recent-title">
+        <table>
+          <caption>最近创建的二十条短链</caption>
+          <thead><tr><th scope="col">短链</th><th scope="col">目标地址（查询参数已隐藏）</th><th scope="col" class="number">点击</th><th scope="col">创建时间</th></tr></thead>
+          <tbody>
+          <?php if (empty($recent)): ?>
+            <tr><td colspan="4" class="empty">暂无数据</td></tr>
+          <?php else: foreach ($recent as $row): $label = redactUrl($row['longurl']); ?>
+            <tr>
+              <td class="code"><a href="<?php echo html(shortUrlLink($base, $row['uid'])); ?>" target="_blank" rel="noopener noreferrer"><?php echo html($row['uid']); ?></a></td>
+              <td class="url"><?php echo html($label); ?></td>
+              <td class="number"><?php echo (int) $row['clicks']; ?></td>
+              <td class="date"><?php echo html($row['created_at']); ?></td>
+            </tr>
+          <?php endforeach; endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <a class="back" href="index.html">← 返回生成页</a>
+</div>
 </body>
 </html>
