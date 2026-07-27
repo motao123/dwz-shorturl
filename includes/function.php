@@ -66,7 +66,7 @@ function send_mail($to, $sub, $msg) {
 	}
 }
 function daddslashes($string, $force = 0, $strip = FALSE) {
-	!defined('MAGIC_QUOTES_GPC') && define('MAGIC_QUOTES_GPC', get_magic_quotes_gpc());
+	!defined('MAGIC_QUOTES_GPC') && define('MAGIC_QUOTES_GPC', false);
 	if(!MAGIC_QUOTES_GPC || $force) {
 		if(is_array($string)) {
 			foreach($string as $key => $val) {
@@ -129,7 +129,7 @@ function random($length, $numeric = 0) {
 	$hash = '';
 	$max = strlen($seed) - 1;
 	for($i = 0; $i < $length; $i++) {
-		$hash .= $seed{mt_rand(0, $max)};
+		$hash .= $seed[mt_rand(0, $max)];
 	}
 	return $hash;
 }
@@ -152,6 +152,108 @@ function shorturl($input){
         }
         $output[] = $out;
     }
-    return $output[1];
+	return $output[1];
+}
+
+// 校验目标主机是否为私有/保留地址，防止生成可跳转内网的短链（SSRF 防护）
+function isPrivateHost($host) {
+    $host = strtolower(trim($host, "[] \t"));
+    $ip = $host;
+    if (filter_var($host, FILTER_VALIDATE_IP) === false) {
+        $ip = gethostbyname($host);
+        if ($ip === $host || $ip === false) {
+            return true; // 解析失败，保守拦截
+        }
+    }
+    // 私有地址或保留地址（如 127.0.0.1 / 10.x / 192.168.x / 169.254.169.254）-> 拦截
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+        return true;
+    }
+    // 补充：部分 PHP 版本 filter_var 未覆盖的文档/保留段与 CGNAT
+    $long = ip2long($ip);
+    if ($long !== false) {
+        $reserved = array(
+            '192.0.2.0'    => '192.0.2.255',      // TEST-NET-1
+            '198.51.100.0' => '198.51.100.255',   // TEST-NET-2
+            '203.0.113.0'  => '203.0.113.255',    // TEST-NET-3
+            '100.64.0.0'   => '100.127.255.255',  // CGNAT
+            '192.88.99.0'  => '192.88.99.255',    // 6to4 中继
+        );
+        foreach ($reserved as $start => $end) {
+            $s = ip2long($start);
+            $e = ip2long($end);
+            if ($long >= $s && $long <= $e) return true;
+        }
+    }
+    return false;
+}
+
+// 按 IP 的滑动窗口限流（文件锁保证并发安全）；失败放行避免误杀
+function rate_limit($ip, $max = 20, $window = 60) {
+    $dir = ROOT . 'logs/ratelimit';
+    if (!is_dir($dir)) @mkdir($dir, 0755, true);
+    $file = $dir . '/' . md5($ip) . '.rl';
+    $fp = @fopen($file, 'c+');
+    if (!$fp) return true;
+    flock($fp, LOCK_EX);
+    $now = time();
+    $data = @json_decode(stream_get_contents($fp), true);
+    if (!is_array($data) || !isset($data['start']) || ($now - $data['start']) >= $window) {
+        $data = array('start' => $now, 'count' => 1);
+    } else {
+        $data['count']++;
+    }
+    ftruncate($fp, 0);
+    fseek($fp, 0);
+    fwrite($fp, json_encode($data));
+    flock($fp, LOCK_UN);
+    fclose($fp);
+    return $data['count'] <= $max;
+}
+
+// 创建短链：原子去重（依赖 url_hash 唯一索引），旧表无该列时自动退化为按 longurl 去重
+function create_short_url($DB, $longurl) {
+    $hash = md5($longurl);
+    if (isset($DB->link) && function_exists('mysqli_prepare')) {
+        $uid = shorturl($longurl);
+        if ($stmt = mysqli_prepare($DB->link, "INSERT INTO wjoy_log (uid,longurl,url_hash) VALUES (?,?,?)")) {
+            mysqli_stmt_bind_param($stmt, 'sss', $uid, $longurl, $hash);
+            if (mysqli_stmt_execute($stmt)) {
+                mysqli_stmt_close($stmt);
+                return array('code' => $uid, 'msg' => 'success', 'result' => 1);
+            }
+            $errno = mysqli_errno($DB->link);
+            if ($errno == 1062) { // 唯一键冲突：同 URL 已存在
+                mysqli_stmt_close($stmt);
+                if ($s2 = mysqli_prepare($DB->link, "SELECT uid FROM wjoy_log WHERE url_hash=? LIMIT 1")) {
+                    mysqli_stmt_bind_param($s2, 's', $hash);
+                    mysqli_stmt_execute($s2);
+                    mysqli_stmt_bind_result($s2, $exist_uid);
+                    mysqli_stmt_fetch($s2);
+                    mysqli_stmt_close($s2);
+                    if (!empty($exist_uid)) return array('code' => $exist_uid, 'msg' => 'existence', 'result' => 1);
+                }
+                return array('code' => $uid, 'msg' => 'existence', 'result' => 1);
+            }
+            mysqli_stmt_close($stmt);
+            // 非唯一键错误（如 url_hash 列不存在）-> 退化为仅按 longurl 去重
+        }
+        $enc = $DB->escape($longurl);
+        $myrow = $DB->get_row("SELECT uid FROM wjoy_log WHERE longurl='" . $enc . "' LIMIT 1");
+        if (!$myrow) {
+            $sql = $DB->query("INSERT INTO wjoy_log (uid,longurl) VALUES ('" . $DB->escape($uid) . "','" . $enc . "')");
+            return $sql ? array('code' => $uid, 'msg' => 'success', 'result' => 1) : array('code' => 0, 'msg' => 'failure', 'result' => 10003);
+        }
+        return array('code' => ($myrow['uid'] ?: $uid), 'msg' => 'existence', 'result' => 1);
+    }
+    // 无 mysqli_prepare 保底
+    $enc = $DB->escape($longurl);
+    $myrow = $DB->get_row("SELECT uid FROM wjoy_log WHERE longurl='" . $enc . "' LIMIT 1");
+    if (!$myrow) {
+        $uid = shorturl($longurl);
+        $sql = $DB->query("INSERT INTO wjoy_log (uid,longurl) VALUES ('" . $DB->escape($uid) . "','" . $enc . "')");
+        return $sql ? array('code' => $uid, 'msg' => 'success', 'result' => 1) : array('code' => 0, 'msg' => 'failure', 'result' => 10003);
+    }
+    return array('code' => ($myrow['uid'] ?: shorturl($longurl)), 'msg' => 'existence', 'result' => 1);
 }
 ?>

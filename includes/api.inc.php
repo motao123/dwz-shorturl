@@ -1,6 +1,10 @@
 <?php
-//error_reporting(E_ALL); ini_set("display_errors", 1);
-error_reporting(0);
+// 记录错误日志但不向浏览器输出，便于排查（前端统一收 JSON 错误）
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+if (!is_dir(ROOT . 'logs')) @mkdir(ROOT . 'logs', 0755, true);
+ini_set('error_log', ROOT . 'logs/php_error.log');
 define('IN_CRONLITE', true);
 define('SYSTEM_ROOT', dirname(__FILE__).'/');
 define('ROOT', dirname(SYSTEM_ROOT).'/');
