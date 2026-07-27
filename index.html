@@ -1,246 +1,141 @@
-<html>
+<!doctype html>
+<html lang="zh-CN">
 <head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width,initial-scale=1">
-	<meta name="generator" content="Imotao" />
-	<title>短网址生成 - Imotao</title>
-    <meta name="keywords" content="缩短网址,网址压缩,网址缩短,短网址,短域名,短地址,短URL,免费缩短网址,短链接生成器,短网址生成,免费缩址,域名伪装,域名转向,网站推广,短链接,长网址变短网址">
-	<meta name="description" content="免费专业的网址缩短服务,在线生成短网址,开放API接口,可批量生成短链接,限制接口请求频率,跳转快,稳定可靠,防屏蔽,防拦截,已做SSRF防护!">
-	<link rel="Shortcut Icon" href="/favicon.ico">
-	<link rel="stylesheet" href="/assets/bootstrap.min.css">
-	<style type="text/css">
-		*{margin:0;padding:0}
-		body,form,html{height:100%;}
-		.row{margin-top:120px;min-height:70%}
-		.footer{text-align:center;}
-		.footer a{color: #009688;}
-		.page-header{margin-bottom:40px}
-		.expand-transition{-webkit-transition:all .5s ease;transition:all .5s ease}
-		.expand-enter,.expand-leave{opacity:0}
-
-		@media (max-width:768px){.h3-xs{font-size:20px}
-			.row-xs{margin-top:80px}
-		}
-		#result-wrap{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;z-index:1060;align-items:center;justify-content:center;padding:15px}
-		#result-wrap.in{display:flex}
-		#result-wrap .modal-dialog{width:100%;max-width:480px;margin:0}
-		.alert.top{position:fixed;top:30px;margin:0 auto;left:0;right:0;width:50%;z-index:1050}
-		@media (max-width:768px){.alert.top-xs{width:80%}
-		}
-	</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="generator" content="Imotao">
+  <meta name="theme-color" content="#f7f8fb">
+  <title>短网址生成 - Imotao</title>
+  <meta name="keywords" content="缩短网址,网址压缩,网址缩短,短网址,短域名,短地址,短URL,免费缩短网址,短链接生成器,短网址生成,免费缩址,域名伪装,域名转向,网站推广,短链接,长网址变短网址">
+  <meta name="description" content="免费专业的网址缩短服务，支持自定义短码、有效期、二维码与批量生成。">
+  <link rel="stylesheet" href="./assets/app.css?v=2.0.0">
 </head>
-
 <body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
 
-	<div id="app" class="container">
-		<div class="alert top top-xs alert-dismissible alert-danger expand-transition" style="display:none" id="error-tips">
-		</div>
-		<div class="row row-xs">
-			<div class="col-lg-6 col-md-6 col-sm-6 col-xs-10 col-xs-offset-1 col-sm-offset-3 col-md-offset-3 col-lg-offset-3">
-				<div class="page-header">
-					<h3 class="text-center h3-xs">短网址生成工具</h3>
-				</div>
-				<div class="form-group " id="input-wrap"> 
-					<label class="control-label" for="inputContent">请输入长网址:</label> 
-					<input type="text" id="inputContent" class="form-control" placeholder="请输入地址..."> 
-				</div>
-				<div class="row" style="margin:0 -5px 10px">
-					<div class="col-xs-7" style="padding:0 5px">
-						<label class="control-label" for="customCode">自定义短码（可选，6-8位 a-z/0-5）</label>
-						<input type="text" id="customCode" class="form-control" placeholder="留空则随机生成" maxlength="8" autocomplete="off">
-					</div>
-					<div class="col-xs-5" style="padding:0 5px">
-						<label class="control-label" for="expireDays">有效期</label>
-						<select id="expireDays" class="form-control">
-							<option value="0">永久</option>
-							<option value="1">1 天</option>
-							<option value="7">7 天</option>
-							<option value="30">30 天</option>
-							<option value="365">1 年</option>
-						</select>
-					</div>
-				</div>
-				<div class="text-right">
-					<button type="button" class="btn btn-primary" id="shortify" onclick="checkUrl(document.getElementById('inputContent').value)">缩短网址</button>
-				</div>
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="短网址首页">
+      <span class="brand-mark" aria-hidden="true">↗</span>
+      <span>短网址</span>
+    </a>
+    <span class="header-note">简单、快速、永久免费</span>
+  </header>
 
-				<hr>
+  <main id="main" class="page-shell">
+    <section class="hero" aria-labelledby="page-title">
+      <p class="eyebrow">SHORT LINK, BIG REACH</p>
+      <h1 id="page-title">让每一条链接<br><span>更短，更好分享。</span></h1>
+      <p class="hero-copy">粘贴长网址，即刻生成清爽短链。还可以设置专属短码和有效期限。</p>
+    </section>
 
-				<div class="form-group">
-					<label class="control-label" for="batchInput">批量生成（每行一个网址，最多 100 条）</label>
-					<textarea id="batchInput" class="form-control" rows="4" placeholder="https://example.com/a&#10;https://example.com/b"></textarea>
-				</div>
-				<div class="text-right">
-					<button type="button" class="btn btn-default" id="batchBtn" onclick="batchGenerate()">批量生成</button>
-				</div>
-				<div id="batchResult" class="alert alert-info" style="display:none;margin-top:15px;"></div>
+    <section class="tool-card" aria-labelledby="single-title">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">单条生成</p>
+          <h2 id="single-title">创建你的短链接</h2>
+        </div>
+        <span class="privacy-note">无需注册</span>
+      </div>
 
-				<div class="modal" id="result-wrap">
-					<div class="modal-dialog">
-						<div class="modal-content">
-							<div class="modal-header"> <button type="button" class="close" onclick="closeWrapper()" aria-hidden="true">×</button>
-								<h4 class="modal-title">生成成功！</h4>
-							</div>
-							<div class="modal-body">
-								<div class="form-group"> <input type="text" class="form-control" id="gen_result_url" value="https://imotao.com" readonly> </div>
-							</div>
-						<div class="modal-footer">
-							<button type="button" class="btn btn-info" id="qrBtn">二维码</button>
-							<button type="button" class="btn btn-default" id="copyBtn">复制</button>
-							<a target="_blank" id="preViewBtn" href="https://imotao.com"> <button type="button" class="btn btn-success">访问短链</button> </a>
-						</div>
-						<div id="qrcode" style="margin-top:14px;display:none;text-align:center;"></div>
-					</div>
-					</div>
-				</div>
-			</div>
-		</div>
-	</div>
+      <form id="shorten-form" novalidate>
+        <div class="field-group field-main">
+          <label for="inputContent">目标网址</label>
+          <div class="url-control">
+            <span class="url-icon" aria-hidden="true">⌁</span>
+            <input type="url" id="inputContent" name="url" inputmode="url" autocomplete="url" maxlength="2048" required placeholder="https://example.com/your-long-link" aria-describedby="url-help">
+          </div>
+          <p class="field-help" id="url-help">支持 http:// 和 https://，未填写协议时会自动补全。</p>
+        </div>
 
-	<div class="footer" style="color:#888;">
-        <p>
-        	| <a href="https://github.com/motao123/dwz-shorturl">源码下载</a>
-        </p>
-        声明：本站永久免费，短网址均由用户生成，所跳转网站均与本站无关，亦不承担法律责任!<br>
-		© Copyright 2020-2025 <a href="https://imotao.com/">陌涛</a> - All Rights Reserved. 
-	</div>
+        <div class="options-grid">
+          <div class="field-group">
+            <label for="customCode">自定义短码 <span>可选</span></label>
+            <div class="prefix-control">
+              <span aria-hidden="true">/</span>
+              <input type="text" id="customCode" name="custom" maxlength="8" minlength="6" pattern="[a-z0-5]{6,8}" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="例如 link25" aria-describedby="custom-help">
+            </div>
+            <p class="field-help" id="custom-help">6–8 位，仅限小写 a–z 和数字 0–5。</p>
+          </div>
 
-	<script src="/assets/qrcode.min.js"></script>
-	<script>
-		function sendAJAX(hasHttp) {
-			var btn = document.getElementById('shortify');
-			btn.disabled = true; btn.textContent = '生成中…';
-			var xhr = new XMLHttpRequest();
-			xhr.onreadystatechange = function () {
-				if (xhr.readyState === 4) {
-					btn.disabled = false; btn.textContent = '缩短网址';
-					if (xhr.status === 200) {
-						var result;
-						try {
-							result = JSON.parse(xhr.responseText);
-						} catch (e) {
-							msgAlert('接口返回异常：' + xhr.responseText);
-							return;
-						}
-						if (result.result == 1) {
-							var resultWrap = document.getElementById('result-wrap');
-							resultWrap.classList.add('in');
-							var qrBox = document.getElementById('qrcode');
-							qrBox.style.display = 'none'; qrBox.innerHTML = '';
-							var preViewBtn = document.getElementById('preViewBtn'),
-								genResultUrl = document.getElementById('gen_result_url');
-							var shortLink = location.protocol + '//' + location.host + '/' + result.code;
-							preViewBtn.setAttribute('href', shortLink);
-							genResultUrl.value = shortLink;
-						} else {
-							msgAlert(result.msg || '返回错误');
-						}
-					} else if (xhr.status === 429) {
-						msgAlert('请求过于频繁，请稍后再试');
-					} else {
-						msgAlert('网络错误，请稍后重试');
-					}
-				}
-			};
-			xhr.onerror = function () {
-				btn.disabled = false; btn.textContent = '缩短网址';
-				msgAlert('网络错误，请稍后重试');
-			};
-			var urlVal = document.getElementById('inputContent').value;
-			var urlParam = hasHttp ? urlVal : location.protocol + '//' + urlVal;
-			xhr.open('POST', '/api.php');
-			xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-			xhr.send('url=' + encodeURIComponent(urlParam) + '&custom=' + encodeURIComponent(document.getElementById('customCode').value.trim()) + '&expire=' + encodeURIComponent(document.getElementById('expireDays').value));
-		}
+          <div class="field-group">
+            <label for="expireDays">有效期</label>
+            <select id="expireDays" name="expire">
+              <option value="0">永久有效</option>
+              <option value="1">1 天</option>
+              <option value="7">7 天</option>
+              <option value="30">30 天</option>
+              <option value="365">1 年</option>
+            </select>
+          </div>
+        </div>
 
-		function batchGenerate() {
-			var btn = document.getElementById('batchBtn');
-			btn.disabled = true; btn.textContent = '生成中…';
-			var xhr = new XMLHttpRequest();
-			xhr.onreadystatechange = function () {
-				if (xhr.readyState === 4) {
-					btn.disabled = false; btn.textContent = '批量生成';
-					if (xhr.status === 200) {
-						var res;
-						try { res = JSON.parse(xhr.responseText); } catch (e) { msgAlert('接口返回异常'); return; }
-						var box = document.getElementById('batchResult');
-						box.style.display = 'block';
-						var html = '<ul style="margin-bottom:0">';
-						res.forEach(function (r) {
-							var link = r.code ? (location.protocol + '//' + location.host + '/' + r.code) : '';
-							html += '<li>' + escapeHtml(r.url) + ' &rarr; ' + (link ? ('<a href="' + link + '" target="_blank">' + r.code + '</a>') : escapeHtml(r.msg)) + '</li>';
-						});
-						html += '</ul>';
-						box.innerHTML = html;
-					} else {
-						msgAlert('批量生成失败');
-					}
-				}
-			};
-			xhr.onerror = function () {
-				btn.disabled = false; btn.textContent = '批量生成';
-				msgAlert('网络错误，请稍后重试');
-			};
-			var urls = document.getElementById('batchInput').value;
-			xhr.open('POST', '/batch.php');
-			xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-			xhr.send('urls=' + encodeURIComponent(urls));
-		}
+        <button class="button button-primary button-wide" type="submit" id="shortify">
+          <span>生成短链接</span><span aria-hidden="true">→</span>
+        </button>
+      </form>
+    </section>
 
-		function msgAlert(txt) {
-			var tips = document.getElementById('error-tips');
-			tips.style.display = "block";
-			tips.textContent = txt;
-			setTimeout(function () {
-				tips.style.display = 'none';
-			}, 3000);
-		}
-		function closeWrapper() {
-			document.getElementById('result-wrap').classList.remove('in');
-		}
-		function checkUrl(text) {
-			var hasHttp = /^([hH][tT]{2}[pP]:\/\/|[hH][tT]{2}[pP][sS]:\/\/)\w+([-.]\w+)*\.\w+([-.]\w+)*/.test(text),
-				notHasHttp = /^\w+([-.]\w+)*\.\w+([-.]\w+)*/.test(text);
-			if (!hasHttp && !notHasHttp) {
-				msgAlert('输入的url有误，请重新输入!', true);
-			} else {
-				document.getElementById('input-wrap').classList.remove('has-error');
-				sendAJAX(hasHttp);
-			}
-		}
-		function escapeHtml(s) {
-			return String(s).replace(/[&<>"']/g, function (c) {
-				return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-			});
-		}
-		document.getElementById('copyBtn').addEventListener('click', function () {
-			var url = document.getElementById('gen_result_url').value;
-			if (navigator.clipboard && navigator.clipboard.writeText) {
-				navigator.clipboard.writeText(url).then(function () { msgAlert('已复制到剪贴板'); }, function () { fallbackCopy(url); });
-			} else {
-				fallbackCopy(url);
-			}
-		});
-		document.getElementById('qrBtn').addEventListener('click', function () {
-			var box = document.getElementById('qrcode');
-			var url = document.getElementById('gen_result_url').value;
-			if (box.style.display === 'none') {
-				box.innerHTML = '';
-				new QRCode(box, { text: url, width: 160, height: 160 });
-				box.style.display = 'block';
-			} else {
-				box.style.display = 'none';
-			}
-		});
-		function fallbackCopy(url) {
-			var ta = document.createElement('textarea');
-			ta.value = url; document.body.appendChild(ta); ta.select();
-			try { document.execCommand('copy'); msgAlert('已复制到剪贴板'); }
-			catch (e) { msgAlert('复制失败，请手动复制'); }
-			document.body.removeChild(ta);
-		}
-	</script>
+    <section class="batch-section" aria-labelledby="batch-title">
+      <div class="section-heading compact">
+        <div>
+          <p class="section-kicker">批量工具</p>
+          <h2 id="batch-title">一次处理多个网址</h2>
+        </div>
+        <span class="count-badge">最多 100 条</span>
+      </div>
 
+      <form id="batch-form" class="batch-form" novalidate>
+        <div class="field-group">
+          <label for="batchInput">网址列表 <span>每行一个</span></label>
+          <textarea id="batchInput" name="urls" rows="6" maxlength="210000" required placeholder="https://example.com/page-one&#10;https://example.com/page-two" aria-describedby="batch-help"></textarea>
+          <div class="field-meta">
+            <span id="batch-help">批量生成使用随机短码且永久有效。</span>
+            <span id="batch-count" aria-live="polite">0 / 100</span>
+          </div>
+        </div>
+        <button class="button button-secondary" type="submit" id="batchBtn">批量生成</button>
+      </form>
+
+      <div id="batchResult" class="batch-results" hidden aria-labelledby="batch-result-title">
+        <div class="results-heading">
+          <h3 id="batch-result-title">生成结果</h3>
+          <span id="batch-summary"></span>
+        </div>
+        <ol id="batch-list" class="result-list"></ol>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>短网址由用户生成，目标网站内容与本站无关。</p>
+    <p>© 2020–2026 <a href="https://imotao.com/">陌涛</a> · <a href="https://github.com/motao123/dwz-shorturl">获取源码</a></p>
+  </footer>
+
+  <div id="status" class="status-toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+
+  <div id="result-wrap" class="dialog-backdrop" hidden>
+    <section class="result-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-description" tabindex="-1">
+      <button class="dialog-close" type="button" id="dialog-close" aria-label="关闭结果弹窗">×</button>
+      <div class="success-mark" aria-hidden="true">✓</div>
+      <p class="section-kicker">创建成功</p>
+      <h2 id="dialog-title">你的短链接已就绪</h2>
+      <p id="dialog-description">复制链接开始分享，或生成二维码用于手机扫码。</p>
+
+      <div class="result-url-row">
+        <input type="text" id="gen_result_url" readonly aria-label="生成的短链接">
+        <button class="button button-copy" type="button" id="copyBtn">复制</button>
+      </div>
+
+      <div class="dialog-actions">
+        <button class="button button-secondary" type="button" id="qrBtn" aria-expanded="false" aria-controls="qrcode">显示二维码</button>
+        <a class="button button-primary" target="_blank" rel="noopener noreferrer" id="preViewBtn" href="./">访问短链 ↗</a>
+      </div>
+
+      <div id="qrcode" class="qr-box" hidden></div>
+    </section>
+  </div>
+
+  <script src="./assets/qrcode.min.js?v=2.0.0"></script>
+  <script src="./assets/app.js?v=2.0.0"></script>
 </body>
-
 </html>
