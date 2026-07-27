@@ -14,6 +14,11 @@ if(!isset($port))$port='3306';
 //连接数据库
 require(SYSTEM_ROOT."db.class.php");
 $DB=new DB($host,$user,$pwd,$dbname,$port);
+if (empty($DB->link)) {
+    if (!headers_sent()) header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(array('code'=>0,'msg'=>'数据库连接失败：'.($DB->connect_error?$DB->connect_error:'未知错误'),'result'=>0));
+    exit();
+}
 
 require(SYSTEM_ROOT.'function.php');
 require(SYSTEM_ROOT.'member.php');

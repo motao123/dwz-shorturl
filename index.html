@@ -85,7 +85,13 @@
 				if (xhr.readyState === 4) {
 
 					if(xhr.status===200){
-						var result = JSON.parse(xhr.responseText);
+						var result;
+						try {
+							result = JSON.parse(xhr.responseText);
+						} catch (e) {
+							msgAlert('接口返回异常：' + xhr.responseText);
+							return;
+						}
 						if (result.result == 1) {
 							var resultWrap = document.getElementById('result-wrap');
 							resultWrap.style.display = 'block';

@@ -46,7 +46,10 @@ elseif(extension_loaded('mysqli') && $nomysqli==false) {
             
             $this->link = mysqli_connect($db_host, $db_user, $db_pass, $db_name, $db_port);
             
-            if (!$this->link) die('Connect Error (' . mysqli_connect_errno() . ') '.mysqli_connect_error());
+            if (!$this->link) {
+                $this->connect_error = 'Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error();
+                return;
+            }
             
             //mysqli_select_db($this->link, $db_name) or die(mysqli_error($this->link));
             
@@ -111,7 +114,10 @@ mysqli_query($this->link,"set names 'utf8'");
 
 		$this->link = @mysql_connect($db_host.':'.$db_port, $db_user, $db_pass);
             
-		if (!$this->link) die('Connect Error (' . mysql_errno() . ') '.mysql_error());
+		if (!$this->link) {
+			$this->connect_error = 'Connect Error (' . mysql_errno() . ') ' . mysql_error();
+			return;
+		}
             
 			mysql_select_db($db_name, $this->link) or die(mysql_error($this->link));
 
