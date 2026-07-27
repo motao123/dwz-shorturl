@@ -42,7 +42,7 @@ function dateParams() {
 async function loadTrend() {
   loading.value = true
   try {
-    const points = await getTrend({ granularity: granularity.value, ...dateParams() })
+    const points = (await getTrend({ granularity: granularity.value, ...dateParams() })) ?? []
     trendOption.value = {
       tooltip: {
         trigger: 'axis',
@@ -109,7 +109,7 @@ async function loadTrend() {
 async function loadTop() {
   topLoading.value = true
   try {
-    const tops = await getTop({ limit: 10, ...dateParams() })
+    const tops = (await getTop({ limit: 10, ...dateParams() })) ?? []
     const items = [...tops].reverse()
     topOption.value = {
       tooltip: {

@@ -52,11 +52,13 @@ async function loadOverview() {
   loading.value = true
   try {
     const data = await getOverview()
-    Object.assign(overview, data)
-    animateTo('total', data.total_urls)
-    animateTo('newToday', data.today_new)
-    animateTo('clicksToday', data.today_clicks)
-    animateTo('rate', rateToPercent(data.active_rate), 1)
+    if (data) {
+      Object.assign(overview, data)
+      animateTo('total', data.total_urls ?? 0)
+      animateTo('newToday', data.today_new ?? 0)
+      animateTo('clicksToday', data.today_clicks ?? 0)
+      animateTo('rate', rateToPercent(data.active_rate ?? 0), 1)
+    }
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '概览数据加载失败')
   } finally {
@@ -69,7 +71,7 @@ const chartOption = ref<ECOption>({})
 async function loadTrend() {
   chartLoading.value = true
   try {
-    const points = await getTrend({ granularity: 'day', days: 7 })
+    const points = (await getTrend({ granularity: 'day', days: 7 })) ?? []
     chartOption.value = {
       tooltip: {
         trigger: 'axis',

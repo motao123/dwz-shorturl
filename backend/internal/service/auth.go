@@ -22,10 +22,16 @@ type LoginResult struct {
 }
 
 type UserInfo struct {
-	ID       uint64   `json:"id"`
-	Username string   `json:"username"`
-	Email    string   `json:"email"`
-	Roles    []string `json:"roles"`
+	ID          uint64   `json:"id"`
+	Username    string   `json:"username"`
+	Email       string   `json:"email"`
+	DisplayName string   `json:"display_name"`
+	AvatarUrl   string   `json:"avatar_url"`
+	Status      int8     `json:"status"`
+	LastLoginAt *string  `json:"last_login_at"`
+	LastLoginIP *string  `json:"last_login_ip"`
+	Roles       []string `json:"roles"`
+	Permissions []string `json:"permissions"`
 }
 
 type AuthService interface {
@@ -147,11 +153,33 @@ func (s *authService) GetMe(userID uint64) (*UserInfo, error) {
 		roleNames = append(roleNames, r.Name)
 	}
 
+	// Load permissions
+	perms, err := s.GetUserPermissions(userID)
+	if err != nil {
+		perms = []string{}
+	}
+
+	var lastLoginAt *string
+	if user.LastLoginAt != nil {
+		s := user.LastLoginAt.Format("2006-01-02T15:04:05Z")
+		lastLoginAt = &s
+	}
+	var lastLoginIP *string
+	if user.LastLoginIP != "" {
+		lastLoginIP = &user.LastLoginIP
+	}
+
 	return &UserInfo{
-		ID:       user.ID,
-		Username: user.Username,
-		Email:    user.Email,
-		Roles:    roleNames,
+		ID:          user.ID,
+		Username:    user.Username,
+		Email:       user.Email,
+		DisplayName: user.DisplayName,
+		AvatarUrl:   user.AvatarURL,
+		Status:      user.Status,
+		LastLoginAt: lastLoginAt,
+		LastLoginIP: lastLoginIP,
+		Roles:       roleNames,
+		Permissions: perms,
 	}, nil
 }
 
