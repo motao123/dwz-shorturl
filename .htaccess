@@ -1,8 +1,25 @@
+Options -Indexes
+
+# Block sensitive and operational files before rewrite processing.
+<FilesMatch "(?i)^(?:config(?:\.sample)?\.php|setup\.php|install\.sql|nginx\.example\.conf|composer\.(?:json|lock)|.*\.(?:log|sql|bak|old|orig|save|swp))$">
+    Require all denied
+</FilesMatch>
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    # 已存在的文件/目录直接访问，不做重写
+
+    # Subdirectory deployment (e.g. project at https://example.com/short/):
+    # the relative rewrite target below usually stays in this directory
+    # automatically. If your host requires an explicit base path, uncomment
+    # the next line and set it to your subdirectory WITH a trailing slash:
+    # RewriteBase /short/
+
+    # Block hidden paths, migrations, logs, includes and other internal paths.
+    RewriteRule "(^|/)\." - [F,L]
+    RewriteRule "^(?:migrations|logs|includes)(?:/|$)" - [F,L,NC]
+
+    # Existing files/directories remain directly addressable unless blocked above.
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
-    # 仅匹配 6-8 位 a-z0-5 的短码路径，重写到 do.php
     RewriteRule ^([a-z0-5]{6,8})$ do.php?uid=$1 [L,QSA]
 </IfModule>
