@@ -1,68 +1,54 @@
 <?php
-/*!
+/*
 @name:dwz-shorturl API
 @description:dwz-shorturl接口文件
-@author:陌涛 
-@version:1.3
-@time:2026-07-27
-@copyright:陌涛
 */
 include __DIR__ . '/includes/api.inc.php';
 
-$longurl = isset($_GET['url']) ? $_GET['url'] : (isset($_POST['url']) ? $_POST['url'] : '');
-$format = isset($_GET['format']) ? $_GET['format'] : (isset($_POST['format']) ? $_POST['format'] : '');
-$custom = isset($_GET['custom']) ? trim($_GET['custom']) : (isset($_POST['custom']) ? trim($_POST['custom']) : '');
-$expire = isset($_GET['expire']) ? intval($_GET['expire']) : (isset($_POST['expire']) ? intval($_POST['expire']) : 0);
-
-// 统一响应头（仅对 JSON）
-if (!headers_sent()) {
-    if (!isset($format) || $format !== 'txt') {
-        header('Content-Type: application/json; charset=utf-8');
-    }
+$format = isset($_POST['format']) && is_string($_POST['format']) ? $_POST['format'] : '';
+if (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST') {
+    if (!headers_sent()) header('Allow: POST');
+    api_result(0, 'method not allowed', 10010, 405);
 }
 
-if (!$longurl) {
-    show_result(0, "the url cannot be empty", 10001);
-    exit();
-}
-// 仅允许 http/https，限制长度，拒绝危险协议
-if (strlen($longurl) > 2048) {
-    show_result(0, "url too long", 10002);
-    exit();
-}
-$parts = @parse_url($longurl);
-if (!$parts || !isset($parts['scheme']) || !in_array(strtolower($parts['scheme']), ['http', 'https'])) {
-    show_result(0, "url is incorrect", 10002);
-    exit();
-}
-// SSRF 防护：拒绝指向私有/保留网段的目标
-$host = isset($parts['host']) ? $parts['host'] : '';
-if (isPrivateHost($host)) {
-    show_result(0, "url host not allowed", 10004);
-    exit();
-}
-// 接口限流（防滥用）
+$longurl = isset($_POST['url']) && is_string($_POST['url']) ? trim($_POST['url']) : '';
+$custom = isset($_POST['custom']) && is_string($_POST['custom']) ? trim($_POST['custom']) : '';
+$expire_raw = isset($_POST['expire']) ? $_POST['expire'] : 0;
+
+if (!headers_sent() && $format !== 'txt') header('Content-Type: application/json; charset=utf-8');
+
+$validation = validate_long_url($longurl);
+if (!$validation[0]) api_result(0, $validation[1], $validation[2], 400);
+if (!validate_custom_code($custom)) api_result(0, '自定义短码格式错误（需 6-8 位，仅含 a-z 与 0-5）', 10006, 422);
+$expire = validate_expire_days($expire_raw);
+if ($expire === false) api_result(0, '有效期仅支持 0、1、7、30 或 365 天', 10008, 422);
 if (!rate_limit(real_ip(), 20, 60)) {
-    if (!headers_sent()) header('HTTP/1.1 429 Too Many Requests');
-    show_result(0, "请求过于频繁，请稍后再试", 10005);
-    exit();
+    if (!headers_sent()) header('Retry-After: 60');
+    api_result(0, '请求过于频繁，请稍后再试', 10005, 429);
 }
 
 $r = create_short_url($DB, $longurl, $custom, $expire);
-show_result($r['result'] == 1 ? $r['code'] : 0, $r['msg'], $r['result']);
+$status = $r['result'] == 1 ? 200 : (in_array($r['result'], array(10007, 10013), true) ? 409 : 500);
+api_result(
+    $r['result'] == 1 ? $r['code'] : 0,
+    $r['msg'],
+    $r['result'],
+    $status,
+    isset($r['short_url']) ? $r['short_url'] : '',
+    isset($r['state']) ? $r['state'] : ''
+);
 
-$DB->close();
-
-function show_result($code, $msg, $result) {
-    global $format;
+function api_result($code, $msg, $result, $status = 200, $short_url = '', $state = '') {
+    global $format, $DB;
+    if (!headers_sent()) http_response_code($status);
     if ($format === 'txt') {
-        if ($code === 0) {
-            echo $msg;
-        } else {
-            echo $code;
-        }
+        echo $code === 0 ? $msg : ($short_url !== '' ? $short_url : $code);
     } else {
-        $result = array("code" => $code, "msg" => $msg, "result" => $result);
-        echo json_encode($result);
+        $payload = array('code' => $code, 'msg' => $msg, 'result' => $result);
+        if ($short_url !== '') $payload['short_url'] = $short_url;
+        if ($state !== '') $payload['state'] = $state;
+        echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
+    if (isset($DB)) $DB->close();
+    exit();
 }

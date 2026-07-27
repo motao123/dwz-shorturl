@@ -1,138 +1,44 @@
 <?php
-function curl_get($url,$ip){
-    $ch=curl_init($url);
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
-    $ip = rand(0,255).'.'.rand(0,255).'.'.rand(0,255).'.'.rand(0,255) ;
-    $httpheader[] = 'X-FORWARDED-FOR:'.$ip.',CLIENT-IP:'.$ip;
-   	if($ip === 1){
-   		curl_setopt($ch, CURLOPT_HTTPHEADER, $httpheader);
-   	}
-	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-	curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Linux; U; Android 4.4.1; zh-cn; R815T Build/JOP40D) AppleWebKit/533.1 (KHTML, like Gecko)Version/4.0 MQQBrowser/4.5 Mobile Safari/533.1');
-	curl_setopt($ch, CURLOPT_REFERER, $url);
-	curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-	$content=curl_exec($ch);
-	curl_close($ch);
-	return($content);
+function trusted_proxy_match($ip, $trusted_proxies) {
+	if (!filter_var($ip, FILTER_VALIDATE_IP) || !is_array($trusted_proxies)) return false;
+	foreach ($trusted_proxies as $proxy) {
+		$proxy = trim((string)$proxy);
+		if ($proxy === $ip) return true;
+		if (strpos($proxy, '/') === false) continue;
+		list($network, $bits) = array_pad(explode('/', $proxy, 2), 2, null);
+		$ip_bin = @inet_pton($ip);
+		$network_bin = @inet_pton($network);
+		if ($ip_bin === false || $network_bin === false || strlen($ip_bin) !== strlen($network_bin)) continue;
+		$bits = (int)$bits;
+		$max_bits = strlen($ip_bin) * 8;
+		if ($bits < 0 || $bits > $max_bits) continue;
+		$bytes = intdiv($bits, 8);
+		$remainder = $bits % 8;
+		if (substr($ip_bin, 0, $bytes) !== substr($network_bin, 0, $bytes)) continue;
+		if ($remainder === 0) return true;
+		$mask = (0xff << (8 - $remainder)) & 0xff;
+		if ((ord($ip_bin[$bytes]) & $mask) === (ord($network_bin[$bytes]) & $mask)) return true;
+	}
+	return false;
 }
+
 function real_ip(){
-	$ip = $_SERVER['REMOTE_ADDR'];
-	if (isset($_SERVER['HTTP_CLIENT_IP']) && preg_match('/^([0-9]{1,3}\.){3}[0-9]{1,3}$/', $_SERVER['HTTP_CLIENT_IP'])) {
-		$ip = $_SERVER['HTTP_CLIENT_IP'];
-	} elseif(isset($_SERVER['HTTP_X_FORWARDED_FOR']) AND preg_match_all('#\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}#s', $_SERVER['HTTP_X_FORWARDED_FOR'], $matches)) {
-		foreach ($matches[0] AS $xip) {
-			if (!preg_match('#^(10|172\.16|192\.168)\.#', $xip)) {
-				$ip = $xip;
-				break;
-			}
-		}
+	global $trusted_proxies;
+	$remote = isset($_SERVER['REMOTE_ADDR']) ? trim($_SERVER['REMOTE_ADDR']) : '';
+	if (!filter_var($remote, FILTER_VALIDATE_IP)) return '0.0.0.0';
+	$trusted = isset($trusted_proxies) && is_array($trusted_proxies) ? $trusted_proxies : array();
+	if (!trusted_proxy_match($remote, $trusted)) return $remote;
+
+	$forwarded = isset($_SERVER['HTTP_X_FORWARDED_FOR']) ? explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']) : array();
+	$forwarded[] = $remote;
+	for ($i = count($forwarded) - 1; $i >= 0; $i--) {
+		$candidate = trim($forwarded[$i]);
+		if (!filter_var($candidate, FILTER_VALIDATE_IP)) continue;
+		if (!trusted_proxy_match($candidate, $trusted)) return $candidate;
 	}
-	return $ip;
-}
-function get_ip_city($ip){
-    $url = 'http://int.dpool.sina.com.cn/iplookup/iplookup.php?format=json&ip=';
-    @$city = curl_get($url . $ip);
-    $city = json_decode($city, true);
-    if ($city['city']) {
-        $location = $city['province'].$city['city'];
-    } else {
-        $location = $city['province'];
-    }
-	if($location){
-		return $location;
-	}else{
-		return false;
-	}
-}
-function send_mail($to, $sub, $msg) {
-	global $conf;
-	include_once ROOT.'includes/smtp.class.php';
-	$From = $conf['mail_name'];
-	$Host = $conf['mail_stmp'];
-	$Port = $conf['mail_port'];
-	$SMTPAuth = 1;
-	$Username = $conf['mail_name'];
-	$Password = $conf['mail_pwd'];
-	$Nickname = $conf['sitename'];
-	$SSL = false;
-	$mail = new SMTP($Host , $Port , $SMTPAuth , $Username , $Password , $SSL);
-	$mail->att = array();
-	if($mail->send($to , $From , $sub , $msg, $Nickname)) {
-		return true;
-	} else {
-		return $mail->log;
-	}
-}
-function daddslashes($string, $force = 0, $strip = FALSE) {
-	!defined('MAGIC_QUOTES_GPC') && define('MAGIC_QUOTES_GPC', false);
-	if(!MAGIC_QUOTES_GPC || $force) {
-		if(is_array($string)) {
-			foreach($string as $key => $val) {
-				$string[$key] = daddslashes($val, $force, $strip);
-			}
-		} else {
-			$string = addslashes($strip ? stripslashes($string) : $string);
-		}
-	}
-	return $string;
+	return $remote;
 }
 
-function strexists($string, $find) {
-	return !(strpos($string, $find) === FALSE);
-}
-function authcode($string, $operation = 'DECODE', $key = '', $expiry = 0) {
-	$ckey_length = 4;
-	$key = md5($key ? $key : ENCRYPT_KEY);
-	$keya = md5(substr($key, 0, 16));
-	$keyb = md5(substr($key, 16, 16));
-	$keyc = $ckey_length ? ($operation == 'DECODE' ? substr($string, 0, $ckey_length): substr(md5(microtime()), -$ckey_length)) : '';
-	$cryptkey = $keya.md5($keya.$keyc);
-	$key_length = strlen($cryptkey);
-	$string = $operation == 'DECODE' ? base64_decode(substr($string, $ckey_length)) : sprintf('%010d', $expiry ? $expiry + time() : 0).substr(md5($string.$keyb), 0, 16).$string;
-	$string_length = strlen($string);
-	$result = '';
-	$box = range(0, 255);
-	$rndkey = array();
-	for($i = 0; $i <= 255; $i++) {
-		$rndkey[$i] = ord($cryptkey[$i % $key_length]);
-	}
-	for($j = $i = 0; $i < 256; $i++) {
-		$j = ($j + $box[$i] + $rndkey[$i]) % 256;
-		$tmp = $box[$i];
-		$box[$i] = $box[$j];
-		$box[$j] = $tmp;
-	}
-	for($a = $j = $i = 0; $i < $string_length; $i++) {
-		$a = ($a + 1) % 256;
-		$j = ($j + $box[$a]) % 256;
-		$tmp = $box[$a];
-		$box[$a] = $box[$j];
-		$box[$j] = $tmp;
-		$result .= chr(ord($string[$i]) ^ ($box[($box[$a] + $box[$j]) % 256]));
-	}
-	if($operation == 'DECODE') {
-		if((substr($result, 0, 10) == 0 || substr($result, 0, 10) - time() > 0) && substr($result, 10, 16) == substr(md5(substr($result, 26).$keyb), 0, 16)) {
-			return substr($result, 26);
-		} else {
-			return '';
-		}
-	} else {
-		return $keyc.str_replace('=', '', base64_encode($result));
-	}
-}
-
-function random($length, $numeric = 0) {
-	$seed = base_convert(md5(microtime().$_SERVER['DOCUMENT_ROOT']), 16, $numeric ? 10 : 35);
-	$seed = $numeric ? (str_replace('0', '', $seed).'012340567890') : ($seed.'zZ'.strtoupper($seed));
-	$hash = '';
-	$max = strlen($seed) - 1;
-	for($i = 0; $i < $length; $i++) {
-		$hash .= $seed[mt_rand(0, $max)];
-	}
-	return $hash;
-}
 function shorturl($input){
     $base32 = array('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5');
     $hex = md5($input);
@@ -155,138 +61,164 @@ function shorturl($input){
 	return $output[1];
 }
 
-// 校验目标主机是否为私有/保留地址，防止生成可跳转内网的短链（SSRF 防护）
+// Validate a destination once for both single and batch APIs.
+function validate_long_url($url) {
+    if (!is_string($url) || $url === '') return array(false, 'the url cannot be empty', 10001);
+    if (strlen($url) > 2048) return array(false, 'url too long', 10002);
+    if (preg_match('/[\x00-\x20\x7f]/', $url)) return array(false, 'url is incorrect', 10002);
+    $parts = parse_url($url);
+    if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) return array(false, 'url is incorrect', 10002);
+    if (!in_array(strtolower($parts['scheme']), array('http', 'https'), true)) return array(false, 'url is incorrect', 10002);
+    if (isset($parts['user']) || isset($parts['pass'])) return array(false, 'url is incorrect', 10002);
+    if (isset($parts['port']) && ($parts['port'] < 1 || $parts['port'] > 65535)) return array(false, 'url is incorrect', 10002);
+    if (isPrivateHost($parts['host'])) return array(false, 'url host not allowed', 10004);
+    return array(true, '', 1);
+}
+
+// Resolve every address and reject the host if any answer is private, reserved, or unresolved.
 function isPrivateHost($host) {
-    $host = strtolower(trim($host, "[] \t"));
-    $ip = $host;
-    if (filter_var($host, FILTER_VALIDATE_IP) === false) {
-        $ip = gethostbyname($host);
-        if ($ip === $host || $ip === false) {
-            return true; // 解析失败，保守拦截
+    $host = strtolower(trim((string)$host, "[] \t"));
+    if ($host === '' || $host === 'localhost' || substr($host, -6) === '.local') return true;
+    $addresses = array();
+    if (filter_var($host, FILTER_VALIDATE_IP)) {
+        $addresses[] = $host;
+    } else {
+        $ipv4 = @gethostbynamel($host);
+        if (is_array($ipv4)) $addresses = array_merge($addresses, $ipv4);
+        if (function_exists('dns_get_record') && defined('DNS_AAAA')) {
+            $ipv6 = @dns_get_record($host, DNS_AAAA);
+            if (is_array($ipv6)) foreach ($ipv6 as $record) if (!empty($record['ipv6'])) $addresses[] = $record['ipv6'];
         }
     }
-    // 私有地址或保留地址（如 127.0.0.1 / 10.x / 192.168.x / 169.254.169.254）-> 拦截
-    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
-        return true;
-    }
-    // 补充：部分 PHP 版本 filter_var 未覆盖的文档/保留段与 CGNAT
-    $long = ip2long($ip);
-    if ($long !== false) {
-        $reserved = array(
-            '192.0.2.0'    => '192.0.2.255',      // TEST-NET-1
-            '198.51.100.0' => '198.51.100.255',   // TEST-NET-2
-            '203.0.113.0'  => '203.0.113.255',    // TEST-NET-3
-            '100.64.0.0'   => '100.127.255.255',  // CGNAT
-            '192.88.99.0'  => '192.88.99.255',    // 6to4 中继
-        );
-        foreach ($reserved as $start => $end) {
-            $s = ip2long($start);
-            $e = ip2long($end);
-            if ($long >= $s && $long <= $e) return true;
-        }
+    $addresses = array_unique($addresses);
+    if (!$addresses) return true;
+    foreach ($addresses as $ip) {
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) return true;
     }
     return false;
 }
 
-// 按 IP 的滑动窗口限流（文件锁保证并发安全）；失败放行避免误杀
-function rate_limit($ip, $max = 20, $window = 60) {
-    $dir = ROOT . 'logs/ratelimit';
-    if (!is_dir($dir)) @mkdir($dir, 0755, true);
-    $file = $dir . '/' . md5($ip) . '.rl';
-    $fp = @fopen($file, 'c+');
-    if (!$fp) return true;
-    flock($fp, LOCK_EX);
-    $now = time();
-    $data = @json_decode(stream_get_contents($fp), true);
-    if (!is_array($data) || !isset($data['start']) || ($now - $data['start']) >= $window) {
-        $data = array('start' => $now, 'count' => 1);
-    } else {
-        $data['count']++;
-    }
-    ftruncate($fp, 0);
-    fseek($fp, 0);
-    fwrite($fp, json_encode($data));
-    flock($fp, LOCK_UN);
-    fclose($fp);
-    return $data['count'] <= $max;
+function validate_custom_code($custom) {
+    return $custom === '' || preg_match('/^[a-z0-5]{6,8}$/', $custom) === 1;
 }
 
-// 创建短链：支持自定义短码与有效期；原子去重（依赖 url_hash 唯一索引），旧表无该列时自动退化为按 longurl 去重
+function validate_expire_days($value) {
+    if ($value === '' || $value === null) return 0;
+    if (filter_var($value, FILTER_VALIDATE_INT) === false) return false;
+    $days = (int)$value;
+    return in_array($days, array(0, 1, 7, 30, 365), true) ? $days : false;
+}
+
+function public_short_url($uid) {
+    global $public_base_url;
+    $base = isset($public_base_url) ? rtrim(trim((string)$public_base_url), '/') : '';
+    if ($base === '' || !filter_var($base, FILTER_VALIDATE_URL)) return '';
+    $parts = parse_url($base);
+    if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host']) || !in_array(strtolower($parts['scheme']), array('http', 'https'), true)) return '';
+    return $base . '/' . rawurlencode($uid);
+}
+
+function rate_limit($ip, $max = 20, $window = 60, $cost = 1) {
+    global $rate_limit_dir;
+    $dir = isset($rate_limit_dir) && is_string($rate_limit_dir) && $rate_limit_dir !== '' ? $rate_limit_dir : ROOT . 'logs/ratelimit';
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) return false;
+    $fp = @fopen(rtrim($dir, '/\\') . '/' . md5((string)$ip) . '.rl', 'c+');
+    if (!$fp) return false;
+    if (!flock($fp, LOCK_EX)) { fclose($fp); return false; }
+    $now = time();
+    $data = json_decode(stream_get_contents($fp), true);
+    if (!is_array($data) || !isset($data['start'], $data['count']) || ($now - (int)$data['start']) >= $window) $data = array('start' => $now, 'count' => 0);
+    $cost = max(1, (int)$cost);
+    $allowed = ((int)$data['count'] + $cost) <= $max;
+    if ($allowed) $data['count'] += $cost;
+    ftruncate($fp, 0); rewind($fp); fwrite($fp, json_encode($data)); fflush($fp);
+    flock($fp, LOCK_UN); fclose($fp);
+    return $allowed;
+}
+
+function short_url_result($uid, $msg, $state = 'existing') {
+    return array(
+        'code' => $uid,
+        'short_url' => public_short_url($uid),
+        'msg' => $msg,
+        'result' => 1,
+        'state' => $state,
+        'created' => $state === 'created'
+    );
+}
+
+function find_short_by_hash($DB, $hash) {
+    $stmt = $DB->prepare('SELECT uid, expire_at FROM wjoy_log WHERE url_hash=? LIMIT 1');
+    if (!$stmt) return false;
+    mysqli_stmt_bind_param($stmt, 's', $hash);
+    if (!mysqli_stmt_execute($stmt)) { mysqli_stmt_close($stmt); return false; }
+    mysqli_stmt_bind_result($stmt, $uid, $expire_at);
+    $found = mysqli_stmt_fetch($stmt);
+    mysqli_stmt_close($stmt);
+    return $found ? array('uid' => $uid, 'expire_at' => $expire_at) : null;
+}
+
+function renew_short_expiry($DB, $hash, $expire_at) {
+    $stmt = $DB->prepare('UPDATE wjoy_log SET expire_at=? WHERE url_hash=?');
+    if (!$stmt) return false;
+    mysqli_stmt_bind_param($stmt, 'ss', $expire_at, $hash);
+    $ok = mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
+    return $ok;
+}
+
+// Create or renew a short URL. Generated-code collisions are retried with the existing alphabet.
 function create_short_url($DB, $longurl, $custom = null, $expire_days = 0) {
+    $custom = $custom === null ? '' : trim((string)$custom);
+    if (!validate_custom_code($custom)) return array('code' => 0, 'short_url' => '', 'msg' => '自定义短码格式错误（需 6-8 位，仅含 a-z 与 0-5）', 'result' => 10006);
+    $expire_days = validate_expire_days($expire_days);
+    if ($expire_days === false) return array('code' => 0, 'short_url' => '', 'msg' => '有效期仅支持 0、1、7、30 或 365 天', 'result' => 10008);
+
     $hash = md5($longurl);
-
-    // 自定义短码校验与占用检查
-    $uid = null;
-    if ($custom !== null && $custom !== '') {
-        if (!preg_match('/^[a-z0-5]{6,8}$/', $custom)) {
-            return array('code' => 0, 'msg' => '自定义短码格式错误（需 6-8 位，仅含 a-z 与 0-5）', 'result' => 10006);
+    $expire_at = $expire_days > 0 ? date('Y-m-d H:i:s', time() + $expire_days * 86400) : null;
+    $existing = find_short_by_hash($DB, $hash);
+    if (is_array($existing) && !empty($existing['uid'])) {
+        if ($custom !== '' && $custom !== $existing['uid']) {
+            return array('code' => 0, 'short_url' => '', 'msg' => '该网址已有短链，不能改用其他自定义短码', 'result' => 10013);
         }
-        if ($s = mysqli_prepare($DB->link, "SELECT uid FROM wjoy_log WHERE uid=? LIMIT 1")) {
-            mysqli_stmt_bind_param($s, 's', $custom);
-            mysqli_stmt_execute($s);
-            mysqli_stmt_bind_result($s, $exist_uid);
-            mysqli_stmt_fetch($s);
-            mysqli_stmt_close($s);
-            if (!empty($exist_uid)) {
-                return array('code' => 0, 'msg' => '自定义短码已被占用', 'result' => 10007);
-            }
+        $was_expired = !empty($existing['expire_at']) && strtotime($existing['expire_at']) !== false && strtotime($existing['expire_at']) <= time();
+        if ($was_expired) {
+            if (!renew_short_expiry($DB, $hash, $expire_at)) return array('code' => 0, 'short_url' => '', 'msg' => 'failure', 'result' => 10003);
+            return short_url_result($existing['uid'], 'renewed', 'renewed');
         }
-        $uid = $custom;
+        return short_url_result($existing['uid'], 'existence', 'existing');
     }
 
-    if (isset($DB->link) && function_exists('mysqli_prepare')) {
-        if ($uid === null) $uid = shorturl($longurl);
-        $expire_at = ($expire_days > 0) ? date('Y-m-d H:i:s', time() + intval($expire_days) * 86400) : null;
-
-        if ($stmt = mysqli_prepare($DB->link, "INSERT INTO wjoy_log (uid,longurl,url_hash,expire_at) VALUES (?,?,?,?)")) {
-            mysqli_stmt_bind_param($stmt, 'ssss', $uid, $longurl, $hash, $expire_at);
-            if (mysqli_stmt_execute($stmt)) {
-                mysqli_stmt_close($stmt);
-                return array('code' => $uid, 'msg' => 'success', 'result' => 1);
-            }
-            $errno = mysqli_errno($DB->link);
-            if ($errno == 1062) { // 唯一键冲突
-                mysqli_stmt_close($stmt);
-                // 自定义短码冲突（uid 唯一键）
-                if ($uid !== null && $uid === $custom) {
-                    return array('code' => 0, 'msg' => '自定义短码已被占用', 'result' => 10007);
-                }
-                // url_hash 冲突：同 URL 已存在，返回已有短码
-                if ($s2 = mysqli_prepare($DB->link, "SELECT uid FROM wjoy_log WHERE url_hash=? LIMIT 1")) {
-                    mysqli_stmt_bind_param($s2, 's', $hash);
-                    mysqli_stmt_execute($s2);
-                    mysqli_stmt_bind_result($s2, $exist_uid);
-                    mysqli_stmt_fetch($s2);
-                    mysqli_stmt_close($s2);
-                    if (!empty($exist_uid)) return array('code' => $exist_uid, 'msg' => 'existence', 'result' => 1);
-                }
-                return array('code' => $uid, 'msg' => 'existence', 'result' => 1);
-            }
-            mysqli_stmt_close($stmt);
+    $attempts = $custom !== '' ? 1 : 12;
+    for ($attempt = 0; $attempt < $attempts; $attempt++) {
+        try {
+            $salt = $attempt === 0 ? '' : '|' . $attempt . '|' . bin2hex(random_bytes(8));
+        } catch (Throwable $e) {
+            $salt = '|' . $attempt . '|' . uniqid('', true);
         }
-        // 退化：url_hash / expire_at 列不存在（旧表）
-        $enc = $DB->escape($longurl);
-        $myrow = $DB->get_row("SELECT uid FROM wjoy_log WHERE longurl='" . $enc . "' LIMIT 1");
-        $cols = array('uid', 'longurl');
-        $vals = array("'" . $DB->escape($uid) . "'", "'" . $enc . "'");
-        if ($expire_at) { $cols[] = 'expire_at'; $vals[] = "'" . $DB->escape($expire_at) . "'"; }
-        if (!$myrow) {
-            $sql = $DB->query("INSERT INTO wjoy_log (" . implode(',', $cols) . ") VALUES (" . implode(',', $vals) . ")");
-            return $sql ? array('code' => $uid, 'msg' => 'success', 'result' => 1) : array('code' => 0, 'msg' => 'failure', 'result' => 10003);
+        $uid = $custom !== '' ? $custom : shorturl($longurl . $salt);
+        $stmt = $DB->prepare('INSERT INTO wjoy_log (uid,longurl,url_hash,expire_at) VALUES (?,?,?,?)');
+        if (!$stmt) return array('code' => 0, 'short_url' => '', 'msg' => 'failure', 'result' => 10003);
+        mysqli_stmt_bind_param($stmt, 'ssss', $uid, $longurl, $hash, $expire_at);
+        $ok = mysqli_stmt_execute($stmt);
+        $errno = mysqli_stmt_errno($stmt);
+        mysqli_stmt_close($stmt);
+        if ($ok) return short_url_result($uid, 'success', 'created');
+        if ($errno !== 1062) return array('code' => 0, 'short_url' => '', 'msg' => 'failure', 'result' => 10003);
+        $existing = find_short_by_hash($DB, $hash);
+        if (is_array($existing) && !empty($existing['uid'])) {
+            if ($custom !== '' && $custom !== $existing['uid']) {
+                return array('code' => 0, 'short_url' => '', 'msg' => '该网址已有短链，不能改用其他自定义短码', 'result' => 10013);
+            }
+            $was_expired = !empty($existing['expire_at']) && strtotime($existing['expire_at']) !== false && strtotime($existing['expire_at']) <= time();
+            if ($was_expired) {
+                if (!renew_short_expiry($DB, $hash, $expire_at)) return array('code' => 0, 'short_url' => '', 'msg' => 'failure', 'result' => 10003);
+                return short_url_result($existing['uid'], 'renewed', 'renewed');
+            }
+            return short_url_result($existing['uid'], 'existence', 'existing');
         }
-        return array('code' => ($myrow['uid'] ?: $uid), 'msg' => 'existence', 'result' => 1);
+        if ($custom !== '') return array('code' => 0, 'short_url' => '', 'msg' => '自定义短码已被占用', 'result' => 10007);
     }
-    // 无 mysqli_prepare 保底
-    $enc = $DB->escape($longurl);
-    $myrow = $DB->get_row("SELECT uid FROM wjoy_log WHERE longurl='" . $enc . "' LIMIT 1");
-    if (!$myrow) {
-        if ($uid === null) $uid = shorturl($longurl);
-        $cols = array('uid', 'longurl');
-        $vals = array("'" . $DB->escape($uid) . "'", "'" . $enc . "'");
-        if ($expire_days > 0) { $cols[] = 'expire_at'; $vals[] = "'" . $DB->escape(date('Y-m-d H:i:s', time() + intval($expire_days) * 86400)) . "'"; }
-        $sql = $DB->query("INSERT INTO wjoy_log (" . implode(',', $cols) . ") VALUES (" . implode(',', $vals) . ")");
-        return $sql ? array('code' => $uid, 'msg' => 'success', 'result' => 1) : array('code' => 0, 'msg' => 'failure', 'result' => 10003);
-    }
-    return array('code' => ($myrow['uid'] ?: shorturl($longurl)), 'msg' => 'existence', 'result' => 1);
+    return array('code' => 0, 'short_url' => '', 'msg' => '短码生成冲突，请重试', 'result' => 10009);
 }
 ?>

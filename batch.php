@@ -1,53 +1,53 @@
 <?php
-/*!
+/*
 @name:dwz-shorturl Batch API
 @description:批量生成短链接口
-@author:陌涛
-@version:1.0
-@time:2026-07-27
-@copyright:陌涛
 */
 include __DIR__ . '/includes/api.inc.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    if (!headers_sent()) header('HTTP/1.1 405 Method Not Allowed');
+    if (!headers_sent()) { http_response_code(405); header('Allow: POST'); header('Content-Type: application/json; charset=utf-8'); }
+    echo json_encode(array('code' => 0, 'msg' => 'method not allowed', 'result' => 10010));
     exit();
 }
 if (!headers_sent()) header('Content-Type: application/json; charset=utf-8');
 
-$raw = isset($_POST['urls']) ? $_POST['urls'] : '';
-$lines = preg_split('/\s+/', trim($raw), -1, PREG_SPLIT_NO_EMPTY);
-$lines = array_slice($lines, 0, 100); // 单次上限 100 条
+$raw = isset($_POST['urls']) && is_string($_POST['urls']) ? $_POST['urls'] : '';
+if (strlen($raw) > 210000) batch_error('request too large', 10011, 413);
+$lines = preg_split('/\R+/', trim($raw), -1, PREG_SPLIT_NO_EMPTY);
+if (!$lines) batch_error('urls cannot be empty', 10001, 400);
+if (count($lines) > 100) batch_error('too many urls; maximum is 100', 10012, 422);
+if (!rate_limit(real_ip(), 100, 60, count($lines))) {
+    if (!headers_sent()) header('Retry-After: 60');
+    batch_error('请求过于频繁，请稍后再试', 10005, 429);
+}
 
 $results = array();
 foreach ($lines as $u) {
     $u = trim($u);
-    if ($u === '') continue;
-    if (strlen($u) > 2048) {
-        $results[] = array('url' => $u, 'code' => null, 'msg' => 'url too long');
-        continue;
-    }
-    $parts = @parse_url($u);
-    if (!$parts || !isset($parts['scheme']) || !in_array(strtolower($parts['scheme']), ['http', 'https'])) {
-        $results[] = array('url' => $u, 'code' => null, 'msg' => 'url is incorrect');
-        continue;
-    }
-    $host = isset($parts['host']) ? $parts['host'] : '';
-    if (isPrivateHost($host)) {
-        $results[] = array('url' => $u, 'code' => null, 'msg' => 'url host not allowed');
-        continue;
-    }
-    if (!rate_limit(real_ip(), 50, 60)) {
-        $results[] = array('url' => $u, 'code' => null, 'msg' => '请求过于频繁');
+    $validation = validate_long_url($u);
+    if (!$validation[0]) {
+        $results[] = array('url' => $u, 'code' => null, 'short_url' => '', 'msg' => $validation[1], 'result' => $validation[2]);
         continue;
     }
     $r = create_short_url($DB, $u);
     $results[] = array(
         'url' => $u,
         'code' => $r['result'] == 1 ? $r['code'] : null,
-        'msg' => $r['msg']
+        'short_url' => isset($r['short_url']) ? $r['short_url'] : '',
+        'msg' => $r['msg'],
+        'result' => $r['result']
     );
 }
 
-echo json_encode($results);
+http_response_code(200);
+echo json_encode($results, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 $DB->close();
+
+function batch_error($msg, $result, $status) {
+    global $DB;
+    if (!headers_sent()) http_response_code($status);
+    echo json_encode(array('code' => 0, 'msg' => $msg, 'result' => $result), JSON_UNESCAPED_UNICODE);
+    if (isset($DB)) $DB->close();
+    exit();
+}

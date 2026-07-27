@@ -1,71 +1,54 @@
 <?php
-/*!
-@name:dwz-shorturl Demo
+/*
+@name:dwz-shorturl Redirect
 @description:dwz-shorturl跳转文件
-@author:陌涛 
-@version:1.1
-@time:2026-07-27
-@copyright:陌涛
 */
 include __DIR__ . '/includes/api.inc.php';
-$uid = htmlspecialchars($_GET['uid']);
-// 校验短码格式（6-8位，a-z0-5）
-if ($uid && !preg_match('/^[a-z0-5]{6,8}$/', $uid)) {
-    @header("http/1.1 404 not found");
-    @header("status: 404 not found");
-    echo 'echo 404';
-    exit();
-}
-if (!$uid) {
-    @header("http/1.1 404 not found");
-    @header("status: 404 not found");
-    exit();
-}
-// 使用预处理语句查询，避免拼接注入
-$stmt = mysqli_prepare($DB->link, "SELECT longurl, expire_at FROM wjoy_log WHERE uid=? LIMIT 1");
-if ($stmt) {
-    mysqli_stmt_bind_param($stmt, 's', $uid);
-    mysqli_stmt_execute($stmt);
-    mysqli_stmt_bind_result($stmt, $t_url, $expire_at);
-    if (!mysqli_stmt_fetch($stmt)) {
-        mysqli_stmt_close($stmt);
-        @header("http/1.1 404 not found");
-        @header("status: 404 not found");
-        echo 'echo 404';
-        exit();
-    }
-    mysqli_stmt_close($stmt);
-    // 过期检查（旧表无 expire_at 列时已退化为不带该列的查询，不拦截）
-    if (!empty($expire_at) && strtotime($expire_at) !== false && strtotime($expire_at) < time()) {
-        @header("http/1.1 410 Gone");
-        @header("status: 410 Gone");
-        echo '短链已过期';
-        exit();
-    }
-} else {
-    // 旧表无 expire_at 列：退化为仅查 longurl
-    $stmt2 = mysqli_prepare($DB->link, "SELECT longurl FROM wjoy_log WHERE uid=? LIMIT 1");
-    mysqli_stmt_bind_param($stmt2, 's', $uid);
-    mysqli_stmt_execute($stmt2);
-    mysqli_stmt_bind_result($stmt2, $t_url);
-    if (!mysqli_stmt_fetch($stmt2)) {
-        mysqli_stmt_close($stmt2);
-        @header("http/1.1 404 not found");
-        @header("status: 404 not found");
-        echo 'echo 404';
-        exit();
-    }
-    mysqli_stmt_close($stmt2);
+
+$uid = isset($_GET['uid']) && is_string($_GET['uid']) ? trim($_GET['uid']) : '';
+if ($uid === '' || !preg_match('/^[a-z0-5]{6,8}$/', $uid)) redirect_error(404, 'Not Found');
+
+$stmt = $DB->prepare('SELECT longurl, expire_at FROM wjoy_log WHERE uid=? LIMIT 1');
+if (!$stmt) redirect_error(500, 'Internal Server Error');
+mysqli_stmt_bind_param($stmt, 's', $uid);
+if (!mysqli_stmt_execute($stmt)) { mysqli_stmt_close($stmt); redirect_error(500, 'Internal Server Error'); }
+mysqli_stmt_bind_result($stmt, $t_url, $expire_at);
+if (!mysqli_stmt_fetch($stmt)) { mysqli_stmt_close($stmt); redirect_error(404, 'Not Found'); }
+mysqli_stmt_close($stmt);
+
+if (!empty($expire_at)) {
+    $expires = strtotime($expire_at);
+    if ($expires !== false && $expires <= time()) redirect_error(410, '短链已过期');
 }
 
-// 兼容旧数据：若存储的是 base64 编码的 URL，则解码
+// Compatibility with older rows that stored the target as base64.
 $decoded = base64_decode($t_url, true);
-if ($decoded !== false && base64_encode($decoded) === $t_url && filter_var($decoded, FILTER_VALIDATE_URL)) {
-    $t_url = $decoded;
+if ($decoded !== false && base64_encode($decoded) === $t_url && filter_var($decoded, FILTER_VALIDATE_URL)) $t_url = $decoded;
+$validation = validate_long_url($t_url);
+if (!$validation[0]) redirect_error(410, '短链目标无效');
+
+$click = $DB->prepare('UPDATE wjoy_log SET clicks = clicks + 1 WHERE uid=?');
+if ($click) {
+    mysqli_stmt_bind_param($click, 's', $uid);
+    mysqli_stmt_execute($click);
+    mysqli_stmt_close($click);
 }
 
-// 记录点击数（列不存在时静默忽略）
-mysqli_query($DB->link, "UPDATE wjoy_log SET clicks = clicks + 1 WHERE uid = '" . mysqli_real_escape_string($DB->link, $uid) . "'");
-
-header("Location: " . $t_url, true, 301);
+header('Cache-Control: no-store, private, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
+header('Location: ' . $t_url, true, 302);
+$DB->close();
 exit();
+
+function redirect_error($status, $message) {
+    global $DB;
+    if (!headers_sent()) {
+        http_response_code($status);
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Cache-Control: no-store');
+    }
+    echo $message;
+    if (isset($DB)) $DB->close();
+    exit();
+}

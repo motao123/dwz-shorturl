@@ -1,179 +1,99 @@
 <?php
-//MySQL、MySQLi、SQLite 三合一数据库操作类
-if(!defined('IN_CRONLITE'))exit();
+// MySQLi database wrapper used by the application.
+if (!defined('IN_CRONLITE')) exit();
 
-$nomysqli=false;
+class DB {
+    public $link = null;
+    public $result = null;
+    public $connect_error = '';
 
-if(defined('SQLITE')==true){
-	class DB {
-		var $link = null;
-
-		function __construct($db_file){
-			global $siteurl;
-		$this->link = new PDO('sqlite:'.ROOT.'includes/sqlite/'.$db_file.'.db');
-		if (!$this->link) die('Connection Sqlite failed.\n');
-		return true;
+    public function __construct($db_host, $db_user, $db_pass, $db_name, $db_port = 3306) {
+        if (!extension_loaded('mysqli')) {
+            $this->connect_error = 'MySQLi extension is not installed';
+            return;
         }
 
-		function fetch($q){
-			return $q->fetch();
-		}
-		function get_row($q){
-			$sth = $this->link->query($q);
-			return $sth->fetch();
-		}
-		function count($q){
-			$sth = $this->link->query($q);
-			return $sth->fetchColumn();
-		}
-		function query($q){
-			return $this->result=$this->link->query($q);
-		}
-		function affected(){
-			return $this->result->rowCount();
-		}
-		function error(){
-			$error = $this->link->errorInfo();
-			return '['.$error[1].'] '.$error[2];
-		}
-	}
-}
-elseif(extension_loaded('mysqli') && $nomysqli==false) {
-    class DB {
-        var $link = null;
-
-        function __construct($db_host,$db_user,$db_pass,$db_name,$db_port){
-            
-            $this->link = mysqli_connect($db_host, $db_user, $db_pass, $db_name, $db_port);
-            
+        // PHP 8 may turn MySQLi failures into exceptions depending on global settings.
+        mysqli_report(MYSQLI_REPORT_OFF);
+        try {
+            $this->link = mysqli_init();
             if (!$this->link) {
-                $this->connect_error = 'Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error();
+                $this->connect_error = 'Unable to initialize MySQLi';
                 return;
             }
-            
-            //mysqli_select_db($this->link, $db_name) or die(mysqli_error($this->link));
-            
- 
-mysqli_query($this->link,"set sql_mode = ''");
- //字符转换，读库
-mysqli_query($this->link,"set character set 'utf8'");
-//写库
-mysqli_query($this->link,"set names 'utf8'"); 
-	return true;
-	}
-		function fetch($q){
-			return mysqli_fetch_assoc($q);
-		}
-		function get_row($q){
-			$result = mysqli_query($this->link,$q);
-			return mysqli_fetch_assoc($result);
-		}
-		function count($q){
-			$result = mysqli_query($this->link,$q);
-			$count = mysqli_fetch_array($result);
-			return $count[0];
-		}
-		function query($q){
-			return mysqli_query($this->link,$q);
-		}
-		function escape($str){
-			return mysqli_real_escape_string($this->link,$str);
-		}
-		function insert($q){
-			if(mysqli_query($this->link,$q))
-				return mysqli_insert_id($this->link); 
-			return false;
-		}
-		function affected(){
-			return mysqli_affected_rows($this->link);
-		}
-		function insert_array($table,$array){
-			$q = "INSERT INTO `$table`";
-			$q .=" (`".implode("`,`",array_keys($array))."`) ";
-			$q .=" VALUES ('".implode("','",array_values($array))."') ";
-			
-			if(mysqli_query($this->link,$q))
-				return mysqli_insert_id($this->link);
-			return false;
-		}
-		function error(){
-			$error = mysqli_error($this->link);
-			$errno = mysqli_errno($this->link);
-			return '['.$errno.'] '.$error;
-		}
-		function close(){
-			$q = mysqli_close($this->link);
-			return $q;
-		}
-	}
-} else { // we use the old mysql
-	class DB {
-		var $link = null;
+            mysqli_options($this->link, MYSQLI_OPT_CONNECT_TIMEOUT, 5);
+            if (!@mysqli_real_connect($this->link, $db_host, $db_user, $db_pass, $db_name, (int)$db_port)) {
+                $this->connect_error = 'Connect Error (' . mysqli_connect_errno() . ') ' . mysqli_connect_error();
+                $this->link = null;
+                return;
+            }
+            if (!mysqli_set_charset($this->link, 'utf8mb4')) {
+                $this->connect_error = 'Unable to configure database charset';
+                mysqli_close($this->link);
+                $this->link = null;
+            }
+        } catch (Throwable $e) {
+            $this->connect_error = $e->getMessage();
+            $this->link = null;
+        }
+    }
 
-		function __construct($db_host,$db_user,$db_pass,$db_name,$db_port){
+    public function fetch($query) {
+        return $query ? mysqli_fetch_assoc($query) : false;
+    }
 
-		$this->link = @mysql_connect($db_host.':'.$db_port, $db_user, $db_pass);
-            
-		if (!$this->link) {
-			$this->connect_error = 'Connect Error (' . mysql_errno() . ') ' . mysql_error();
-			return;
-		}
-            
-			mysql_select_db($db_name, $this->link) or die(mysql_error($this->link));
+    public function get_row($query) {
+        $result = $this->query($query);
+        return $result instanceof mysqli_result ? mysqli_fetch_assoc($result) : false;
+    }
 
-mysql_query("set sql_mode = ''");
-//字符转换，读库
-mysql_query("set character set 'utf8'");
-//写库
-mysql_query("set names 'utf8'"); 
+    public function count($query) {
+        $result = $this->query($query);
+        if (!($result instanceof mysqli_result)) return 0;
+        $row = mysqli_fetch_row($result);
+        return $row ? $row[0] : 0;
+    }
 
-	return true;
-		}
-		function fetch($q){
-			return mysql_fetch_assoc($q);
-		}
-		function get_row($q){
-			$result = mysql_query($q, $this->link);
-			return mysql_fetch_assoc($result);
-		}
-		function count($q){
-			$result = mysql_query($q, $this->link);
-			$count = mysql_fetch_array($result);
-			return $count[0];
-		}
-        function query($q){
-			return mysql_query($q, $this->link);
-		}
-		function escape($str){
-			return mysql_real_escape_string($str, $this->link);
-		}
-		function affected(){
-			return mysql_affected_rows($this->link);
-		}
-		function insert($q){
-			if(mysql_query($q, $this->link))
-				return mysql_insert_id($this->link);
-			return false;
-		}
-		function insert_array($table,$array){
-			$q = "INSERT INTO `$table`";
-			$q .=" (`".implode("`,`",array_keys($array))."`) ";
-			$q .=" VALUES ('".implode("','",array_values($array))."') ";
+    public function query($query) {
+        if (!$this->link) return false;
+        try {
+            $this->result = mysqli_query($this->link, $query);
+        } catch (Throwable $e) {
+            $this->result = false;
+        }
+        return $this->result;
+    }
 
-			if(mysql_query($q, $this->link))
-				return mysql_insert_id($this->link);
-			return false;
-		}
-		function error(){
-			$error = mysql_error($this->link);
-			$errno = mysql_errno($this->link);
-			return '['.$errno.'] '.$error;
-		}
-		function close(){
-			$q = mysql_close($this->link);
-			return $q;
-		}
-	}
+    public function prepare($query) {
+        if (!$this->link) return false;
+        try {
+            return mysqli_prepare($this->link, $query);
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
 
+    public function escape($value) {
+        return $this->link ? mysqli_real_escape_string($this->link, (string)$value) : '';
+    }
+
+    public function insert($query) {
+        return $this->query($query) ? mysqli_insert_id($this->link) : false;
+    }
+
+    public function affected() {
+        return $this->link ? mysqli_affected_rows($this->link) : 0;
+    }
+
+    public function error() {
+        if (!$this->link) return $this->connect_error;
+        return '[' . mysqli_errno($this->link) . '] ' . mysqli_error($this->link);
+    }
+
+    public function close() {
+        if (!$this->link) return true;
+        $closed = mysqli_close($this->link);
+        $this->link = null;
+        return $closed;
+    }
 }
-?>
