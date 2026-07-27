@@ -1,0 +1,7 @@
+node_modules
+dist
+*.local
+
+# unplugin 生成的声明文件
+src/auto-imports.d.ts
+src/components.d.ts
