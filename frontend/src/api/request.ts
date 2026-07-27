@@ -78,7 +78,7 @@ function hardLogout() {
   tokenStorage.clear()
   localStorage.removeItem('dwz_user_info')
   const redirect = encodeURIComponent(window.location.pathname + window.location.search)
-  window.location.href = `/login?redirect=${redirect}`
+  window.location.href = `/admin/login?redirect=${redirect}`
 }
 
 async function doRefreshToken(): Promise<string> {

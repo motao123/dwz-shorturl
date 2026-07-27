@@ -11,13 +11,14 @@ import (
 
 type OverviewResult struct {
 	TotalUrls   int64   `json:"total_urls"`
+	TotalClicks int64   `json:"total_clicks"`
 	TodayNew    int64   `json:"today_new"`
 	TodayClicks int64   `json:"today_clicks"`
 	ActiveRate  float64 `json:"active_rate"`
 }
 
 type TrendPoint struct {
-	Date   string `json:"date"`
+	Label  string `json:"label"`
 	Clicks int64  `json:"clicks"`
 }
 
@@ -48,6 +49,13 @@ func (s *statsService) Overview() (*OverviewResult, error) {
 		return nil, err
 	}
 
+	// Total clicks across all short URLs
+	var totalClicks int64
+	err = s.db.Model(&model.ShortUrl{}).Select("COALESCE(SUM(clicks), 0)").Scan(&totalClicks).Error
+	if err != nil {
+		return nil, err
+	}
+
 	// Count today's clicks from click_logs
 	var todayClicks int64
 	today := time.Now().Format("2006-01-02")
@@ -72,6 +80,7 @@ func (s *statsService) Overview() (*OverviewResult, error) {
 
 	return &OverviewResult{
 		TotalUrls:   totalUrls,
+		TotalClicks: totalClicks,
 		TodayNew:    todayNew,
 		TodayClicks: todayClicks,
 		ActiveRate:  activeRate,
@@ -79,7 +88,7 @@ func (s *statsService) Overview() (*OverviewResult, error) {
 }
 
 func (s *statsService) Trend(granularity string, dateFrom, dateTo *time.Time) ([]TrendPoint, error) {
-	var results []TrendPoint
+	results := make([]TrendPoint, 0)
 
 	query := s.db.Model(&model.ClickLog{})
 
@@ -112,11 +121,11 @@ func (s *statsService) Trend(granularity string, dateFrom, dateTo *time.Time) ([
 		Order("date ASC").
 		Scan(&rows).Error
 	if err != nil {
-		return nil, err
+		return results, err
 	}
 
 	for _, r := range rows {
-		results = append(results, TrendPoint{Date: r.Date, Clicks: r.Clicks})
+		results = append(results, TrendPoint{Label: r.Date, Clicks: r.Clicks})
 	}
 
 	return results, nil
