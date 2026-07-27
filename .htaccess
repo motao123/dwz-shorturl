@@ -1,0 +1,8 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    # 已存在的文件/目录直接访问，不做重写
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    # 仅匹配 6-8 位 a-z0-5 的短码路径，重写到 do.php
+    RewriteRule ^([a-z0-5]{6,8})$ do.php?uid=$1 [L,QSA]
+</IfModule>

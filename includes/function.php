@@ -211,20 +211,47 @@ function rate_limit($ip, $max = 20, $window = 60) {
     return $data['count'] <= $max;
 }
 
-// 创建短链：原子去重（依赖 url_hash 唯一索引），旧表无该列时自动退化为按 longurl 去重
-function create_short_url($DB, $longurl) {
+// 创建短链：支持自定义短码与有效期；原子去重（依赖 url_hash 唯一索引），旧表无该列时自动退化为按 longurl 去重
+function create_short_url($DB, $longurl, $custom = null, $expire_days = 0) {
     $hash = md5($longurl);
+
+    // 自定义短码校验与占用检查
+    $uid = null;
+    if ($custom !== null && $custom !== '') {
+        if (!preg_match('/^[a-z0-5]{6,8}$/', $custom)) {
+            return array('code' => 0, 'msg' => '自定义短码格式错误（需 6-8 位，仅含 a-z 与 0-5）', 'result' => 10006);
+        }
+        if ($s = mysqli_prepare($DB->link, "SELECT uid FROM wjoy_log WHERE uid=? LIMIT 1")) {
+            mysqli_stmt_bind_param($s, 's', $custom);
+            mysqli_stmt_execute($s);
+            mysqli_stmt_bind_result($s, $exist_uid);
+            mysqli_stmt_fetch($s);
+            mysqli_stmt_close($s);
+            if (!empty($exist_uid)) {
+                return array('code' => 0, 'msg' => '自定义短码已被占用', 'result' => 10007);
+            }
+        }
+        $uid = $custom;
+    }
+
     if (isset($DB->link) && function_exists('mysqli_prepare')) {
-        $uid = shorturl($longurl);
-        if ($stmt = mysqli_prepare($DB->link, "INSERT INTO wjoy_log (uid,longurl,url_hash) VALUES (?,?,?)")) {
-            mysqli_stmt_bind_param($stmt, 'sss', $uid, $longurl, $hash);
+        if ($uid === null) $uid = shorturl($longurl);
+        $expire_at = ($expire_days > 0) ? date('Y-m-d H:i:s', time() + intval($expire_days) * 86400) : null;
+
+        if ($stmt = mysqli_prepare($DB->link, "INSERT INTO wjoy_log (uid,longurl,url_hash,expire_at) VALUES (?,?,?,?)")) {
+            mysqli_stmt_bind_param($stmt, 'ssss', $uid, $longurl, $hash, $expire_at);
             if (mysqli_stmt_execute($stmt)) {
                 mysqli_stmt_close($stmt);
                 return array('code' => $uid, 'msg' => 'success', 'result' => 1);
             }
             $errno = mysqli_errno($DB->link);
-            if ($errno == 1062) { // 唯一键冲突：同 URL 已存在
+            if ($errno == 1062) { // 唯一键冲突
                 mysqli_stmt_close($stmt);
+                // 自定义短码冲突（uid 唯一键）
+                if ($uid !== null && $uid === $custom) {
+                    return array('code' => 0, 'msg' => '自定义短码已被占用', 'result' => 10007);
+                }
+                // url_hash 冲突：同 URL 已存在，返回已有短码
                 if ($s2 = mysqli_prepare($DB->link, "SELECT uid FROM wjoy_log WHERE url_hash=? LIMIT 1")) {
                     mysqli_stmt_bind_param($s2, 's', $hash);
                     mysqli_stmt_execute($s2);
@@ -236,12 +263,15 @@ function create_short_url($DB, $longurl) {
                 return array('code' => $uid, 'msg' => 'existence', 'result' => 1);
             }
             mysqli_stmt_close($stmt);
-            // 非唯一键错误（如 url_hash 列不存在）-> 退化为仅按 longurl 去重
         }
+        // 退化：url_hash / expire_at 列不存在（旧表）
         $enc = $DB->escape($longurl);
         $myrow = $DB->get_row("SELECT uid FROM wjoy_log WHERE longurl='" . $enc . "' LIMIT 1");
+        $cols = array('uid', 'longurl');
+        $vals = array("'" . $DB->escape($uid) . "'", "'" . $enc . "'");
+        if ($expire_at) { $cols[] = 'expire_at'; $vals[] = "'" . $DB->escape($expire_at) . "'"; }
         if (!$myrow) {
-            $sql = $DB->query("INSERT INTO wjoy_log (uid,longurl) VALUES ('" . $DB->escape($uid) . "','" . $enc . "')");
+            $sql = $DB->query("INSERT INTO wjoy_log (" . implode(',', $cols) . ") VALUES (" . implode(',', $vals) . ")");
             return $sql ? array('code' => $uid, 'msg' => 'success', 'result' => 1) : array('code' => 0, 'msg' => 'failure', 'result' => 10003);
         }
         return array('code' => ($myrow['uid'] ?: $uid), 'msg' => 'existence', 'result' => 1);
@@ -250,8 +280,11 @@ function create_short_url($DB, $longurl) {
     $enc = $DB->escape($longurl);
     $myrow = $DB->get_row("SELECT uid FROM wjoy_log WHERE longurl='" . $enc . "' LIMIT 1");
     if (!$myrow) {
-        $uid = shorturl($longurl);
-        $sql = $DB->query("INSERT INTO wjoy_log (uid,longurl) VALUES ('" . $DB->escape($uid) . "','" . $enc . "')");
+        if ($uid === null) $uid = shorturl($longurl);
+        $cols = array('uid', 'longurl');
+        $vals = array("'" . $DB->escape($uid) . "'", "'" . $enc . "'");
+        if ($expire_days > 0) { $cols[] = 'expire_at'; $vals[] = "'" . $DB->escape(date('Y-m-d H:i:s', time() + intval($expire_days) * 86400)) . "'"; }
+        $sql = $DB->query("INSERT INTO wjoy_log (" . implode(',', $cols) . ") VALUES (" . implode(',', $vals) . ")");
         return $sql ? array('code' => $uid, 'msg' => 'success', 'result' => 1) : array('code' => 0, 'msg' => 'failure', 'result' => 10003);
     }
     return array('code' => ($myrow['uid'] ?: shorturl($longurl)), 'msg' => 'existence', 'result' => 1);

@@ -11,6 +11,8 @@ include './includes/api.inc.php';
 
 $longurl = isset($_GET['url']) ? $_GET['url'] : (isset($_POST['url']) ? $_POST['url'] : '');
 $format = isset($_GET['format']) ? $_GET['format'] : (isset($_POST['format']) ? $_POST['format'] : '');
+$custom = isset($_GET['custom']) ? trim($_GET['custom']) : (isset($_POST['custom']) ? trim($_POST['custom']) : '');
+$expire = isset($_GET['expire']) ? intval($_GET['expire']) : (isset($_POST['expire']) ? intval($_POST['expire']) : 0);
 
 // 统一响应头（仅对 JSON）
 if (!headers_sent()) {
@@ -46,7 +48,7 @@ if (!rate_limit(real_ip(), 20, 60)) {
     exit();
 }
 
-$r = create_short_url($DB, $longurl);
+$r = create_short_url($DB, $longurl, $custom, $expire);
 show_result($r['result'] == 1 ? $r['code'] : 0, $r['msg'], $r['result']);
 
 $DB->close();

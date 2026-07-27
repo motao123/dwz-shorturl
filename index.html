@@ -42,6 +42,22 @@
 					<label class="control-label" for="inputContent">请输入长网址:</label> 
 					<input type="text" id="inputContent" class="form-control" placeholder="请输入地址..."> 
 				</div>
+				<div class="row" style="margin:0 -5px 10px">
+					<div class="col-xs-7" style="padding:0 5px">
+						<label class="control-label" for="customCode">自定义短码（可选，6-8位 a-z/0-5）</label>
+						<input type="text" id="customCode" class="form-control" placeholder="留空则随机生成" maxlength="8" autocomplete="off">
+					</div>
+					<div class="col-xs-5" style="padding:0 5px">
+						<label class="control-label" for="expireDays">有效期</label>
+						<select id="expireDays" class="form-control">
+							<option value="0">永久</option>
+							<option value="1">1 天</option>
+							<option value="7">7 天</option>
+							<option value="30">30 天</option>
+							<option value="365">1 年</option>
+						</select>
+					</div>
+				</div>
 				<div class="text-right">
 					<button type="button" class="btn btn-primary" id="shortify" onclick="checkUrl(document.getElementById('inputContent').value)">缩短网址</button>
 				</div>
@@ -66,11 +82,13 @@
 							<div class="modal-body">
 								<div class="form-group"> <input type="text" class="form-control" id="gen_result_url" value="https://imotao.com" readonly> </div>
 							</div>
-							<div class="modal-footer">
-								<button type="button" class="btn btn-default" id="copyBtn">复制</button>
-								<a target="_blank" id="preViewBtn" href="https://imotao.com"> <button type="button" class="btn btn-success">访问短链</button> </a>
-							</div>
+						<div class="modal-footer">
+							<button type="button" class="btn btn-info" id="qrBtn">二维码</button>
+							<button type="button" class="btn btn-default" id="copyBtn">复制</button>
+							<a target="_blank" id="preViewBtn" href="https://imotao.com"> <button type="button" class="btn btn-success">访问短链</button> </a>
 						</div>
+						<div id="qrcode" style="margin-top:14px;display:none;text-align:center;"></div>
+					</div>
 					</div>
 				</div>
 			</div>
@@ -85,6 +103,7 @@
 		© Copyright 2020-2025 <a href="https://imotao.com/">陌涛</a> - All Rights Reserved. 
 	</div>
 
+	<script src="/assets/qrcode.min.js"></script>
 	<script>
 		function sendAJAX(hasHttp) {
 			var btn = document.getElementById('shortify');
@@ -104,6 +123,8 @@
 						if (result.result == 1) {
 							var resultWrap = document.getElementById('result-wrap');
 							resultWrap.style.display = 'block';
+							var qrBox = document.getElementById('qrcode');
+							qrBox.style.display = 'none'; qrBox.innerHTML = '';
 							var preViewBtn = document.getElementById('preViewBtn'),
 								genResultUrl = document.getElementById('gen_result_url');
 							var shortLink = location.protocol + '//' + location.host + '/' + result.code;
@@ -127,7 +148,7 @@
 			var urlParam = hasHttp ? urlVal : location.protocol + '//' + urlVal;
 			xhr.open('POST', '/api.php');
 			xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-			xhr.send('url=' + encodeURIComponent(urlParam));
+			xhr.send('url=' + encodeURIComponent(urlParam) + '&custom=' + encodeURIComponent(document.getElementById('customCode').value.trim()) + '&expire=' + encodeURIComponent(document.getElementById('expireDays').value));
 		}
 
 		function batchGenerate() {
@@ -196,6 +217,17 @@
 				navigator.clipboard.writeText(url).then(function () { msgAlert('已复制到剪贴板'); }, function () { fallbackCopy(url); });
 			} else {
 				fallbackCopy(url);
+			}
+		});
+		document.getElementById('qrBtn').addEventListener('click', function () {
+			var box = document.getElementById('qrcode');
+			var url = document.getElementById('gen_result_url').value;
+			if (box.style.display === 'none') {
+				box.innerHTML = '';
+				new QRCode(box, { text: url, width: 160, height: 160 });
+				box.style.display = 'block';
+			} else {
+				box.style.display = 'none';
 			}
 		});
 		function fallbackCopy(url) {

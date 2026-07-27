@@ -28,7 +28,7 @@ function dispUrl($u) {
     if ($dec !== false && base64_encode($dec) === $u && filter_var($dec, FILTER_VALIDATE_URL)) return $dec;
     return $u;
 }
-function shortUrl($base, $uid) { return $base . 'do.php?uid=' . $uid; }
+function shortUrl($base, $uid) { return $base . $uid; }
 
 $totalLinks = (int)$DB->count("SELECT COUNT(*) FROM wjoy_log");
 $totalClicks = (int)$DB->count("SELECT COALESCE(SUM(clicks),0) FROM wjoy_log");
