@@ -18,6 +18,9 @@ export interface ShortUrl {
   creator_name?: string
   source: string
   ip: string | null
+  domain_id?: number | null
+  domain?: string
+  short_url?: string
   created_at: string
   updated_at: string
 }
@@ -40,6 +43,7 @@ export interface ShortUrlPayload {
   expire_days?: number | null
   expire_at?: string | null
   status?: ShortUrlStatus
+  domain_id?: number | null
 }
 
 export interface BatchCreateItem {

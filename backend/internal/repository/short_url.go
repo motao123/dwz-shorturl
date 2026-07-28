@@ -13,6 +13,7 @@ type ShortUrlFilters struct {
 	Keyword    string
 	Status     *int8
 	CategoryID *uint64
+	DomainID   *uint64
 	CreatedBy  *uint64
 	DateFrom   *time.Time
 	DateTo     *time.Time
@@ -104,6 +105,9 @@ func (r *shortUrlRepo) List(page, perPage int, filters ShortUrlFilters) ([]model
 	}
 	if filters.CategoryID != nil {
 		query = query.Where("category_id = ?", *filters.CategoryID)
+	}
+	if filters.DomainID != nil {
+		query = query.Where("domain_id = ?", *filters.DomainID)
 	}
 	if filters.CreatedBy != nil {
 		query = query.Where("created_by = ?", *filters.CreatedBy)

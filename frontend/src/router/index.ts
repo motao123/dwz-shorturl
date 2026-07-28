@@ -29,6 +29,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '短链管理', icon: 'Link', perm: 'short_urls.read' }
       },
       {
+        path: 'domains',
+        name: 'Domains',
+        component: () => import('@/views/domains/DomainList.vue'),
+        meta: { title: '域名管理', icon: 'Connection', perm: 'domains.read' }
+      },
+      {
         path: 'users',
         name: 'Users',
         component: () => import('@/views/users/UserList.vue'),

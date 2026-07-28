@@ -14,6 +14,8 @@ if (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST')
 $longurl = isset($_POST['url']) && is_string($_POST['url']) ? trim($_POST['url']) : '';
 $custom = isset($_POST['custom']) && is_string($_POST['custom']) ? trim($_POST['custom']) : '';
 $expire_raw = isset($_POST['expire']) ? $_POST['expire'] : 0;
+$domain_id = isset($_POST['domain']) && is_string($_POST['domain']) ? trim($_POST['domain']) : '';
+$domain_id = $domain_id !== '' ? $domain_id : null;
 
 if (!headers_sent() && $format !== 'txt') header('Content-Type: application/json; charset=utf-8');
 
@@ -27,7 +29,7 @@ if (!rate_limit(real_ip(), 20, 60)) {
     api_result(0, '请求过于频繁，请稍后再试', 10005, 429);
 }
 
-$r = create_short_url($DB, $longurl, $custom, $expire);
+$r = create_short_url($DB, $longurl, $custom, $expire, $domain_id);
 $status = $r['result'] == 1 ? 200 : (in_array($r['result'], array(10007, 10013), true) ? 409 : 500);
 api_result(
     $r['result'] == 1 ? $r['code'] : 0,

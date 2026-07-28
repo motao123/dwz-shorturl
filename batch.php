@@ -13,6 +13,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 if (!headers_sent()) header('Content-Type: application/json; charset=utf-8');
 
 $raw = isset($_POST['urls']) && is_string($_POST['urls']) ? $_POST['urls'] : '';
+$domain_id = isset($_POST['domain']) && is_string($_POST['domain']) ? trim($_POST['domain']) : '';
+$domain_id = $domain_id !== '' ? $domain_id : null;
 if (strlen($raw) > 210000) batch_error('request too large', 10011, 413);
 $lines = preg_split('/\R+/', trim($raw), -1, PREG_SPLIT_NO_EMPTY);
 if (!$lines) batch_error('urls cannot be empty', 10001, 400);
@@ -30,7 +32,7 @@ foreach ($lines as $u) {
         $results[] = array('url' => $u, 'code' => null, 'short_url' => '', 'msg' => $validation[1], 'result' => $validation[2]);
         continue;
     }
-    $r = create_short_url($DB, $u);
+    $r = create_short_url($DB, $u, null, 0, $domain_id);
     $results[] = array(
         'url' => $u,
         'code' => $r['result'] == 1 ? $r['code'] : null,

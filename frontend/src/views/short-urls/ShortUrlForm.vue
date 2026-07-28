@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Link } from '@element-plus/icons-vue'
 import { createShortUrl, updateShortUrl, type ShortUrl, type ShortUrlPayload } from '@/api/short-urls'
+import { getActiveDomains, type ActiveDomain } from '@/api/domains'
 import { URL_CATEGORIES } from '@/utils/constants'
 
 interface Props {
@@ -26,6 +27,19 @@ const isEdit = computed(() => Boolean(props.editing))
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
 
+const activeDomains = ref<ActiveDomain[]>([])
+
+async function loadActiveDomains() {
+  try {
+    const res = await getActiveDomains()
+    activeDomains.value = Array.isArray(res) ? res : []
+  } catch {
+    activeDomains.value = []
+  }
+}
+
+onMounted(loadActiveDomains)
+
 interface FormState {
   long_url: string
   uid: string
@@ -33,6 +47,7 @@ interface FormState {
   category_id: number | null
   expire_days: number | null
   status: 0 | 1
+  domain_id: number | null
 }
 
 const form = reactive<FormState>({
@@ -41,7 +56,8 @@ const form = reactive<FormState>({
   title: '',
   category_id: null,
   expire_days: null,
-  status: 1
+  status: 1,
+  domain_id: null
 })
 
 /** -1 作为「永久有效」的选择器哨兵值 */
@@ -94,6 +110,7 @@ function resetForm() {
   form.category_id = null
   form.expire_days = null
   form.status = 1
+  form.domain_id = null
   formRef.value?.clearValidate()
 }
 
@@ -106,6 +123,7 @@ watch(visible, (v) => {
     form.category_id = props.editing.category_id
     form.expire_days = null
     form.status = props.editing.status === 0 ? 0 : 1
+    form.domain_id = props.editing.domain_id ?? null
   } else {
     resetForm()
   }
@@ -133,6 +151,7 @@ async function handleSubmit() {
       ElMessage.success('短链已更新')
     } else {
       if (form.uid.trim()) payload.uid = form.uid.trim()
+      if (form.domain_id) payload.domain_id = form.domain_id
       await createShortUrl(payload)
       ElMessage.success('短链创建成功')
     }
@@ -215,6 +234,23 @@ async function handleSubmit() {
           </el-form-item>
         </el-col>
       </el-row>
+
+      <el-form-item label="短链域名">
+        <el-select
+          v-model="form.domain_id"
+          placeholder="默认域名"
+          clearable
+          style="width: 100%"
+          :disabled="!activeDomains.length"
+        >
+          <el-option
+            v-for="d in activeDomains"
+            :key="d.id"
+            :label="`${d.scheme}://${d.domain}`"
+            :value="d.id"
+          />
+        </el-select>
+      </el-form-item>
 
       <el-form-item v-if="isEdit" label="状态">
         <el-radio-group v-model="form.status">

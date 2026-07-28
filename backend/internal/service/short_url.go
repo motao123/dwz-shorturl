@@ -31,10 +31,10 @@ var (
 )
 
 type ShortUrlService interface {
-	Create(longURL, custom string, expireDays int, createdBy *uint64, source, ip string) (*model.ShortUrl, error)
+	Create(longURL, custom string, expireDays int, domainID *uint64, createdBy *uint64, source, ip string) (*model.ShortUrl, error)
 	BatchCreate(urls []string, createdBy *uint64, ip string) ([]model.ShortUrl, []error)
 	GetByID(id uint64) (*model.ShortUrl, error)
-	Update(id uint64, longURL, title string, expireDays *int, status *int8, categoryID *uint64) (*model.ShortUrl, error)
+	Update(id uint64, longURL, title string, expireDays *int, status *int8, categoryID *uint64, domainID *uint64) (*model.ShortUrl, error)
 	Delete(id uint64) error
 	BatchDelete(ids []uint64) error
 	List(page, perPage int, filters repository.ShortUrlFilters) ([]model.ShortUrl, int64, error)
@@ -43,16 +43,17 @@ type ShortUrlService interface {
 }
 
 type shortUrlService struct {
-	repo  repository.ShortUrlRepo
-	rdb   *redis.Client
-	db    *gorm.DB // raw DB for legacy table fallback queries
+	repo       repository.ShortUrlRepo
+	rdb        *redis.Client
+	db         *gorm.DB // raw DB for legacy table fallback queries
+	domainRepo repository.DomainRepo
 }
 
-func NewShortUrlService(repo repository.ShortUrlRepo, rdb *redis.Client, db *gorm.DB) ShortUrlService {
-	return &shortUrlService{repo: repo, rdb: rdb, db: db}
+func NewShortUrlService(repo repository.ShortUrlRepo, rdb *redis.Client, db *gorm.DB, domainRepo repository.DomainRepo) ShortUrlService {
+	return &shortUrlService{repo: repo, rdb: rdb, db: db, domainRepo: domainRepo}
 }
 
-func (s *shortUrlService) Create(longURL, custom string, expireDays int, createdBy *uint64, source, ip string) (*model.ShortUrl, error) {
+func (s *shortUrlService) Create(longURL, custom string, expireDays int, domainID *uint64, createdBy *uint64, source, ip string) (*model.ShortUrl, error) {
 	longURL = strings.TrimSpace(longURL)
 	if err := validateURL(longURL); err != nil {
 		return nil, err
@@ -111,6 +112,7 @@ func (s *shortUrlService) Create(longURL, custom string, expireDays int, created
 			UID:       uid,
 			LongURL:   longURL,
 			URLHash:   hash,
+			DomainID:  domainID,
 			Clicks:    0,
 			Status:    1,
 			ExpireAt:  expireAt,
@@ -151,7 +153,7 @@ func (s *shortUrlService) BatchCreate(urls []string, createdBy *uint64, ip strin
 		if u == "" {
 			continue
 		}
-		record, err := s.Create(u, "", 0, createdBy, "batch", ip)
+		record, err := s.Create(u, "", 0, nil, createdBy, "batch", ip)
 		if err != nil {
 			errs[i] = err
 		} else {
@@ -166,7 +168,7 @@ func (s *shortUrlService) GetByID(id uint64) (*model.ShortUrl, error) {
 	return s.repo.FindByID(id)
 }
 
-func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *int, status *int8, categoryID *uint64) (*model.ShortUrl, error) {
+func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *int, status *int8, categoryID *uint64, domainID *uint64) (*model.ShortUrl, error) {
 	record, err := s.repo.FindByID(id)
 	if err != nil {
 		return nil, err
@@ -199,6 +201,10 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 
 	if categoryID != nil {
 		record.CategoryID = categoryID
+	}
+
+	if domainID != nil {
+		record.DomainID = domainID
 	}
 
 	if err := s.repo.Update(record); err != nil {

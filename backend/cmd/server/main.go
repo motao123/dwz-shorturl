@@ -60,16 +60,18 @@ func main() {
 	auditRepo := repository.NewAuditRepo(db)
 	configRepo := repository.NewConfigRepo(db)
 	apiKeyRepo := repository.NewApiKeyRepo(db)
+	domainRepo := repository.NewDomainRepo(db)
 
 	// Initialize services
 	authSvc := service.NewAuthService(userRepo, roleRepo)
-	shortUrlSvc := service.NewShortUrlService(shortUrlRepo, rdb, db)
+	shortUrlSvc := service.NewShortUrlService(shortUrlRepo, rdb, db, domainRepo)
 	userSvc := service.NewUserService(userRepo)
 	roleSvc := service.NewRoleService(roleRepo)
 	statsSvc := service.NewStatsService(shortUrlRepo, db)
 	configSvc := service.NewConfigService(configRepo)
 	auditSvc := service.NewAuditService(auditRepo)
 	apiKeySvc := service.NewApiKeyService(apiKeyRepo)
+	domainSvc := service.NewDomainService(domainRepo)
 
 	// Initialize handlers
 	handlers := &router.Handlers{
@@ -82,6 +84,7 @@ func main() {
 		Audit:    handler.NewAuditHandler(auditSvc),
 		ApiKey:   handler.NewApiKeyHandler(apiKeySvc),
 		Redirect: handler.NewRedirectHandler(shortUrlSvc, rdb, db, zapLogger, clickQueue),
+		Domain:   handler.NewDomainHandler(domainSvc),
 	}
 
 	// Permission loader function for RBAC middleware

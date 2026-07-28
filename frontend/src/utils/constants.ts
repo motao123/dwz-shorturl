@@ -2,8 +2,9 @@
 export const SHORT_DOMAIN = 'https://dwz.cn'
 
 /** 拼接完整短链 */
-export function buildShortUrl(uid: string): string {
-  return `${SHORT_DOMAIN}/${uid}`
+export function buildShortUrl(uid: string, domain?: string): string {
+  const base = domain || SHORT_DOMAIN
+  return `${base}/${uid}`
 }
 
 /** 短链状态展示映射 */

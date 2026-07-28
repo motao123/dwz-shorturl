@@ -109,8 +109,26 @@ function validate_expire_days($value) {
     return in_array($days, array(0, 1, 7, 30, 365), true) ? $days : false;
 }
 
-function public_short_url($uid) {
-    global $public_base_url;
+function public_short_url($uid, $domain_id = null) {
+    global $public_base_url, $DB;
+
+    // If a domain_id is specified, try to look up the domain from the domains table
+    if ($domain_id !== null && $domain_id !== '' && isset($DB) && !empty($DB->link)) {
+        $stmt = $DB->prepare('SELECT domain, scheme FROM domains WHERE id=? AND status=1 LIMIT 1');
+        if ($stmt) {
+            mysqli_stmt_bind_param($stmt, 's', $domain_id);
+            mysqli_stmt_execute($stmt);
+            mysqli_stmt_bind_result($stmt, $d_domain, $d_scheme);
+            if (mysqli_stmt_fetch($stmt)) {
+                mysqli_stmt_close($stmt);
+                $scheme = !empty($d_scheme) ? $d_scheme : 'https';
+                return $scheme . '://' . $d_domain . '/' . rawurlencode($uid);
+            }
+            mysqli_stmt_close($stmt);
+        }
+    }
+
+    // Fallback to global base URL
     $base = isset($public_base_url) ? rtrim(trim((string)$public_base_url), '/') : '';
     if ($base === '' || !filter_var($base, FILTER_VALIDATE_URL)) return '';
     $parts = parse_url($base);
@@ -136,10 +154,10 @@ function rate_limit($ip, $max = 20, $window = 60, $cost = 1) {
     return $allowed;
 }
 
-function short_url_result($uid, $msg, $state = 'existing') {
+function short_url_result($uid, $msg, $state = 'existing', $domain_id = null) {
     return array(
         'code' => $uid,
-        'short_url' => public_short_url($uid),
+        'short_url' => public_short_url($uid, $domain_id),
         'msg' => $msg,
         'result' => 1,
         'state' => $state,
@@ -168,7 +186,7 @@ function renew_short_expiry($DB, $hash, $expire_at) {
 }
 
 // Create or renew a short URL. Generated-code collisions are retried with the existing alphabet.
-function create_short_url($DB, $longurl, $custom = null, $expire_days = 0) {
+function create_short_url($DB, $longurl, $custom = null, $expire_days = 0, $domain_id = null) {
     $custom = $custom === null ? '' : trim((string)$custom);
     if (!validate_custom_code($custom)) return array('code' => 0, 'short_url' => '', 'msg' => '自定义短码格式错误（需 6-8 位，仅含 a-z 与 0-5）', 'result' => 10006);
     $expire_days = validate_expire_days($expire_days);
@@ -184,9 +202,9 @@ function create_short_url($DB, $longurl, $custom = null, $expire_days = 0) {
         $was_expired = !empty($existing['expire_at']) && strtotime($existing['expire_at']) !== false && strtotime($existing['expire_at']) <= time();
         if ($was_expired) {
             if (!renew_short_expiry($DB, $hash, $expire_at)) return array('code' => 0, 'short_url' => '', 'msg' => 'failure', 'result' => 10003);
-            return short_url_result($existing['uid'], 'renewed', 'renewed');
+            return short_url_result($existing['uid'], 'renewed', 'renewed', $domain_id);
         }
-        return short_url_result($existing['uid'], 'existence', 'existing');
+        return short_url_result($existing['uid'], 'existence', 'existing', $domain_id);
     }
 
     $attempts = $custom !== '' ? 1 : 12;
@@ -203,7 +221,7 @@ function create_short_url($DB, $longurl, $custom = null, $expire_days = 0) {
         $ok = mysqli_stmt_execute($stmt);
         $errno = mysqli_stmt_errno($stmt);
         mysqli_stmt_close($stmt);
-        if ($ok) return short_url_result($uid, 'success', 'created');
+        if ($ok) return short_url_result($uid, 'success', 'created', $domain_id);
         if ($errno !== 1062) return array('code' => 0, 'short_url' => '', 'msg' => 'failure', 'result' => 10003);
         $existing = find_short_by_hash($DB, $hash);
         if (is_array($existing) && !empty($existing['uid'])) {
@@ -213,9 +231,9 @@ function create_short_url($DB, $longurl, $custom = null, $expire_days = 0) {
             $was_expired = !empty($existing['expire_at']) && strtotime($existing['expire_at']) !== false && strtotime($existing['expire_at']) <= time();
             if ($was_expired) {
                 if (!renew_short_expiry($DB, $hash, $expire_at)) return array('code' => 0, 'short_url' => '', 'msg' => 'failure', 'result' => 10003);
-                return short_url_result($existing['uid'], 'renewed', 'renewed');
+                return short_url_result($existing['uid'], 'renewed', 'renewed', $domain_id);
             }
-            return short_url_result($existing['uid'], 'existence', 'existing');
+            return short_url_result($existing['uid'], 'existence', 'existing', $domain_id);
         }
         if ($custom !== '') return array('code' => 0, 'short_url' => '', 'msg' => '自定义短码已被占用', 'result' => 10007);
     }

@@ -21,9 +21,10 @@ func NewShortUrlHandler(svc service.ShortUrlService) *ShortUrlHandler {
 }
 
 type CreateShortUrlRequest struct {
-	URL        string `json:"url" binding:"required"`
-	Custom     string `json:"custom"`
-	ExpireDays int    `json:"expire_days"`
+	URL        string  `json:"url" binding:"required"`
+	Custom     string  `json:"custom"`
+	ExpireDays int     `json:"expire_days"`
+	DomainID   *uint64 `json:"domain_id"`
 }
 
 type BatchCreateRequest struct {
@@ -31,11 +32,12 @@ type BatchCreateRequest struct {
 }
 
 type UpdateShortUrlRequest struct {
-	LongURL    string `json:"long_url"`
-	Title      string `json:"title"`
-	ExpireDays *int   `json:"expire_days"`
-	Status     *int8  `json:"status"`
+	LongURL    string  `json:"long_url"`
+	Title      string  `json:"title"`
+	ExpireDays *int    `json:"expire_days"`
+	Status     *int8   `json:"status"`
 	CategoryID *uint64 `json:"category_id"`
+	DomainID   *uint64 `json:"domain_id"`
 }
 
 type BatchDeleteRequest struct {
@@ -50,7 +52,7 @@ func (h *ShortUrlHandler) Create(c *gin.Context) {
 	}
 
 	userID := c.GetUint64("user_id")
-	record, err := h.svc.Create(req.URL, req.Custom, req.ExpireDays, &userID, "admin", c.ClientIP())
+	record, err := h.svc.Create(req.URL, req.Custom, req.ExpireDays, req.DomainID, &userID, "admin", c.ClientIP())
 	if err != nil {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
@@ -113,7 +115,7 @@ func (h *ShortUrlHandler) Update(c *gin.Context) {
 		return
 	}
 
-	record, err := h.svc.Update(id, req.LongURL, req.Title, req.ExpireDays, req.Status, req.CategoryID)
+	record, err := h.svc.Update(id, req.LongURL, req.Title, req.ExpireDays, req.Status, req.CategoryID, req.DomainID)
 	if err != nil {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
@@ -171,6 +173,13 @@ func (h *ShortUrlHandler) List(c *gin.Context) {
 		v, err := strconv.ParseUint(cid, 10, 64)
 		if err == nil {
 			filters.CategoryID = &v
+		}
+	}
+
+	if did := c.Query("domain_id"); did != "" {
+		v, err := strconv.ParseUint(did, 10, 64)
+		if err == nil {
+			filters.DomainID = &v
 		}
 	}
 
