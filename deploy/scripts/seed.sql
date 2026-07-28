@@ -1,6 +1,6 @@
 -- Seed data for dwz-admin
--- Initial roles, permissions, and super_admin user
--- Password for admin: admin123 (bcrypt hash)
+-- Initial roles, permissions, and a placeholder admin user.
+-- IMPORTANT: Replace the bcrypt hash in the INSERT below before deploying.
 
 USE dwz_admin;
 
@@ -57,10 +57,13 @@ INSERT INTO role_permissions (role_id, permission_id)
 SELECT 4, id FROM permissions
 WHERE action = 'read';
 
--- Default admin user (password: admin123)
--- bcrypt hash of "admin123" with cost 10
+-- Default admin user
+-- IMPORTANT: The password hash below is a PLACEHOLDER.
+-- Replace it with `php -r "echo password_hash('your-password', PASSWORD_BCRYPT);"` or
+-- `go run ./cmd/generate-hash` before deploying to production.
+-- The default hash corresponds to "admin123" and MUST be changed after first login.
 INSERT INTO users (username, email, password_hash, display_name, status) VALUES
-('admin', 'admin@localhost', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '系统管理员', 1);
+('admin', 'admin@localhost', 'REPLACE_WITH_YOUR_BCRYPT_HASH', '系统管理员', 1);
 
 -- Assign super_admin role to admin user
 INSERT INTO user_roles (user_id, role_id) VALUES (1, 1);

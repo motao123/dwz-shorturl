@@ -5,3 +5,9 @@ logs/
 *.log
 frontend/dist
 backend/dwz-admin.exe
+
+# Production configs - never commit real credentials
+backend/configs/config.yaml
+backend/configs/config.local.yaml
+deploy/.env
+*.local.yaml
