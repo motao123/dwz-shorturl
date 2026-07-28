@@ -210,7 +210,7 @@ func initDB(cfg *config.Config, zapLogger *zap.Logger) *gorm.DB {
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	// NOTE: AutoMigrate is disabled. Use the SQL migration files in
-	// backend/migrations/ instead (001_init.sql, 002_migrate_wjoy_log.sql).
+	// backend/migrations/ instead (schema.sql, migrate_wjoy_log.sql).
 	// This prevents GORM from altering columns/indexes that were carefully
 	// defined in the hand-written DDL.
 

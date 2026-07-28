@@ -1,6 +1,6 @@
 -- Fresh-install schema. This file is intentionally non-destructive:
 -- existing tables and rows are never dropped or replaced.
--- Existing installations should run migrations/001_legacy_schema.php instead.
+-- Existing installations should run migrations/legacy_schema.php instead.
 
 CREATE TABLE IF NOT EXISTS `wjoy_log` (
   `Id` int unsigned NOT NULL AUTO_INCREMENT,

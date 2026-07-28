@@ -1,4 +1,4 @@
--- 001_init.sql
+-- schema.sql
 -- Complete schema for dwz-admin short URL management system
 
 CREATE TABLE IF NOT EXISTS `users` (
