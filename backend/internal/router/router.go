@@ -118,8 +118,6 @@ func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, err
 		}
 	}
 
-	// Health check
-	engine.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
-	})
+	// Health check (detailed)
+	engine.GET("/health", h.Redirect.Health)
 }

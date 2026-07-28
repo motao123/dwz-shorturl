@@ -11,7 +11,6 @@ import (
 
 	"dwz-admin/internal/config"
 	"dwz-admin/internal/handler"
-	"dwz-admin/internal/model"
 	"dwz-admin/internal/repository"
 	"dwz-admin/internal/router"
 	"dwz-admin/internal/service"
@@ -47,6 +46,13 @@ func main() {
 	// Initialize Redis
 	rdb := initRedis(cfg)
 
+	// Initialize click event queue (buffered channel + batch worker)
+	clickQueue := handler.NewClickQueue(db, zapLogger)
+	zapLogger.Info("click queue initialized", zap.Int("capacity", 2048))
+
+	// Initialize cron scheduler
+	cronSvc := service.NewCronService(db, zapLogger)
+
 	// Initialize repositories
 	userRepo := repository.NewUserRepo(db)
 	roleRepo := repository.NewRoleRepo(db)
@@ -57,7 +63,7 @@ func main() {
 
 	// Initialize services
 	authSvc := service.NewAuthService(userRepo, roleRepo)
-	shortUrlSvc := service.NewShortUrlService(shortUrlRepo, rdb)
+	shortUrlSvc := service.NewShortUrlService(shortUrlRepo, rdb, db)
 	userSvc := service.NewUserService(userRepo)
 	roleSvc := service.NewRoleService(roleRepo)
 	statsSvc := service.NewStatsService(shortUrlRepo, db)
@@ -75,7 +81,7 @@ func main() {
 		Config:   handler.NewConfigHandler(configSvc),
 		Audit:    handler.NewAuditHandler(auditSvc),
 		ApiKey:   handler.NewApiKeyHandler(apiKeySvc),
-		Redirect: handler.NewRedirectHandler(shortUrlSvc, rdb, db, zapLogger),
+		Redirect: handler.NewRedirectHandler(shortUrlSvc, rdb, db, zapLogger, clickQueue),
 	}
 
 	// Permission loader function for RBAC middleware
@@ -95,6 +101,12 @@ func main() {
 		Handler: engine,
 	}
 
+	// Start cron scheduler
+	cronSvc.Start()
+	defer func() {
+		cronSvc.Stop()
+	}()
+
 	// Start server in goroutine
 	go func() {
 		zapLogger.Info("server starting", zap.String("addr", addr))
@@ -109,14 +121,32 @@ func main() {
 	<-quit
 
 	zapLogger.Info("shutting down server...")
+
+	// 1. Stop HTTP server (no new requests)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
 	if err := srv.Shutdown(ctx); err != nil {
 		zapLogger.Fatal("server forced to shutdown", zap.Error(err))
 	}
 
-	zapLogger.Info("server exited")
+	// 2. Stop click queue (flush remaining events)
+	zapLogger.Info("flushing click queue...")
+	clickQueue.Stop()
+	zapLogger.Info("click queue stopped")
+
+	// 3. Close Redis
+	if err := rdb.Close(); err != nil {
+		zapLogger.Warn("failed to close redis", zap.Error(err))
+	}
+
+	// 4. Close DB
+	if sqlDB, err := db.DB(); err == nil {
+		if err := sqlDB.Close(); err != nil {
+			zapLogger.Warn("failed to close database", zap.Error(err))
+		}
+	}
+
+	zapLogger.Info("server exited gracefully")
 }
 
 func initLogger(level, file string) *zap.Logger {
@@ -179,21 +209,10 @@ func initDB(cfg *config.Config, zapLogger *zap.Logger) *gorm.DB {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	// Auto-migrate tables (safe for development; production should use migrations)
-	if err := db.AutoMigrate(
-		&model.User{},
-		&model.Role{},
-		&model.Permission{},
-		&model.RolePermission{},
-		&model.UserRole{},
-		&model.ShortUrl{},
-		&model.UrlCategory{},
-		&model.AuditLog{},
-		&model.SystemConfig{},
-		&model.ApiKey{},
-	); err != nil {
-		zapLogger.Warn("auto-migrate failed (may already exist)", zap.Error(err))
-	}
+	// NOTE: AutoMigrate is disabled. Use the SQL migration files in
+	// backend/migrations/ instead (001_init.sql, 002_migrate_wjoy_log.sql).
+	// This prevents GORM from altering columns/indexes that were carefully
+	// defined in the hand-written DDL.
 
 	zapLogger.Info("database connected",
 		zap.String("host", cfg.Database.Host),
