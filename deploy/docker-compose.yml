@@ -57,8 +57,8 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ../backend/migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
-      - ./scripts/seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+      - ../backend/migrations/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - ./scripts/seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --innodb-buffer-pool-size=256M
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root_secret_2026}"]

@@ -131,7 +131,7 @@ function importSchema($link, $sqlFile)
 }
 
 if (file_exists($configFile)) {
-    failInstall('检测到 config.php 已存在，安装已硬停止。现有站点升级请运行 php migrations/001_legacy_schema.php。');
+    failInstall('检测到 config.php 已存在，安装已硬停止。现有站点升级请运行 php migrations/legacy_schema.php。');
 }
 if (!extension_loaded('mysqli')) {
     failInstall('缺少 mysqli PHP 扩展');
@@ -169,7 +169,7 @@ if (tableExists($link, $database, 'wjoy_log') && !schemaIsCompatible($link, $dat
     mysqli_close($link);
     failInstall(
         "检测到现有但不兼容的 wjoy_log，安装已停止且未写入 config.php。\n"
-        . "先运行：php migrations/001_legacy_schema.php --host=" . escapeshellarg($host)
+        . "先运行：php migrations/legacy_schema.php --host=" . escapeshellarg($host)
         . " --port={$port} --user=" . escapeshellarg($user) . " --pwd=... --db=" . escapeshellarg($database)
         . "\n处理迁移报告中的重复/空值后重跑迁移，再重新运行 setup.php。"
     );

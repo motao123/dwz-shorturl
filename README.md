@@ -96,13 +96,13 @@ $stats_token = '';
 3. 使用与现有站点匹配的迁移脚本先预览：
 
    ```bash
-   php migrations/001_legacy_schema.php --dry-run
+   php migrations/legacy_schema.php --dry-run
    ```
 
 4. 检查报告无误后执行：
 
    ```bash
-   php migrations/001_legacy_schema.php
+   php migrations/legacy_schema.php
    ```
 
 5. 处理脚本报告的重复/空值冲突，必要时再次运行迁移，确认所需唯一索引已创建。

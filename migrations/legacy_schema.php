@@ -3,9 +3,9 @@
  * Non-destructive legacy schema migration for dwz-shorturl.
  *
  * Run from the project root:
- *   php migrations/001_legacy_schema.php
+ *   php migrations/legacy_schema.php
  * Preview without writes:
- *   php migrations/001_legacy_schema.php --dry-run
+ *   php migrations/legacy_schema.php --dry-run
  *
  * The script reads the existing config.php, adds missing columns cautiously,
  * normalizes valid legacy base64 URLs to plain URLs, fills url_hash, and adds
