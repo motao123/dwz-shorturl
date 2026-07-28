@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -44,10 +45,11 @@ type ShortUrlService interface {
 type shortUrlService struct {
 	repo  repository.ShortUrlRepo
 	rdb   *redis.Client
+	db    *gorm.DB // raw DB for legacy table fallback queries
 }
 
-func NewShortUrlService(repo repository.ShortUrlRepo, rdb *redis.Client) ShortUrlService {
-	return &shortUrlService{repo: repo, rdb: rdb}
+func NewShortUrlService(repo repository.ShortUrlRepo, rdb *redis.Client, db *gorm.DB) ShortUrlService {
+	return &shortUrlService{repo: repo, rdb: rdb, db: db}
 }
 
 func (s *shortUrlService) Create(longURL, custom string, expireDays int, createdBy *uint64, source, ip string) (*model.ShortUrl, error) {
@@ -268,13 +270,18 @@ func (s *shortUrlService) ResolveByUID(uid string) (*model.ShortUrl, error) {
 		return record, nil
 	}
 
-	// Cache miss - query DB
+	// Cache miss - query short_urls table first
 	record, err := s.repo.FindByUID(uid)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("short url not found")
+			// Fallback: try legacy wjoy_log table (PHP-era data not yet migrated)
+			record = s.resolveFromLegacy(uid)
+			if record == nil {
+				return nil, errors.New("short url not found")
+			}
+		} else {
+			return nil, err
 		}
-		return nil, err
 	}
 
 	// Check expiry
@@ -290,6 +297,48 @@ func (s *shortUrlService) ResolveByUID(uid string) (*model.ShortUrl, error) {
 	s.rdb.Set(ctx, cacheKey, record.LongURL, time.Hour)
 
 	return record, nil
+}
+
+// resolveFromLegacy queries the PHP-era wjoy_log table as a fallback.
+// Columns: uid, longurl (no underscore), expire_at, clicks.
+func (s *shortUrlService) resolveFromLegacy(uid string) *model.ShortUrl {
+	if s.db == nil {
+		return nil
+	}
+
+	type legacyRow struct {
+		LongURL  string `gorm:"column:longurl"`
+		ExpireAt *time.Time
+	}
+	var row legacyRow
+	// Check if wjoy_log table exists before querying (avoids noise on fresh installs)
+	var tableExists int64
+	s.db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'wjoy_log'").Scan(&tableExists)
+	if tableExists == 0 {
+		return nil
+	}
+
+	err := s.db.Table("wjoy_log").
+		Select("longurl, expire_at").
+		Where("uid = ?", uid).
+		Limit(1).
+		Scan(&row).Error
+	if err != nil || row.LongURL == "" {
+		return nil
+	}
+
+	// Handle base64-encoded legacy URLs
+	if dec, decErr := base64decodeSafe(row.LongURL); decErr == nil && dec != "" {
+		row.LongURL = dec
+	}
+
+	return &model.ShortUrl{
+		UID:      uid,
+		LongURL:  row.LongURL,
+		Status:   1,
+		ExpireAt: row.ExpireAt,
+		Source:   "legacy",
+	}
 }
 
 func (s *shortUrlService) invalidateCache(uid string) {
@@ -388,6 +437,20 @@ func md5Hash(input string) string {
 
 func isDuplicateError(err error) bool {
 	return strings.Contains(err.Error(), "Duplicate entry") || strings.Contains(err.Error(), "1062")
+}
+
+// base64decodeSafe decodes a base64 string and returns the decoded value
+// only if it looks like a valid http(s) URL. Used for legacy wjoy_log rows.
+func base64decodeSafe(s string) (string, error) {
+	dec, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return "", err
+	}
+	result := string(dec)
+	if !strings.HasPrefix(result, "http://") && !strings.HasPrefix(result, "https://") {
+		return "", fmt.Errorf("not a valid URL")
+	}
+	return result, nil
 }
 
 // PublicShortURL builds the full public short URL from a uid.
