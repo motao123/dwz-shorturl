@@ -284,22 +284,17 @@ onMounted(loadData)
               <div v-if="row.name" class="row-sub">{{ row.name }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="协议" width="90" align="center">
+          <el-table-column label="协议" width="80" align="center">
             <template #default="{ row }">
               <el-tag size="small" effect="plain" round>{{ row.scheme }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="备注" min-width="120">
-            <template #default="{ row }">
-              <span class="row-sub">{{ row.name || '-' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="项目" min-width="120">
+          <el-table-column label="项目" min-width="100">
             <template #default="{ row }">
               <span class="row-sub">{{ row.project || '-' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="90" align="center">
+          <el-table-column label="状态" width="80" align="center">
             <template #default="{ row }">
               <el-tag
                 :type="STATUS_MAP[row.status as 0 | 1 | 2]?.type ?? 'info'"
@@ -311,36 +306,34 @@ onMounted(loadData)
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="优先级" width="90" align="center">
+          <el-table-column label="优先级" width="70" align="center">
             <template #default="{ row }">
               <span class="mono priority">{{ row.priority }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="DNS" width="100" align="center">
+          <el-table-column label="健康" width="120" align="center">
             <template #default="{ row }">
-              <el-tag
-                :type="CHECK_MAP[row.dns_status]?.type ?? 'info'"
-                size="small"
-                effect="plain"
-                round
-              >
-                {{ CHECK_MAP[row.dns_status]?.label ?? row.dns_status ?? '-' }}
-              </el-tag>
+              <div class="health-cell">
+                <el-tag
+                  :type="CHECK_MAP[row.dns_status]?.type ?? 'info'"
+                  size="small"
+                  effect="plain"
+                  round
+                >
+                  DNS {{ CHECK_MAP[row.dns_status]?.label ?? '-' }}
+                </el-tag>
+                <el-tag
+                  :type="CHECK_MAP[row.ssl_status]?.type ?? 'info'"
+                  size="small"
+                  effect="plain"
+                  round
+                >
+                  SSL {{ CHECK_MAP[row.ssl_status]?.label ?? '-' }}
+                </el-tag>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column label="SSL" width="100" align="center">
-            <template #default="{ row }">
-              <el-tag
-                :type="CHECK_MAP[row.ssl_status]?.type ?? 'info'"
-                size="small"
-                effect="plain"
-                round
-              >
-                {{ CHECK_MAP[row.ssl_status]?.label ?? row.ssl_status ?? '-' }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="链接数" width="90" align="right">
+          <el-table-column label="链接数" width="80" align="right">
             <template #default="{ row }">
               <span class="mono clicks">{{ row.link_count ?? 0 }}</span>
             </template>
@@ -393,7 +386,7 @@ onMounted(loadData)
 
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="协议" prop="scheme">
+            <el-form-item label="协议" prop="scheme" required>
               <el-select v-model="form.scheme" style="width: 100%">
                 <el-option label="https" value="https" />
                 <el-option label="http" value="http" />
@@ -471,6 +464,13 @@ onMounted(loadData)
   font-weight: 700;
   color: var(--dwz-ink);
   font-variant-numeric: tabular-nums;
+}
+
+.health-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
 }
 
 /* 行内迷你操作按钮 */

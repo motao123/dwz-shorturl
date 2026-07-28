@@ -319,6 +319,9 @@ onMounted(reload)
 
 .chart-card {
   padding: 18px 20px 12px;
+}
+
+.chart-card:not(:last-child) {
   margin-bottom: 16px;
 }
 

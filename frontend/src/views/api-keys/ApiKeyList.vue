@@ -300,7 +300,7 @@ onMounted(loadData)
     </el-dialog>
 
     <!-- 统计弹窗 -->
-    <el-dialog v-model="statsVisible" :title="`调用统计 · ${statsKeyName}`" width="460px">
+    <el-dialog v-model="statsVisible" :title="`调用统计 · ${statsKeyName}`" width="460px" :close-on-click-modal="false" destroy-on-close>
       <div v-loading="statsLoading" class="key-stats">
         <template v-if="statsData">
           <div class="key-stats__row">
