@@ -15,9 +15,10 @@ if (!file_exists(__DIR__ . '/config.php')) {
 }
 
 require __DIR__ . '/config.php';
+define('IN_CRONLITE', true);
 require SYSTEM_ROOT . 'db.class.php';
 
-$DB = new DB();
+$DB = new DB($host, $user, $pwd, $dbname, $port ?? 3306);
 if (empty($DB->link)) {
     http_response_code(503);
     echo '<?xml version="1.0" encoding="UTF-8"?><urlset/>';
