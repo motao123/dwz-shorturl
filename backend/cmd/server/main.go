@@ -26,9 +26,13 @@ import (
 
 func main() {
 	// Load configuration
-	configPath := "configs/config.yaml"
+	configPath := "configs/config.yaml" // production config (gitignored)
 	if envPath := os.Getenv("CONFIG_PATH"); envPath != "" {
 		configPath = envPath
+	}
+	// Fallback to example config if production config doesn't exist
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		configPath = "configs/config.example.yaml"
 	}
 	if err := config.Init(configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
