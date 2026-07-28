@@ -5,6 +5,11 @@ Options -Indexes
     Require all denied
 </FilesMatch>
 
+# Sitemap: serve sitemap.xml via sitemap.php
+<IfModule mod_rewrite.c>
+    RewriteRule ^sitemap\.xml$ sitemap.php [L]
+</IfModule>
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
 

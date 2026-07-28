@@ -1,0 +1,19 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /admin/api/
+Disallow: /api.php
+Disallow: /batch.php
+Disallow: /do.php
+Disallow: /stats.php
+Disallow: /config.php
+Disallow: /config.sample.php
+Disallow: /setup.php
+Disallow: /install.sql
+Disallow: /includes/
+Disallow: /migrations/
+Disallow: /logs/
+Disallow: /docs/
+Disallow: /assets/app.js
+
+Sitemap: https://1.xk7.cn/sitemap.xml
