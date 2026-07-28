@@ -226,7 +226,29 @@ $public_base_url = 'https://example.com/short';
 - `assets/app.js`
 - `assets/qrcode.min.js`
 
-页面使用相对 URL，因此根目录和子目录部署均可工作。`index.html` 当前通过 `?v=2.4.0` 引用 CSS、JavaScript 与二维码脚本。Nginx 示例会缓存静态资源 7 天；更新资源后应同步提升查询版本（例如 `v=2.4.1`），并按需刷新 CDN/反向代理缓存。若部署后仍看到旧界面，先确认新 `index.html` 已生效，再清理边缘缓存或执行浏览器强制刷新。
+页面使用相对 URL，因此根目录和子目录部署均可工作。`index.html` 当前通过 `?v=2.5.0` 引用 CSS、JavaScript 与二维码脚本。Nginx 示例会缓存静态资源 7 天；更新资源后应同步提升查询版本（例如 `v=2.5.1`），并按需刷新 CDN/反向代理缓存。若部署后仍看到旧界面，先确认新 `index.html` 已生效，再清理边缘缓存或执行浏览器强制刷新。
+
+## SEO 与站长统计
+
+网站已内置以下 SEO 与统计能力：
+
+- **`robots.txt`** - 允许搜索引擎收录首页与短链，屏蔽 `/admin/`、`/api.php`、`/includes/` 等敏感路径
+- **`sitemap.php`** - 动态生成 `sitemap.xml`，包含首页、API 文档页和最近 500 条有效短链
+- **Open Graph / Twitter Card** - 首页含完整社交分享元数据
+- **JSON-LD 结构化数据** - `WebApplication` 类型，含功能列表与免费标识
+- **Canonical** - 首页 `<link rel="canonical">` 指向 `https://1.xk7.cn/`
+- **百度统计** - `index.html` 底部预埋百度统计代码（需替换 `PLACEHOLDER_BAIDU_TONGJI_ID`）
+- **Google Analytics** - 预埋 GA4 代码（需替换 `G-PLACEHOLDER`）
+- **站长平台验证** - 预埋百度/Google/Bing 三平台 meta 验证标签（需替换各自的 `PLACEHOLDER`）
+
+### 启用站长统计
+
+1. **百度统计**：前往 [tongji.baidu.com](https://tongji.baidu.com) 添加站点，获取统计代码中的 HM ID，替换 `index.html` 中的 `PLACEHOLDER_BAIDU_TONGJI_ID`
+2. **Google Analytics**：前往 [analytics.google.com](https://analytics.google.com) 创建 GA4 数据流，获取 Measurement ID（`G-XXXXXXX`），替换 `index.html` 中的 `G-PLACEHOLDER`（两处）
+3. **百度站长**：前往 [ziyuan.baidu.com](https://ziyuan.baidu.com) 添加站点 `https://1.xk7.cn`，选择 HTML 标签验证，将 `codeva-PLACEHOLDER` 替换为实际验证码
+4. **Google Search Console**：前往 [search.google.com/search-console](https://search.google.com/search-console) 添加资源，选择 HTML 标签验证，将 `PLACEHOLDER` 替换为实际验证码
+5. **Bing Webmaster**：前往 [bing.com/webmasters](https://www.bing.com/webmasters) 添加站点，选择 Meta Tag 验证，将 `PLACEHOLDER` 替换为实际验证码
+6. **提交 Sitemap**：在各站长平台提交 `https://1.xk7.cn/sitemap.xml`
 
 ## API 文档
 
