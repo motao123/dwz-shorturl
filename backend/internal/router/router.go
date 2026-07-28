@@ -18,6 +18,7 @@ type Handlers struct {
 	Audit    *handler.AuditHandler
 	ApiKey   *handler.ApiKeyHandler
 	Redirect *handler.RedirectHandler
+	Domain   *handler.DomainHandler
 }
 
 func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, error), logger *zap.Logger) {
@@ -34,6 +35,9 @@ func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, err
 	{
 		// Public auth routes
 		admin.POST("/auth/login", h.Auth.Login)
+
+		// Public domain routes (no auth required) - registered before /:id to avoid route conflict
+		admin.GET("/domains/active", h.Domain.Active)
 
 		// Authenticated routes
 		auth := admin.Group("")
@@ -56,6 +60,18 @@ func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, err
 				shortUrls.POST("/batch-delete", middleware.RequirePermission("short_urls", "delete"), h.ShortUrl.BatchDelete)
 				shortUrls.PUT("/:id", middleware.RequirePermission("short_urls", "update"), h.ShortUrl.Update)
 				shortUrls.DELETE("/:id", middleware.RequirePermission("short_urls", "delete"), h.ShortUrl.Delete)
+			}
+
+			// Domains
+			domains := auth.Group("/domains")
+			{
+				domains.GET("", middleware.RequirePermission("domains", "read"), h.Domain.List)
+				domains.GET("/:id", middleware.RequirePermission("domains", "read"), h.Domain.GetByID)
+				domains.POST("", middleware.RequirePermission("domains", "create"), h.Domain.Create)
+				domains.PUT("/:id", middleware.RequirePermission("domains", "update"), h.Domain.Update)
+				domains.DELETE("/:id", middleware.RequirePermission("domains", "delete"), h.Domain.Delete)
+				domains.POST("/:id/check", middleware.RequirePermission("domains", "update"), h.Domain.Check)
+				domains.PUT("/batch-status", middleware.RequirePermission("domains", "update"), h.Domain.BatchStatus)
 			}
 
 			// Stats

@@ -11,6 +11,7 @@ import {
   Setting,
   Document,
   Key,
+  Connection,
   Expand,
   Fold,
   ArrowDown,
@@ -35,6 +36,7 @@ interface MenuEntry {
 const menuEntries: MenuEntry[] = [
   { path: '/dashboard', title: '仪表盘', icon: Odometer, perm: 'stats.read' },
   { path: '/short-urls', title: '短链管理', icon: Link, perm: 'short_urls.read' },
+  { path: '/domains', title: '域名管理', icon: Connection, perm: 'domains.read' },
   { path: '/stats', title: '统计分析', icon: TrendCharts, perm: 'stats.read' },
   { path: '/users', title: '用户管理', icon: User, perm: 'users.read' },
   { path: '/roles', title: '角色管理', icon: Stamp, perm: 'roles.read' },

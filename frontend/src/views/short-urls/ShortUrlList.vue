@@ -293,7 +293,7 @@ onMounted(loadData)
           <el-table-column label="短码" min-width="150">
             <template #default="{ row }">
               <div class="uid-cell">
-                <a :href="buildShortUrl(row.uid)" target="_blank" rel="noopener" class="uid mono">
+                <a :href="row.short_url || buildShortUrl(row.uid)" target="_blank" rel="noopener" class="uid mono">
                   {{ row.uid }}
                 </a>
                 <el-tooltip content="复制短链" placement="top">

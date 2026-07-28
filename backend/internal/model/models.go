@@ -71,6 +71,7 @@ type ShortUrl struct {
 	URLHash    string         `gorm:"size:32;uniqueIndex:uk_url_hash;not null" json:"url_hash"`
 	Title      string         `gorm:"size:255" json:"title"`
 	CategoryID *uint64        `json:"category_id"`
+	DomainID   *uint64        `gorm:"index" json:"domain_id"`
 	Clicks     uint32         `gorm:"default:0;not null" json:"clicks"`
 	Status     int8           `gorm:"default:1;not null" json:"status"`
 	ExpireAt   *time.Time     `json:"expire_at"`

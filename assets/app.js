@@ -19,6 +19,8 @@
   var batchList = document.getElementById('batch-list');
   var batchSummary = document.getElementById('batch-summary');
   var statusBox = document.getElementById('status');
+  var domainSelect = document.getElementById('domainSelect');
+  var domainField = document.getElementById('domain-field');
   var dialogBackdrop = document.getElementById('result-wrap');
   var dialog = dialogBackdrop.querySelector('[role="dialog"]');
   var dialogClose = document.getElementById('dialog-close');
@@ -143,7 +145,8 @@
     }
 
     urlInput.value = normalized;
-    return { url: normalized, custom: custom, expire: expireSelect.value };
+    var domain = domainSelect.value || '';
+    return { url: normalized, custom: custom, expire: expireSelect.value, domain: domain };
   }
 
   function getFocusableElements() {
@@ -322,7 +325,7 @@
     batchInput.setAttribute('aria-invalid', 'false');
     setBusy(batchButton, true, '生成中…', '批量生成');
     try {
-      var payload = await postForm('batch.php', { urls: lines.join('\n') });
+      var payload = await postForm('batch.php', { urls: lines.join('\n'), domain: domainSelect.value || '' });
       var items = normalizeBatchPayload(payload);
       if (!items.length) throw new Error(readError(payload, '服务未返回批量结果'));
       renderBatch(items);
@@ -405,4 +408,30 @@
   });
 
   updateBatchCount();
+
+  // Load available domains for the domain selector
+  async function loadDomains() {
+    try {
+      var response = await fetch(endpoint('admin/api/domains/active'), {
+        method: 'GET',
+        credentials: 'same-origin',
+        signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined
+      });
+      if (!response.ok) return;
+      var domains = await response.json();
+      var list = Array.isArray(domains) ? domains : (domains && domains.data ? domains.data : []);
+      if (!list.length) return;
+      list.forEach(function (d) {
+        var opt = document.createElement('option');
+        opt.value = d.id;
+        opt.textContent = (d.scheme || 'https') + '://' + d.domain;
+        if (d.name) opt.textContent += ' (' + d.name + ')';
+        domainSelect.appendChild(opt);
+      });
+      domainField.hidden = false;
+    } catch (e) {
+      // Domains API unavailable, keep selector hidden
+    }
+  }
+  loadDomains();
 }());
