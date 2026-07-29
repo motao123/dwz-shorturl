@@ -99,8 +99,8 @@ func (r *roleRepo) SetPermissions(roleID uint64, permIDs []uint64) error {
 func (r *roleRepo) GetUserPermissions(userID uint64) ([]model.Permission, error) {
 	var perms []model.Permission
 	err := r.db.
-		Joins("JOIN user_roles ON user_roles.role_id = role_permissions.role_id").
 		Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").
+		Joins("JOIN user_roles ON user_roles.role_id = role_permissions.role_id").
 		Where("user_roles.user_id = ?", userID).
 		Distinct().
 		Find(&perms).Error
