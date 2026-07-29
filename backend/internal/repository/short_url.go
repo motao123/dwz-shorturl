@@ -25,10 +25,11 @@ type ShortUrlRepo interface {
 	FindByUID(uid string) (*model.ShortUrl, error)
 	FindByHash(hash string) (*model.ShortUrl, error)
 	FindByID(id uint64) (*model.ShortUrl, error)
-	Create(url *model.ShortUrl) error
+	CreateWithDomainCount(url *model.ShortUrl) error
 	Update(url *model.ShortUrl) error
-	SoftDelete(id uint64) error
-	BatchDelete(ids []uint64) error
+	UpdateWithDomainCount(url *model.ShortUrl, oldDomainID *uint64) error
+	SoftDeleteWithDomainCount(url *model.ShortUrl) error
+	BatchDeleteWithDomainCount(urls []model.ShortUrl) error
 	List(page, perPage int, filters ShortUrlFilters) ([]model.ShortUrl, int64, error)
 	Count() (int64, error)
 	CountByStatus(status int8) (int64, error)
@@ -74,20 +75,133 @@ func (r *shortUrlRepo) FindByID(id uint64) (*model.ShortUrl, error) {
 	return &url, nil
 }
 
-func (r *shortUrlRepo) Create(url *model.ShortUrl) error {
-	return r.db.Create(url).Error
+// CreateWithDomainCount atomically creates a short URL and increments the
+// selected domain's derived link_count. A failed count update rolls back the
+// short URL insert so both tables remain consistent.
+func (r *shortUrlRepo) CreateWithDomainCount(url *model.ShortUrl) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(url).Error; err != nil {
+			return err
+		}
+		if url.DomainID == nil {
+			return nil
+		}
+		result := tx.Model(&model.Domain{}).
+			Where("id = ?", *url.DomainID).
+			UpdateColumn("link_count", gorm.Expr("link_count + 1"))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }
 
 func (r *shortUrlRepo) Update(url *model.ShortUrl) error {
 	return r.db.Save(url).Error
 }
 
-func (r *shortUrlRepo) SoftDelete(id uint64) error {
-	return r.db.Delete(&model.ShortUrl{}, id).Error
+// UpdateWithDomainCount atomically moves a short URL between domains and
+// adjusts both derived counters. Passing equal old/new domain IDs only saves
+// the record without touching counters.
+func (r *shortUrlRepo) UpdateWithDomainCount(url *model.ShortUrl, oldDomainID *uint64) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(url).Error; err != nil {
+			return err
+		}
+		if sameUint64Ptr(oldDomainID, url.DomainID) {
+			return nil
+		}
+		if oldDomainID != nil {
+			result := tx.Model(&model.Domain{}).
+				Where("id = ?", *oldDomainID).
+				UpdateColumn("link_count", gorm.Expr("CASE WHEN link_count > 0 THEN link_count - 1 ELSE 0 END"))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+		if url.DomainID != nil {
+			result := tx.Model(&model.Domain{}).
+				Where("id = ?", *url.DomainID).
+				UpdateColumn("link_count", gorm.Expr("link_count + 1"))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+		return nil
+	})
 }
 
-func (r *shortUrlRepo) BatchDelete(ids []uint64) error {
-	return r.db.Delete(&model.ShortUrl{}, ids).Error
+// SoftDeleteWithDomainCount atomically soft-deletes one short URL and
+// decrements its domain counter.
+func (r *shortUrlRepo) SoftDeleteWithDomainCount(url *model.ShortUrl) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Delete(&model.ShortUrl{}, url.ID)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		if url.DomainID == nil {
+			return nil
+		}
+		result = tx.Model(&model.Domain{}).
+			Where("id = ?", *url.DomainID).
+			UpdateColumn("link_count", gorm.Expr("CASE WHEN link_count > 0 THEN link_count - 1 ELSE 0 END"))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+}
+
+// BatchDeleteWithDomainCount atomically soft-deletes a batch and decrements
+// each affected domain by the exact number of deleted links.
+func (r *shortUrlRepo) BatchDeleteWithDomainCount(urls []model.ShortUrl) error {
+	if len(urls) == 0 {
+		return nil
+	}
+	ids := make([]uint64, 0, len(urls))
+	domainCounts := make(map[uint64]int)
+	for _, url := range urls {
+		ids = append(ids, url.ID)
+		if url.DomainID != nil {
+			domainCounts[*url.DomainID]++
+		}
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Delete(&model.ShortUrl{}, ids)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != int64(len(ids)) {
+			return gorm.ErrRecordNotFound
+		}
+		for domainID, count := range domainCounts {
+			result = tx.Model(&model.Domain{}).
+				Where("id = ?", domainID).
+				UpdateColumn("link_count", gorm.Expr("CASE WHEN link_count >= ? THEN link_count - ? ELSE 0 END", count, count))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+		return nil
+	})
 }
 
 func (r *shortUrlRepo) List(page, perPage int, filters ShortUrlFilters) ([]model.ShortUrl, int64, error) {
@@ -142,6 +256,13 @@ func (r *shortUrlRepo) List(page, perPage int, filters ShortUrlFilters) ([]model
 	}
 
 	return urls, total, nil
+}
+
+func sameUint64Ptr(a, b *uint64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func (r *shortUrlRepo) Count() (int64, error) {

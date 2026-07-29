@@ -28,7 +28,8 @@ type CreateShortUrlRequest struct {
 }
 
 type BatchCreateRequest struct {
-	URLs []string `json:"urls" binding:"required,min=1,max=100"`
+	URLs     []string `json:"urls" binding:"required,min=1,max=100"`
+	DomainID *uint64  `json:"domain_id"`
 }
 
 type UpdateShortUrlRequest struct {
@@ -69,7 +70,7 @@ func (h *ShortUrlHandler) BatchCreate(c *gin.Context) {
 	}
 
 	userID := c.GetUint64("user_id")
-	results, errs := h.svc.BatchCreate(req.URLs, &userID, c.ClientIP())
+	results, errs := h.svc.BatchCreate(req.URLs, req.DomainID, &userID, c.ClientIP())
 
 	// Build error list
 	errList := make([]string, 0)

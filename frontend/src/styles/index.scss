@@ -182,8 +182,27 @@ body {
 
 /* ---------- 弹窗 ---------- */
 
+.el-overlay {
+  z-index: 2000;
+}
+
+.el-overlay-dialog {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
 .el-dialog {
   border-radius: 14px;
+  margin-top: 8vh !important;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.el-dialog__body {
+  overflow-y: auto;
+  flex: 1;
 }
 
 .el-dialog__header {
@@ -204,6 +223,14 @@ body {
 .el-dialog__footer {
   border-top: 1px solid var(--dwz-line);
   padding: 12px 20px;
+}
+
+@media (max-width: 640px) {
+  .el-dialog {
+    width: calc(100% - 24px) !important;
+    margin-top: 12px !important;
+    max-height: calc(100vh - 24px);
+  }
 }
 
 /* ---------- NProgress 品牌化 ---------- */

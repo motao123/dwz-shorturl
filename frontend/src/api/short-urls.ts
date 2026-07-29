@@ -46,12 +46,6 @@ export interface ShortUrlPayload {
   domain_id?: number | null
 }
 
-export interface BatchCreateItem {
-  long_url: string
-  title?: string
-  expire_days?: number | null
-}
-
 /** 分页列表 */
 export function listShortUrls(params: ShortUrlQuery): Promise<PageResult<ShortUrl>> {
   return request.get<PageResult<ShortUrl>>('/short-urls', { params })
@@ -82,9 +76,18 @@ export function batchRemoveShortUrls(ids: number[]): Promise<{ deleted: number }
   return request.post<{ deleted: number }>('/short-urls/batch-delete', { ids })
 }
 
+export interface BatchCreateResult {
+  results: ShortUrl[]
+  errors: string[]
+  total: number
+}
+
 /** 批量创建 */
-export function batchCreateShortUrls(items: BatchCreateItem[]): Promise<{ created: number }> {
-  return request.post<{ created: number }>('/short-urls/batch-create', { items })
+export function batchCreateShortUrls(urls: string[], domainId?: number | null): Promise<BatchCreateResult> {
+  return request.post<BatchCreateResult>('/short-urls/batch-create', {
+    urls,
+    domain_id: domainId || undefined
+  })
 }
 
 /** 导出 CSV（二进制流） */

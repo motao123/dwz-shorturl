@@ -53,6 +53,27 @@ CREATE TABLE IF NOT EXISTS `user_roles` (
   KEY `idx_role` (`role_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Domain pool entries are declared before short_urls because short links may
+-- reference them through domain_id.
+CREATE TABLE IF NOT EXISTS `domains` (
+  `id`          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  `domain`      VARCHAR(128) NOT NULL COMMENT 'domain name e.g. 1.xk7.cn',
+  `scheme`      VARCHAR(8)   NOT NULL DEFAULT 'https' COMMENT 'http or https',
+  `name`        VARCHAR(64)  NULL COMMENT 'display name',
+  `project`     VARCHAR(64)  NULL COMMENT 'owning project / group',
+  `status`      TINYINT      NOT NULL DEFAULT 1 COMMENT '1=active 0=disabled',
+  `priority`    INT          NOT NULL DEFAULT 100 COMMENT 'lower = higher priority',
+  `dns_status`  VARCHAR(16)  NOT NULL DEFAULT 'pending' COMMENT 'pending/ok/fail',
+  `ssl_status`  VARCHAR(16)  NOT NULL DEFAULT 'pending' COMMENT 'pending/ok/fail',
+  `link_count`  INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'number of short links using this domain',
+  `created_at`  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updated_at`  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  `deleted_at`  DATETIME(3)  NULL,
+  UNIQUE KEY `uk_domain` (`domain`),
+  KEY `idx_status_priority` (`status`, `priority`),
+  KEY `idx_pick_domain` (`status`, `link_count`, `priority`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `short_urls` (
   `id`          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   `uid`         VARCHAR(16)    NOT NULL COMMENT 'short code',
@@ -60,6 +81,7 @@ CREATE TABLE IF NOT EXISTS `short_urls` (
   `url_hash`    CHAR(32)       NOT NULL COMMENT 'MD5 dedup',
   `title`       VARCHAR(255)   NULL COMMENT 'user-defined title',
   `category_id` BIGINT UNSIGNED NULL COMMENT 'category ID',
+  `domain_id`   BIGINT UNSIGNED NULL COMMENT 'domain pool entry this link belongs to',
   `clicks`      INT UNSIGNED   NOT NULL DEFAULT 0,
   `status`      TINYINT        NOT NULL DEFAULT 1 COMMENT '1=active 0=disabled 2=expired',
   `expire_at`   DATETIME(3)    NULL COMMENT 'NULL=permanent',
@@ -75,7 +97,9 @@ CREATE TABLE IF NOT EXISTS `short_urls` (
   KEY `idx_clicks` (`clicks` DESC),
   KEY `idx_created_at` (`created_at` DESC),
   KEY `idx_created_by` (`created_by`),
-  KEY `idx_category` (`category_id`)
+  KEY `idx_category` (`category_id`),
+  KEY `idx_domain` (`domain_id`),
+  KEY `idx_domain_created` (`domain_id`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `url_categories` (
