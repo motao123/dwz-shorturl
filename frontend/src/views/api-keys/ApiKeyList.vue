@@ -244,7 +244,7 @@ onMounted(loadData)
     </section>
 
     <!-- 创建弹窗 -->
-    <el-dialog v-model="createVisible" title="创建 API 密钥" width="480px" :close-on-click-modal="false" destroy-on-close>
+    <el-dialog v-model="createVisible" title="创建 API 密钥" width="480px" :close-on-click-modal="false" destroy-on-close append-to-body>
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
         <el-form-item label="密钥用途" prop="name">
           <el-input v-model="form.name" placeholder="如：小程序后端调用" maxlength="64" show-word-limit />
@@ -281,6 +281,7 @@ onMounted(loadData)
       :close-on-click-modal="false"
       :close-on-press-escape="false"
       :show-close="true"
+      append-to-body
     >
       <div class="key-result">
         <div class="key-result__warn">
@@ -300,7 +301,7 @@ onMounted(loadData)
     </el-dialog>
 
     <!-- 统计弹窗 -->
-    <el-dialog v-model="statsVisible" :title="`调用统计 · ${statsKeyName}`" width="460px" :close-on-click-modal="false" destroy-on-close>
+    <el-dialog v-model="statsVisible" :title="`调用统计 · ${statsKeyName}`" width="460px" :close-on-click-modal="false" destroy-on-close append-to-body>
       <div v-loading="statsLoading" class="key-stats">
         <template v-if="statsData">
           <div class="key-stats__row">

@@ -373,6 +373,7 @@ onMounted(loadData)
       width="540px"
       :close-on-click-modal="false"
       destroy-on-close
+      append-to-body
     >
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent>
         <el-form-item label="域名" prop="domain" required>

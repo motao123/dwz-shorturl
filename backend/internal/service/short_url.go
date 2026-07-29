@@ -32,7 +32,7 @@ var (
 
 type ShortUrlService interface {
 	Create(longURL, custom string, expireDays int, domainID *uint64, createdBy *uint64, source, ip string) (*model.ShortUrl, error)
-	BatchCreate(urls []string, createdBy *uint64, ip string) ([]model.ShortUrl, []error)
+	BatchCreate(urls []string, domainID *uint64, createdBy *uint64, ip string) ([]model.ShortUrl, []error)
 	GetByID(id uint64) (*model.ShortUrl, error)
 	Update(id uint64, longURL, title string, expireDays *int, status *int8, categoryID *uint64, domainID *uint64) (*model.ShortUrl, error)
 	Delete(id uint64) error
@@ -43,14 +43,13 @@ type ShortUrlService interface {
 }
 
 type shortUrlService struct {
-	repo       repository.ShortUrlRepo
-	rdb        *redis.Client
-	db         *gorm.DB // raw DB for legacy table fallback queries
-	domainRepo repository.DomainRepo
+	repo repository.ShortUrlRepo
+	rdb  *redis.Client
+	db   *gorm.DB // raw DB for legacy table fallback queries
 }
 
-func NewShortUrlService(repo repository.ShortUrlRepo, rdb *redis.Client, db *gorm.DB, domainRepo repository.DomainRepo) ShortUrlService {
-	return &shortUrlService{repo: repo, rdb: rdb, db: db, domainRepo: domainRepo}
+func NewShortUrlService(repo repository.ShortUrlRepo, rdb *redis.Client, db *gorm.DB) ShortUrlService {
+	return &shortUrlService{repo: repo, rdb: rdb, db: db}
 }
 
 func (s *shortUrlService) Create(longURL, custom string, expireDays int, domainID *uint64, createdBy *uint64, source, ip string) (*model.ShortUrl, error) {
@@ -121,7 +120,7 @@ func (s *shortUrlService) Create(longURL, custom string, expireDays int, domainI
 			IP:        ip,
 		}
 
-		err := s.repo.Create(&record)
+		err := s.repo.CreateWithDomainCount(&record)
 		if err == nil {
 			return &record, nil
 		}
@@ -144,7 +143,7 @@ func (s *shortUrlService) Create(longURL, custom string, expireDays int, domainI
 	return nil, ErrCodeCollision
 }
 
-func (s *shortUrlService) BatchCreate(urls []string, createdBy *uint64, ip string) ([]model.ShortUrl, []error) {
+func (s *shortUrlService) BatchCreate(urls []string, domainID *uint64, createdBy *uint64, ip string) ([]model.ShortUrl, []error) {
 	results := make([]model.ShortUrl, 0, len(urls))
 	errs := make([]error, len(urls))
 
@@ -153,7 +152,7 @@ func (s *shortUrlService) BatchCreate(urls []string, createdBy *uint64, ip strin
 		if u == "" {
 			continue
 		}
-		record, err := s.Create(u, "", 0, nil, createdBy, "batch", ip)
+		record, err := s.Create(u, "", 0, domainID, createdBy, "batch", ip)
 		if err != nil {
 			errs[i] = err
 		} else {
@@ -203,11 +202,17 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 		record.CategoryID = categoryID
 	}
 
-	if domainID != nil {
+	// Track domain change for link_count adjustment.
+	var oldDomainID *uint64
+	if record.DomainID != nil {
+		v := *record.DomainID
+		oldDomainID = &v
+	}
+	if domainID != nil && !sameUint64Ptr(oldDomainID, domainID) {
 		record.DomainID = domainID
 	}
 
-	if err := s.repo.Update(record); err != nil {
+	if err := s.repo.UpdateWithDomainCount(record, oldDomainID); err != nil {
 		return nil, err
 	}
 
@@ -223,17 +228,22 @@ func (s *shortUrlService) Delete(id uint64) error {
 		return err
 	}
 	s.invalidateCache(record.UID)
-	return s.repo.SoftDelete(id)
+	return s.repo.SoftDeleteWithDomainCount(record)
 }
 
 func (s *shortUrlService) BatchDelete(ids []uint64) error {
+	// Read records first to collect the exact set that will be deleted and to
+	// invalidate their redirect caches.
+	records := make([]model.ShortUrl, 0, len(ids))
 	for _, id := range ids {
 		record, err := s.repo.FindByID(id)
-		if err == nil {
-			s.invalidateCache(record.UID)
+		if err != nil {
+			return err
 		}
+		s.invalidateCache(record.UID)
+		records = append(records, *record)
 	}
-	return s.repo.BatchDelete(ids)
+	return s.repo.BatchDeleteWithDomainCount(records)
 }
 
 func (s *shortUrlService) List(page, perPage int, filters repository.ShortUrlFilters) ([]model.ShortUrl, int64, error) {
@@ -464,4 +474,13 @@ func PublicShortURL(uid string) string {
 	cfg := config.Get()
 	base := strings.TrimRight(cfg.Public.BaseURL, "/")
 	return base + "/" + uid
+}
+
+// sameUint64Ptr reports whether two *uint64 point to equal values. nil is
+// treated as a distinct value so that changing nil<->id is detected.
+func sameUint64Ptr(a, b *uint64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }

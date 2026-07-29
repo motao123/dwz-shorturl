@@ -68,7 +68,7 @@ func main() {
 
 	// Initialize services
 	authSvc := service.NewAuthService(userRepo, roleRepo)
-	shortUrlSvc := service.NewShortUrlService(shortUrlRepo, rdb, db, domainRepo)
+	shortUrlSvc := service.NewShortUrlService(shortUrlRepo, rdb, db)
 	userSvc := service.NewUserService(userRepo)
 	roleSvc := service.NewRoleService(roleRepo)
 	statsSvc := service.NewStatsService(shortUrlRepo, db)

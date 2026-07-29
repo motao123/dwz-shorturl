@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS `domains` (
   `updated_at`  DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   `deleted_at`  DATETIME(3)  NULL,
   UNIQUE KEY `uk_domain` (`domain`),
-  KEY `idx_status_priority` (`status`, `priority`)
+  KEY `idx_status_priority` (`status`, `priority`),
+  KEY `idx_pick_domain` (`status`, `link_count`, `priority`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 2. domain_id on short_urls -------------------------------------------------
