@@ -73,3 +73,13 @@ func (h *AuditHandler) GetByID(c *gin.Context) {
 
 	pkg.Success(c, log)
 }
+
+// auditLog records an admin action to the audit log (best-effort). It is safe
+// to call when auditSvc is nil.
+func auditLog(c *gin.Context, auditSvc service.AuditService, resource, action string, resourceID uint64, detail string) {
+	if auditSvc == nil {
+		return
+	}
+	uid := c.GetUint64("user_id")
+	_ = auditSvc.Log(&uid, action, resource, strconv.FormatUint(resourceID, 10), detail, c.ClientIP(), c.GetHeader("User-Agent"))
+}

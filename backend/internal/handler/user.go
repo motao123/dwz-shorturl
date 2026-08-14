@@ -11,11 +11,12 @@ import (
 )
 
 type UserHandler struct {
-	svc service.UserService
+	svc      service.UserService
+	auditSvc service.AuditService
 }
 
-func NewUserHandler(svc service.UserService) *UserHandler {
-	return &UserHandler{svc: svc}
+func NewUserHandler(svc service.UserService, auditSvc service.AuditService) *UserHandler {
+	return &UserHandler{svc: svc, auditSvc: auditSvc}
 }
 
 type CreateUserRequest struct {
@@ -53,6 +54,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "user", "user_create", user.ID, `{"username":`+strconv.Quote(user.Username)+`}`)
 	pkg.Success(c, user)
 }
 
@@ -75,6 +77,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "user", "user_update", id, "")
 	pkg.Success(c, user)
 }
 
@@ -90,6 +93,7 @@ func (h *UserHandler) Delete(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "user", "user_delete", id, "")
 	pkg.Success(c, nil)
 }
 
@@ -140,6 +144,7 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "user", "user_password_reset", id, "")
 	pkg.Success(c, nil)
 }
 
@@ -161,5 +166,6 @@ func (h *UserHandler) AssignRoles(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "user", "user_roles", id, "")
 	pkg.Success(c, nil)
 }

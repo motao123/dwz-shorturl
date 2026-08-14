@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"dwz-admin/internal/model"
@@ -53,6 +54,10 @@ func (s *apiKeyService) Create(userID uint64, name string, permissions string, r
 
 	if rateLimit <= 0 {
 		rateLimit = 100
+	}
+	// permissions is a JSON column; store a valid JSON array (empty => none).
+	if strings.TrimSpace(permissions) == "" {
+		permissions = "[]"
 	}
 
 	key := &model.ApiKey{

@@ -15,20 +15,32 @@ type ShortUrlFilters struct {
 	CategoryID *uint64
 	DomainID   *uint64
 	CreatedBy  *uint64
+	MemberID   *uint64
 	DateFrom   *time.Time
 	DateTo     *time.Time
 	Sort       string
 	Order      string
+	// IncludeDeleted lists only soft-deleted rows (回收站/trash view).
+	IncludeDeleted bool
 }
 
 type ShortUrlRepo interface {
 	FindByUID(uid string) (*model.ShortUrl, error)
 	FindByHash(hash string) (*model.ShortUrl, error)
+	// FindByHashIncludingDeleted also matches soft-deleted rows. Used to
+	// resurrect a deleted row instead of hitting the unique-index collision on
+	// url_hash, which would otherwise make the same URL un-creatable forever.
+	FindByHashIncludingDeleted(hash string) (*model.ShortUrl, error)
 	FindByID(id uint64) (*model.ShortUrl, error)
+	// FindByIDIncludingDeleted also matches soft-deleted rows (for restore).
+	FindByIDIncludingDeleted(id uint64) (*model.ShortUrl, error)
 	CreateWithDomainCount(url *model.ShortUrl) error
 	Update(url *model.ShortUrl) error
 	UpdateWithDomainCount(url *model.ShortUrl, oldDomainID *uint64) error
 	SoftDeleteWithDomainCount(url *model.ShortUrl) error
+	// RestoreWithDomainCount undeletes a soft-deleted row and restores its
+	// domain counter (回收站 restore).
+	RestoreWithDomainCount(url *model.ShortUrl) error
 	BatchDeleteWithDomainCount(urls []model.ShortUrl) error
 	List(page, perPage int, filters ShortUrlFilters) ([]model.ShortUrl, int64, error)
 	Count() (int64, error)
@@ -66,9 +78,27 @@ func (r *shortUrlRepo) FindByHash(hash string) (*model.ShortUrl, error) {
 	return &url, nil
 }
 
+func (r *shortUrlRepo) FindByHashIncludingDeleted(hash string) (*model.ShortUrl, error) {
+	var url model.ShortUrl
+	err := r.db.Unscoped().Where("url_hash = ?", hash).First(&url).Error
+	if err != nil {
+		return nil, err
+	}
+	return &url, nil
+}
+
 func (r *shortUrlRepo) FindByID(id uint64) (*model.ShortUrl, error) {
 	var url model.ShortUrl
 	err := r.db.First(&url, id).Error
+	if err != nil {
+		return nil, err
+	}
+	return &url, nil
+}
+
+func (r *shortUrlRepo) FindByIDIncludingDeleted(id uint64) (*model.ShortUrl, error) {
+	var url model.ShortUrl
+	err := r.db.Unscoped().First(&url, id).Error
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +197,35 @@ func (r *shortUrlRepo) SoftDeleteWithDomainCount(url *model.ShortUrl) error {
 	})
 }
 
+// RestoreWithDomainCount undeletes a soft-deleted short URL and restores its
+// domain link_count (回收站 restore). Runs in a transaction.
+func (r *shortUrlRepo) RestoreWithDomainCount(url *model.ShortUrl) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		// gorm.DeletedAt zero value writes NULL → undelete.
+		url.DeletedAt = gorm.DeletedAt{}
+		result := tx.Unscoped().Model(&model.ShortUrl{}).Where("id = ?", url.ID).Update("deleted_at", nil)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		if url.DomainID == nil {
+			return nil
+		}
+		result = tx.Model(&model.Domain{}).
+			Where("id = ?", *url.DomainID).
+			UpdateColumn("link_count", gorm.Expr("link_count + 1"))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+}
+
 // BatchDeleteWithDomainCount atomically soft-deletes a batch and decrements
 // each affected domain by the exact number of deleted links.
 func (r *shortUrlRepo) BatchDeleteWithDomainCount(urls []model.ShortUrl) error {
@@ -209,6 +268,10 @@ func (r *shortUrlRepo) List(page, perPage int, filters ShortUrlFilters) ([]model
 	var total int64
 
 	query := r.db.Model(&model.ShortUrl{})
+	if filters.IncludeDeleted {
+		// 回收站视图：只看已软删除的行
+		query = query.Unscoped().Where("deleted_at IS NOT NULL")
+	}
 
 	if filters.Keyword != "" {
 		like := "%" + filters.Keyword + "%"
@@ -225,6 +288,9 @@ func (r *shortUrlRepo) List(page, perPage int, filters ShortUrlFilters) ([]model
 	}
 	if filters.CreatedBy != nil {
 		query = query.Where("created_by = ?", *filters.CreatedBy)
+	}
+	if filters.MemberID != nil {
+		query = query.Where("member_id = ?", *filters.MemberID)
 	}
 	if filters.DateFrom != nil {
 		query = query.Where("created_at >= ?", *filters.DateFrom)

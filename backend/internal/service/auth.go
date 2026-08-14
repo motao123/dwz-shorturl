@@ -99,6 +99,11 @@ func (s *authService) Refresh(refreshToken string) (*LoginResult, error) {
 	if err != nil {
 		return nil, errors.New("invalid refresh token")
 	}
+	// P1-4: only refresh-type tokens may be exchanged for a new pair; an access
+	// token replayed here would otherwise escalate its own lifetime.
+	if claims.TokenType != pkg.TokenTypeRefresh {
+		return nil, errors.New("invalid refresh token")
+	}
 
 	user, err := s.userRepo.FindByID(claims.UserID)
 	if err != nil {

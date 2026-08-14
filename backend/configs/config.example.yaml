@@ -8,12 +8,28 @@ database:
   password: ""
   dbname: dwz_admin
   charset: utf8mb4
+# Public frontend DB (holds the `members` table). Leave user/dbname empty to
+# disable member management without breaking startup.
+public_db:
+  host: 127.0.0.1
+  port: 3306
+  user: ""
+  password: ""
+  dbname: ""
+  charset: utf8mb4
+# CORS: only these origins may make credentialed cross-origin requests.
+# Empty = same-origin only (all cross-origin requests refused).
+cors:
+  allowed_origins: []
 redis:
   addr: 127.0.0.1:6379
   password: ""
   db: 0
 jwt:
   secret: "change-me-to-random-32-bytes!!"
+  # Previous secrets still accepted during key rotation (tokens signed with an
+  # old secret remain valid). Keep empty unless rotating.
+  previous_secrets: []
   access_expiry: 2h
   refresh_expiry: 168h
 public:
@@ -27,3 +43,9 @@ rate_limit:
 log:
   level: info
   file: ""
+
+# GeoIP country resolution for click analytics. Set db_path to an ip2region v1
+# database file (e.g. /www/server/dwz-admin/data/ip2region.db). Empty disables
+# country resolution (click_logs.country stays blank).
+geoip:
+  db_path: ""

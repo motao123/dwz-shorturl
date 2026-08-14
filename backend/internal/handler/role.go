@@ -11,11 +11,12 @@ import (
 )
 
 type RoleHandler struct {
-	svc service.RoleService
+	svc      service.RoleService
+	auditSvc service.AuditService
 }
 
-func NewRoleHandler(svc service.RoleService) *RoleHandler {
-	return &RoleHandler{svc: svc}
+func NewRoleHandler(svc service.RoleService, auditSvc service.AuditService) *RoleHandler {
+	return &RoleHandler{svc: svc, auditSvc: auditSvc}
 }
 
 type CreateRoleRequest struct {
@@ -46,6 +47,7 @@ func (h *RoleHandler) Create(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "role", "role_create", role.ID, `{"name":`+strconv.Quote(req.Name)+`}`)
 	pkg.Success(c, role)
 }
 
@@ -68,6 +70,7 @@ func (h *RoleHandler) Update(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "role", "role_update", id, "")
 	pkg.Success(c, role)
 }
 
@@ -83,6 +86,7 @@ func (h *RoleHandler) Delete(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "role", "role_delete", id, "")
 	pkg.Success(c, nil)
 }
 
@@ -114,6 +118,7 @@ func (h *RoleHandler) SetPermissions(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "role", "role_permissions", id, "")
 	pkg.Success(c, nil)
 }
 
