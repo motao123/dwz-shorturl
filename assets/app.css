@@ -200,6 +200,12 @@ textarea:focus-visible {
   animation: pulse-dot 2s infinite;
 }
 
+/* 服务不可用时（真实 /health 探测失败）将状态点置为警示色 */
+.header-note.is-down .status-dot {
+  background: #d64545;
+  animation: none;
+}
+
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -1010,4 +1016,141 @@ body.dialog-open {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ─── 会员栏（头部） ─── */
+.member-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.member-link {
+  padding: 6px 12px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+
+.member-link:hover {
+  color: var(--ink-strong);
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
+}
+
+.member-user {
+  padding: 5px 12px;
+  color: var(--ink-strong);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+
+.member-user:hover {
+  color: var(--strong);
+  border-color: var(--line-strong);
+  background: var(--surface);
+}
+
+/* ─── 登录 / 注册弹窗 ─── */
+.member-dialog {
+  width: min(420px, 100%);
+}
+
+.member-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 22px;
+  padding: 4px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.member-tab {
+  min-width: 84px;
+  padding: 7px 16px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: color 120ms, background 120ms;
+}
+
+.member-tab.is-active {
+  color: var(--ink-strong);
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.member-title {
+  margin: 0 0 4px;
+  color: var(--ink-strong);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.member-sub {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.member-form .button {
+  margin-top: 24px;
+}
+
+/* ─── 域名选择域：样式与输入框统一 + 自定义箭头 ─── */
+#domain-field {
+  margin-top: 24px;
+}
+
+#domain-field.fade-in {
+  animation: dialog-in 200ms ease-out;
+}
+
+#domainSelect {
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 56px;
+  padding-right: 44px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' viewBox='0 0 16 16'%3E%3Cpath stroke='%236b7280' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  background-size: 16px;
+  font-size: 15px;
+}
+
+/* ─── 我的短链 ─── */
+.button-sm {
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.empty-note {
+  margin: 16px 0 0;
+  padding: 18px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  font-size: 13px;
+}
+
+#mylinksList .result-list {
+  margin-top: 0;
 }

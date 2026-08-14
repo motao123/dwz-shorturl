@@ -77,6 +77,11 @@
     </div>
     <div class="header-right">
       <span class="header-note"><span class="status-dot" aria-hidden="true"></span>在线</span>
+      <div class="member-bar" id="memberBar">
+        <a class="member-link" href="/member/login" id="memberLoginBtn" hidden>登录 / 注册</a>
+        <a class="member-user" href="/member/" id="memberUser" hidden title="进入用户中心"></a>
+        <a class="member-link" href="#" id="memberLogoutBtn" hidden>退出</a>
+      </div>
     </div>
   </header>
 
@@ -191,7 +196,8 @@
         <ol id="batch-list" class="result-list"></ol>
       </div>
     </section>
-  </main>
+
+    </main>
 
   <footer class="site-footer">
     <p>短网址由用户生成，目标网站内容与本站无关。</p>
@@ -214,7 +220,8 @@
       </div>
 
       <div class="dialog-actions">
-        <button class="button button-secondary" type="button" id="qrBtn" aria-expanded="false" aria-controls="qrcode">显示二维码</button>
+        <button class="button button-secondary" type="button" id="qrBtn" aria-expanded="true" aria-controls="qrcode">隐藏二维码</button>
+        <button class="button button-secondary" type="button" id="againBtn">再生成一条</button>
         <a class="button button-primary" target="_blank" rel="noopener noreferrer" id="preViewBtn" href="./">访问短链 ↗</a>
       </div>
 
@@ -223,7 +230,7 @@
   </div>
 
   <script src="./assets/qrcode.min.js?v=2.6.0"></script>
-  <script src="./assets/app.js?v=2.6.0"></script>
+  <script src="./assets/app.js?v=2.9.0"></script>
 
   <!-- 百度统计 -->
   <script>

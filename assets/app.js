@@ -29,6 +29,15 @@
   var qrButton = document.getElementById('qrBtn');
   var qrBox = document.getElementById('qrcode');
   var previewButton = document.getElementById('preViewBtn');
+  var againButton = document.getElementById('againBtn');
+
+  // 会员 / 登录相关
+  var memberBar = document.getElementById('memberBar');
+  var memberLoginBtn = document.getElementById('memberLoginBtn');
+  var memberUser = document.getElementById('memberUser');
+  var memberLogoutBtn = document.getElementById('memberLogoutBtn');
+
+  var memberState = { loggedIn: false, csrf: '' };
 
   function endpoint(file) {
     return new URL(file, document.baseURI).toString();
@@ -157,10 +166,12 @@
     lastFocusedElement = document.activeElement;
     resultInput.value = shortUrl;
     previewButton.href = shortUrl;
-    qrBox.hidden = true;
+    // 默认即渲染二维码（移动端扫码是核心诉求），省去一次点击
+    qrBox.hidden = false;
     qrBox.replaceChildren();
-    qrButton.textContent = '显示二维码';
-    qrButton.setAttribute('aria-expanded', 'false');
+    renderQr();
+    qrButton.textContent = '隐藏二维码';
+    qrButton.setAttribute('aria-expanded', 'true');
     dialogBackdrop.hidden = false;
     document.body.classList.add('dialog-open');
     dialogClose.focus();
@@ -308,6 +319,11 @@
 
   batchForm.addEventListener('submit', async function (event) {
     event.preventDefault();
+    if (!memberState.loggedIn) {
+      announce('批量生成需要登录，正在跳转…', true);
+      window.location.href = '/member/login?redirect=' + encodeURIComponent('/#batch');
+      return;
+    }
     var lines = getBatchLines();
     if (!lines.length) {
       batchInput.setAttribute('aria-invalid', 'true');
@@ -325,7 +341,7 @@
     batchInput.setAttribute('aria-invalid', 'false');
     setBusy(batchButton, true, '生成中…', '批量生成');
     try {
-      var payload = await postForm('batch.php', { urls: lines.join('\n'), domain: domainSelect.value || '' });
+      var payload = await postForm('batch.php', { urls: lines.join('\n'), domain: domainSelect.value || '', csrf: memberState.csrf || '' });
       var items = normalizeBatchPayload(payload);
       if (!items.length) throw new Error(readError(payload, '服务未返回批量结果'));
       renderBatch(items);
@@ -394,6 +410,14 @@
     qrButton.setAttribute('aria-expanded', willShow ? 'true' : 'false');
   });
 
+  // 「再生成一条」：关闭弹窗、清空并聚焦输入框，支持连续高频生成
+  againButton.addEventListener('click', function () {
+    closeDialog();
+    urlInput.value = '';
+    urlInput.removeAttribute('aria-invalid');
+    urlInput.focus();
+  });
+
   batchList.addEventListener('click', async function (event) {
     var button = event.target.closest('[data-copy]');
     if (!button || !batchList.contains(button)) return;
@@ -407,6 +431,61 @@
     }
   });
 
+  // ---------------- 会员登录 / 注册 ----------------
+
+  function setMemberUI(member) {
+    memberState.loggedIn = Boolean(member);
+    if (member) {
+      memberLoginBtn.hidden = true;
+      memberLogoutBtn.hidden = false;
+      memberUser.hidden = false;
+      memberUser.textContent = (member.username || member.email || '') + ' ›';
+    } else {
+      memberLoginBtn.hidden = false;
+      memberLogoutBtn.hidden = true;
+      memberUser.hidden = true;
+      memberUser.textContent = '';
+    }
+  }
+
+  // 获取当前登录态 + CSRF token（用于批量接口）
+  async function loadMemberState() {
+    try {
+      var response = await fetch(endpoint('member.php'), {
+        method: 'POST',
+        credentials: 'same-origin'
+      });
+      var payload = await response.json();
+      if (payload && payload.result === 1 && payload.data) {
+        memberState.csrf = payload.data.csrf || '';
+        setMemberUI(payload.data.member);
+      } else {
+        setMemberUI(null);
+      }
+    } catch (e) {
+      setMemberUI(null);
+    }
+  }
+
+  // 登出后跳转到会员中心登录页（登录/注册统一收敛到 /member/login）
+  async function handleLogout() {
+    try {
+      var body = new URLSearchParams();
+      body.set('action', 'logout');
+      body.set('csrf', memberState.csrf || '');
+      await fetch(endpoint('member.php'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: body.toString(),
+        credentials: 'same-origin'
+      });
+    } catch (e) { /* 忽略 */ }
+    window.location.href = '/member/login';
+  }
+
+  memberLogoutBtn.addEventListener('click', function (event) { event.preventDefault(); handleLogout(); });
+
+  // 每个 fetch 的 POST 请求都带上会话 cookie（确保批量接口能识别登录态）
   updateBatchCount();
 
   // Load available domains for the domain selector
@@ -429,9 +508,32 @@
         domainSelect.appendChild(opt);
       });
       domainField.hidden = false;
+      domainField.classList.add('fade-in');
     } catch (e) {
       // Domains API unavailable, keep selector hidden
     }
   }
+
+  // 真实在线状态：请求 /health，失败时把头部状态点标记为「维护中」
+  function checkHealth() {
+    var note = document.querySelector('.header-note');
+    if (!note) return;
+    // 结构：<span class="status-dot"></span>在线 —— 文本节点是最后一个子节点
+    var label = note.lastChild;
+    fetch('./health', { method: 'GET', cache: 'no-store' })
+      .then(function (r) { return r.ok; })
+      .then(function (ok) {
+        note.classList.toggle('is-down', !ok);
+        if (label && label.nodeType === 3) label.textContent = ok ? '在线' : '维护中';
+      })
+      .catch(function () {
+        note.classList.add('is-down');
+        if (label && label.nodeType === 3) label.textContent = '维护中';
+      });
+  }
+
   loadDomains();
+  loadMemberState();
+  checkHealth();
+  window.setInterval(checkHealth, 60000);
 }());

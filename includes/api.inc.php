@@ -17,6 +17,13 @@ if (!isset($trusted_proxies) || !is_array($trusted_proxies)) $trusted_proxies = 
 if (!isset($rate_limit_dir) || !is_string($rate_limit_dir) || $rate_limit_dir === '') {
     $rate_limit_dir = ROOT . 'logs/ratelimit';
 }
+// Admin DB (dual-write target). Optional.
+if (!isset($admin_db_host)) $admin_db_host = '127.0.0.1';
+if (!isset($admin_db_port)) $admin_db_port = 3306;
+if (!isset($admin_db_user)) $admin_db_user = '';
+if (!isset($admin_db_pwd)) $admin_db_pwd = '';
+if (!isset($admin_db_name)) $admin_db_name = '';
+if (!isset($member_secret)) $member_secret = '';
 
 require SYSTEM_ROOT . 'db.class.php';
 $DB = new DB($host, $user, $pwd, $dbname, $port);
@@ -28,6 +35,12 @@ if (empty($DB->link)) {
     }
     echo json_encode(array('code' => 0, 'msg' => '数据库暂时不可用', 'result' => 10000), JSON_UNESCAPED_UNICODE);
     exit();
+}
+
+// Optional admin DB connection for dual-writing short_urls.
+$ADMIN_DB = null;
+if ($admin_db_user !== '' && $admin_db_name !== '') {
+    $ADMIN_DB = new DB($admin_db_host, $admin_db_user, $admin_db_pwd, $admin_db_name, $admin_db_port);
 }
 
 require SYSTEM_ROOT . 'function.php';
