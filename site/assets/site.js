@@ -16,7 +16,10 @@
       toggle.setAttribute("aria-expanded", open ? "true" : "false");
     });
     links.addEventListener("click", function (e) {
-      if (e.target.tagName === "A") links.classList.remove("open");
+      if (e.target.tagName === "A") {
+        links.classList.remove("open");
+        toggle.setAttribute("aria-expanded", "false");
+      }
     });
   }
 

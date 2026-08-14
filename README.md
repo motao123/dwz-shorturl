@@ -176,7 +176,7 @@ DWZ_SERVER=your.host DWZ_USER=root DWZ_PASS='密码' ./deploy.sh
 | [🎨 后台设计](docs/BACKEND_ADMIN_DESIGN.md) | 管理后台技术设计文档 |
 | [🗺️ 功能路线图](docs/FEATURE_ROADMAP.md) | 5 个 Phase / 10 大模块 / 79.5 人日规划 |
 | [🔬 深度分析报告](docs/ANALYSIS_REPORT_2026-08.md) | 功能/UI/交互/架构四维审计 + 13 批修复记录 |
-| [🖥️ 项目官网](https://motao123.github.io/dwz-shorturl/) | GitHub Pages 宣传站（由 Actions 自动构建，Stripe × Bento 杂交设计） |
+| [🖥️ 项目官网](https://motao123.github.io/dwz-shorturl/) | GitHub Pages 宣传站（由 Actions 自动构建，Linear 暗色设计语言，见 site/DESIGN.md） |
 
 ---
 
