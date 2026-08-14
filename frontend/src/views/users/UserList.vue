@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { Search, Plus, EditPen, Delete, RefreshLeft } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import {
@@ -142,9 +143,20 @@ async function handleSubmit() {
       userId = created?.id ?? 0
     }
 
-    // 同步角色
+    // 同步角色；新建用户时角色绑定失败则回滚删除已创建的用户，避免孤儿账号
     if (userId) {
-      await assignUserRoles(userId, form.role_ids)
+      try {
+        await assignUserRoles(userId, form.role_ids)
+      } catch (roleErr) {
+        if (!isEdit.value && userId) {
+          try {
+            await removeUser(userId)
+          } catch {
+            /* 回滚失败仅提示，不掩盖原始错误 */
+          }
+        }
+        throw roleErr
+      }
     }
 
     ElMessage.success(isEdit.value ? '用户已更新' : '用户创建成功')

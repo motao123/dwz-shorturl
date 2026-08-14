@@ -1,30 +1,57 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import {
   Odometer,
   Link,
   User,
+  UserFilled,
   Stamp,
   TrendCharts,
+  Monitor,
   Setting,
   Document,
   Key,
   Connection,
+  WarningFilled,
+  BellFilled,
   Expand,
   Fold,
   ArrowDown,
-  SwitchButton
+  SwitchButton,
+  Sunny,
+  Moon
 } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { useThemeStore } from '@/stores/theme'
 import { hasPermission } from '@/utils/permission'
 
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const themeStore = useThemeStore()
+
+// 窄屏（≤992px）自动折叠侧栏，宽屏时恢复展开（仅当用户此前未手动折叠）
+let mediaQuery: MediaQueryList | null = null
+function handleNarrowChange(e: MediaQueryListEvent | MediaQueryList) {
+  if (e.matches && !appStore.sidebarCollapsed) {
+    appStore.setSidebarCollapsed(true)
+  } else if (!e.matches && appStore.sidebarCollapsed && !appStore.userCollapsed) {
+    appStore.setSidebarCollapsed(false)
+  }
+}
+onMounted(() => {
+  mediaQuery = window.matchMedia('(max-width: 992px)')
+  handleNarrowChange(mediaQuery)
+  mediaQuery.addEventListener?.('change', handleNarrowChange)
+})
+onBeforeUnmount(() => {
+  mediaQuery?.removeEventListener?.('change', handleNarrowChange)
+})
 
 interface MenuEntry {
   path: string
@@ -38,11 +65,16 @@ const menuEntries: MenuEntry[] = [
   { path: '/short-urls', title: '短链管理', icon: Link, perm: 'short_urls.read' },
   { path: '/domains', title: '域名管理', icon: Connection, perm: 'domains.read' },
   { path: '/stats', title: '统计分析', icon: TrendCharts, perm: 'stats.read' },
+  { path: '/monitor', title: '系统监控', icon: Monitor, perm: 'stats.read' },
   { path: '/users', title: '用户管理', icon: User, perm: 'users.read' },
+  { path: '/members', title: '注册用户', icon: UserFilled, perm: 'users.read' },
   { path: '/roles', title: '角色管理', icon: Stamp, perm: 'roles.read' },
   { path: '/configs', title: '系统配置', icon: Setting, perm: 'configs.read' },
   { path: '/audit-logs', title: '审计日志', icon: Document, perm: 'audit.read' },
-  { path: '/api-keys', title: 'API 密钥', icon: Key, perm: 'api_keys.read' }
+  { path: '/violations', title: '违规审核', icon: WarningFilled, perm: 'audit.read' },
+  { path: '/api-keys', title: 'API 密钥', icon: Key, perm: 'api_keys.read' },
+  { path: '/api-docs', title: 'API 文档', icon: Document, perm: 'api_keys.read' },
+  { path: '/webhooks', title: 'Webhook', icon: BellFilled, perm: 'api_keys.read' }
 ]
 
 const visibleMenus = computed(() =>
@@ -142,7 +174,7 @@ async function handleLogout() {
       <!-- 顶栏 -->
       <el-header class="layout__header" height="58px">
         <div class="header-left">
-          <button class="icon-btn" :title="appStore.sidebarCollapsed ? '展开菜单' : '收起菜单'" @click="appStore.toggleSidebar()">
+          <button class="icon-btn" aria-label="切换侧栏" :title="appStore.sidebarCollapsed ? '展开菜单' : '收起菜单'" @click="appStore.toggleSidebar()">
             <el-icon :size="17"><component :is="appStore.sidebarCollapsed ? Expand : Fold" /></el-icon>
           </button>
           <el-breadcrumb separator="/" class="crumbs">
@@ -152,26 +184,32 @@ async function handleLogout() {
           </el-breadcrumb>
         </div>
 
-        <el-dropdown trigger="click" @command="(cmd: string) => cmd === 'logout' && handleLogout()">
-          <div class="user-chip">
-            <span class="user-chip__avatar">{{ authStore.displayName.slice(0, 1).toUpperCase() }}</span>
-            <span class="user-chip__meta">
-              <span class="user-chip__name">{{ authStore.displayName }}</span>
-              <span class="user-chip__role mono">{{ roleLabel }}</span>
-            </span>
-            <el-icon class="user-chip__caret"><ArrowDown /></el-icon>
-          </div>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item disabled>
-                <span class="mono" style="font-size: 12px">@{{ authStore.userInfo?.username }}</span>
-              </el-dropdown-item>
-              <el-dropdown-item divided command="logout">
-                <el-icon><SwitchButton /></el-icon>退出登录
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <div class="header-right">
+          <el-dropdown trigger="click" @command="(cmd: string) => cmd === 'logout' && handleLogout()">
+            <div class="user-chip">
+              <span class="user-chip__avatar">{{ authStore.displayName.slice(0, 1).toUpperCase() }}</span>
+              <span class="user-chip__meta">
+                <span class="user-chip__name">{{ authStore.displayName }}</span>
+                <span class="user-chip__role mono">{{ roleLabel }}</span>
+              </span>
+              <el-icon class="user-chip__caret"><ArrowDown /></el-icon>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item disabled>
+                  <span class="mono" style="font-size: 12px">@{{ authStore.userInfo?.username }}</span>
+                </el-dropdown-item>
+                <el-dropdown-item divided command="logout">
+                  <el-icon><SwitchButton /></el-icon>退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+
+          <button class="icon-btn" aria-label="切换主题" :title="themeStore.dark ? '切换到浅色' : '切换到深色'" @click="themeStore.toggle()">
+            <el-icon :size="17"><component :is="themeStore.dark ? Sunny : Moon" /></el-icon>
+          </button>
+        </div>
       </el-header>
 
       <!-- 内容区 -->
@@ -334,7 +372,7 @@ async function handleLogout() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: rgba(255, 255, 255, 0.92);
+  background: color-mix(in srgb, var(--el-bg-color, #fff) 92%, transparent);
   backdrop-filter: blur(6px);
   border-bottom: 1px solid var(--dwz-line);
   padding: 0 22px;
@@ -349,6 +387,12 @@ async function handleLogout() {
   gap: 14px;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .icon-btn {
   width: 34px;
   height: 34px;
@@ -356,7 +400,7 @@ async function handleLogout() {
   place-items: center;
   border: 1px solid var(--dwz-line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--el-bg-color, #fff);
   color: var(--dwz-text);
   cursor: pointer;
   transition: all 0.16s ease;
@@ -366,6 +410,12 @@ async function handleLogout() {
   border-color: var(--dwz-petrol);
   color: var(--dwz-petrol);
   box-shadow: 0 2px 6px rgba(14, 110, 117, 0.12);
+}
+
+/* 键盘可访问性：图标按钮焦点可见环 */
+.icon-btn:focus-visible {
+  outline: 2px solid var(--dwz-petrol);
+  outline-offset: 2px;
 }
 
 .crumbs :deep(.el-breadcrumb__inner) {
@@ -384,7 +434,7 @@ async function handleLogout() {
 }
 
 .user-chip:hover {
-  background: #edf3f4;
+  background: var(--el-fill-color-light, #edf3f4);
 }
 
 .user-chip__avatar {
@@ -432,5 +482,35 @@ async function handleLogout() {
   background-size: 22px 22px;
   overflow-y: auto;
   height: calc(100vh - 58px);
+}
+
+/* ---------------- 响应式 ---------------- */
+
+@media (max-width: 992px) {
+  .layout__header {
+    padding: 0 12px;
+  }
+
+  .crumbs {
+    display: none;
+  }
+
+  .user-chip__meta {
+    display: none;
+  }
+
+  .user-chip {
+    padding: 4px;
+  }
+
+  .user-chip__caret {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .brand__sub {
+    display: none;
+  }
 }
 </style>

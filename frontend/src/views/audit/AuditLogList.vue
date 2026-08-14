@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import { Search } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { listAuditLogs, type AuditLog, type AuditLogQuery } from '@/api/audit'

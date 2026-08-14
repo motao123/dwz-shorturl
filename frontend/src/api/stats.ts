@@ -66,3 +66,13 @@ export function getTop(params: TopQuery): Promise<TopUrl[]> {
 export function getRecent(limit = 20): Promise<RecentUrl[]> {
   return request.get<RecentUrl[]>('/stats/recent', { params: { limit } })
 }
+
+/** 全局地域分布（近 30 天） */
+export function getCountries(limit = 12): Promise<TrendPoint[]> {
+  return request.get<TrendPoint[]>('/stats/countries', { params: { limit } })
+}
+
+/** 全局来源类型分布（近 30 天） */
+export function getReferrerTypes(limit = 8): Promise<TrendPoint[]> {
+  return request.get<TrendPoint[]>('/stats/referrer-types', { params: { limit } })
+}

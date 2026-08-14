@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import { Refresh, DocumentCopy } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import VChart from 'vue-echarts'
@@ -11,7 +11,7 @@ import { GridComponent, TooltipComponent } from 'echarts/components'
 import type { ComposeOption } from 'echarts/core'
 import type { LineSeriesOption, BarSeriesOption } from 'echarts/charts'
 import type { GridComponentOption, TooltipComponentOption } from 'echarts/components'
-import { getTrend, getTop, getRecent, type TrendGranularity, type RecentUrl } from '@/api/stats'
+import { getTrend, getTop, getRecent, getCountries, getReferrerTypes, type TrendGranularity, type RecentUrl, type TrendPoint } from '@/api/stats'
 import { buildShortUrl, SOURCE_LABELS } from '@/utils/constants'
 import { copyText } from '@/utils/clipboard'
 
@@ -21,6 +21,7 @@ type ECOption = ComposeOption<LineSeriesOption | BarSeriesOption | GridComponent
 const loading = ref(false)
 const topLoading = ref(false)
 const recentLoading = ref(false)
+const geoLoading = ref(false)
 
 const granularity = ref<TrendGranularity>('day')
 const dateRange = ref<[string, string]>([
@@ -31,6 +32,53 @@ const dateRange = ref<[string, string]>([
 const trendOption = ref<ECOption>({})
 const topOption = ref<ECOption>({})
 const recentRows = ref<RecentUrl[]>([])
+const countryRows = ref<TrendPoint[]>([])
+const refTypeRows = ref<TrendPoint[]>([])
+
+/** ISO 3166-1 alpha-2 → 中文名 + 旗帜 emoji（地域分布展示） */
+const COUNTRY_NAMES: Record<string, string> = {
+  CN: '中国', HK: '中国香港', MO: '中国澳门', TW: '中国台湾', US: '美国', JP: '日本',
+  KR: '韩国', SG: '新加坡', GB: '英国', DE: '德国', FR: '法国', IT: '意大利',
+  ES: '西班牙', RU: '俄罗斯', NL: '荷兰', CA: '加拿大', AU: '澳大利亚', NZ: '新西兰',
+  IN: '印度', MY: '马来西亚', TH: '泰国', VN: '越南', ID: '印度尼西亚', PH: '菲律宾',
+  BR: '巴西', TR: '土耳其', AE: '阿联酋', SA: '沙特阿拉伯', MX: '墨西哥', CH: '瑞士',
+  SE: '瑞典', NO: '挪威', FI: '芬兰', DK: '丹麦', PL: '波兰', UA: '乌克兰',
+  IE: '爱尔兰', AT: '奥地利', PT: '葡萄牙', GR: '希腊', CZ: '捷克', IL: '以色列',
+  AR: '阿根廷', CL: '智利', ZA: '南非', EG: '埃及', PK: '巴基斯坦', KZ: '哈萨克斯坦'
+}
+
+function countryName(code: string): string {
+  return COUNTRY_NAMES[code.toUpperCase()] ?? code.toUpperCase()
+}
+
+function countryFlag(code: string): string {
+  const c = code.toUpperCase()
+  if (!/^[A-Z]{2}$/.test(c)) return '🌐'
+  const base = 0x1f1e6
+  return String.fromCodePoint(base + c.charCodeAt(0) - 65, base + c.charCodeAt(1) - 65)
+}
+
+function refTypeIcon(type: string): string {
+  switch (type) {
+    case '搜索引擎': return '🔍'
+    case '社交媒体': return '📣'
+    case '直接访问': return '🔗'
+    default: return '🌐'
+  }
+}
+
+async function loadGeoDistribution() {
+  geoLoading.value = true
+  try {
+    countryRows.value = await getCountries(12)
+    refTypeRows.value = await getReferrerTypes(8)
+  } catch {
+    countryRows.value = []
+    refTypeRows.value = []
+  } finally {
+    geoLoading.value = false
+  }
+}
 
 function dateParams() {
   return {
@@ -212,7 +260,10 @@ async function handleCopy(uid: string) {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  reload()
+  loadGeoDistribution()
+})
 </script>
 
 <template>
@@ -303,6 +354,48 @@ onMounted(reload)
             </tbody>
           </table>
           <el-empty v-if="!recentLoading && !recentRows.length" description="暂无数据" />
+        </div>
+      </section>
+    </div>
+
+    <div class="split">
+      <!-- 地域分布 -->
+      <section class="app-card chart-card">
+        <header class="chart-card__head">
+          <h3 class="chart-card__title">地域分布</h3>
+          <span class="chart-card__sub mono">近 30 天 · TOP 12</span>
+        </header>
+        <div v-loading="geoLoading" class="dist-wrap">
+          <el-table v-if="countryRows.length" :data="countryRows" size="small">
+            <el-table-column label="国家/地区" min-width="140">
+              <template #default="{ row }">
+                <span>{{ countryFlag(row.label) }}</span>
+                <span style="margin-left: 6px">{{ countryName(row.label) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="clicks" label="次数" width="90" align="center" />
+          </el-table>
+          <el-empty v-else-if="!geoLoading" description="暂无地域数据" />
+        </div>
+      </section>
+
+      <!-- 来源类型 -->
+      <section class="app-card chart-card">
+        <header class="chart-card__head">
+          <h3 class="chart-card__title">来源类型</h3>
+          <span class="chart-card__sub mono">近 30 天</span>
+        </header>
+        <div v-loading="geoLoading" class="dist-wrap">
+          <el-table v-if="refTypeRows.length" :data="refTypeRows" size="small">
+            <el-table-column label="类型" min-width="120">
+              <template #default="{ row }">
+                <span>{{ refTypeIcon(row.label) }}</span>
+                <span style="margin-left: 6px">{{ row.label }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="clicks" label="次数" width="90" align="center" />
+          </el-table>
+          <el-empty v-else-if="!geoLoading" description="暂无来源数据" />
         </div>
       </section>
     </div>
