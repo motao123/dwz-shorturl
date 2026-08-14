@@ -94,8 +94,15 @@ func (r *userRepo) UpdateLastLogin(id uint64, ip string) error {
 	}).Error
 }
 
+// SoftDelete soft-deletes a user and its role bindings so user_roles never
+// keeps orphan rows pointing at removed accounts.
 func (r *userRepo) SoftDelete(id uint64) error {
-	return r.db.Delete(&model.User{}, id).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&model.User{}, id).Error; err != nil {
+			return err
+		}
+		return tx.Where("user_id = ?", id).Delete(&model.UserRole{}).Error
+	})
 }
 
 func (r *userRepo) GetRoles(userID uint64) ([]model.Role, error) {
