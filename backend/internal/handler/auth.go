@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
@@ -23,6 +24,7 @@ func NewAuthHandler(svc service.AuthService, rdb *redis.Client) *AuthHandler {
 type LoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
+	TotpCode string `json:"totp_code"`
 }
 
 type RefreshRequest struct {
@@ -36,8 +38,13 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	result, err := h.svc.Login(req.Username, req.Password, c.ClientIP())
+	result, err := h.svc.Login(req.Username, req.Password, req.TotpCode, c.ClientIP())
 	if err != nil {
+		// 2FA 账户未提供验证码：返回特殊标记，前端据此展示 TOTP 输入框。
+		if errors.Is(err, pkg.ErrTotpRequired) {
+			pkg.FailWithData(c, http.StatusUnauthorized, pkg.CodeUnauthorized, "需要两步验证", gin.H{"totp_required": true})
+			return
+		}
 		pkg.Fail(c, http.StatusUnauthorized, pkg.CodeUnauthorized, err.Error())
 		return
 	}

@@ -14,6 +14,7 @@ export interface AdminUser {
   last_login_ip: string | null
   roles: string[]
   role_ids?: number[]
+  totp_enabled?: boolean
   created_at: string
   updated_at: string
 }
@@ -59,4 +60,24 @@ export function resetUserPassword(id: number, password: string): Promise<null> {
 /** 分配角色 */
 export function assignUserRoles(id: number, role_ids: number[]): Promise<null> {
   return request.put<null>(`/users/${id}/roles`, { role_ids })
+}
+
+/** 查询用户的 2FA 状态 */
+export function getTotpStatus(id: number): Promise<{ enabled: boolean }> {
+  return request.get<{ enabled: boolean }>(`/users/${id}/totp`)
+}
+
+/** 生成 TOTP 密钥 + otpauth URI（未持久化） */
+export function provisionTotp(id: number): Promise<{ secret: string; uri: string }> {
+  return request.post<{ secret: string; uri: string }>(`/users/${id}/totp/provision`)
+}
+
+/** 用验证码确认并启用 2FA */
+export function enableTotp(id: number, code: string, secret: string): Promise<null> {
+  return request.post<null>(`/users/${id}/totp/enable`, { code, secret })
+}
+
+/** 关闭 2FA */
+export function disableTotp(id: number): Promise<null> {
+  return request.delete<null>(`/users/${id}/totp`)
 }

@@ -35,7 +35,7 @@ type UserInfo struct {
 }
 
 type AuthService interface {
-	Login(username, password, ip string) (*LoginResult, error)
+	Login(username, password, totpCode, ip string) (*LoginResult, error)
 	Refresh(refreshToken string) (*LoginResult, error)
 	GetMe(userID uint64) (*UserInfo, error)
 }
@@ -49,7 +49,7 @@ func NewAuthService(userRepo repository.UserRepo, roleRepo repository.RoleRepo) 
 	return &authService{userRepo: userRepo, roleRepo: roleRepo}
 }
 
-func (s *authService) Login(username, password, ip string) (*LoginResult, error) {
+func (s *authService) Login(username, password, totpCode, ip string) (*LoginResult, error) {
 	user, err := s.userRepo.FindByUsername(username)
 	if err != nil {
 		return nil, ErrInvalidCredentials
@@ -61,6 +61,17 @@ func (s *authService) Login(username, password, ip string) (*LoginResult, error)
 
 	if !pkg.CheckPassword(user.PasswordHash, password) {
 		return nil, ErrInvalidCredentials
+	}
+
+	// 2FA: accounts with an enrolled TOTP secret must present a valid code.
+	if user.TotpSecret != "" {
+		if !pkg.ValidateTotp(totpCode, user.TotpSecret) {
+			// 区分「未提供/错误」两种：未提供时前端展示验证码输入框。
+			if totpCode == "" {
+				return nil, pkg.ErrTotpRequired
+			}
+			return nil, errors.New("totp code invalid")
+		}
 	}
 
 	roles, err := s.userRepo.GetRoles(user.ID)

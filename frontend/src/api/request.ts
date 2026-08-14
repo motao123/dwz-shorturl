@@ -113,8 +113,9 @@ service.interceptors.response.use(
       if (envelope.code === 0) {
         return envelope.data as never
       }
-      const err = new Error(envelope.msg || '请求失败') as Error & { code?: number }
+      const err = new Error(envelope.msg || '请求失败') as Error & { code?: number; data?: unknown }
       err.code = envelope.code
+      err.data = envelope.data
       return Promise.reject(err)
     }
 
@@ -169,9 +170,10 @@ service.interceptors.response.use(
 
     const fallback = status ? `请求失败（${status}）` : '网络异常，请检查后端服务'
     const finalMsg = msg || fallback
-    const err = new Error(finalMsg) as Error & { code?: number; status?: number }
+    const err = new Error(finalMsg) as Error & { code?: number; status?: number; data?: unknown }
     err.status = status
     err.code = error.response?.data?.code
+    err.data = error.response?.data?.data
     return Promise.reject(err)
   }
 )
