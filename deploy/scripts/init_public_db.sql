@@ -1,7 +1,16 @@
--- Fresh-install schema. This file is intentionally non-destructive:
--- existing tables and rows are never dropped or replaced.
--- Existing installations should run migrations/legacy_schema.php instead.
+-- Public frontend database initialisation for Docker.
+-- Creates the public schema and the tables the admin backend manages via
+-- public_db (members, violation_reviews) plus the PHP-facing wjoy_log.
+CREATE DATABASE IF NOT EXISTS `1_xk7_cn` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+-- Grant the app user (default: dwz) access to the public schema. This runs as
+-- root during docker-entrypoint-initdb.d. Keep in sync with MYSQL_USER.
+GRANT ALL PRIVILEGES ON `1_xk7_cn`.* TO 'dwz'@'%';
+FLUSH PRIVILEGES;
+
+USE `1_xk7_cn`;
+
+-- Public short links (PHP-era write path)
 CREATE TABLE IF NOT EXISTS `wjoy_log` (
   `Id` int unsigned NOT NULL AUTO_INCREMENT,
   `uid` varchar(16) NOT NULL,
@@ -20,7 +29,7 @@ CREATE TABLE IF NOT EXISTS `wjoy_log` (
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Public-facing member accounts (login / register on the PHP frontend).
+-- Public-facing member accounts
 CREATE TABLE IF NOT EXISTS `members` (
   `id`            INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `username`      VARCHAR(32)  NOT NULL,
@@ -44,7 +53,7 @@ CREATE TABLE IF NOT EXISTS `members` (
   KEY `idx_reset_token` (`reset_token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Violation review log: records blocked URL submissions for manual review.
+-- Violation review log (blocked URLs awaiting manual review)
 CREATE TABLE IF NOT EXISTS `violation_reviews` (
   `id`          INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `url`         TEXT         NOT NULL,

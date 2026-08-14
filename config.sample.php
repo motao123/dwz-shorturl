@@ -17,6 +17,18 @@ $trusted_proxies = array();
 // 限流文件目录。生产环境建议放在 Web 根目录之外，并授予 PHP 进程写权限。
 $rate_limit_dir = __DIR__ . '/logs/ratelimit';
 
+// 管理后台数据库（用于把新短链双写到 short_urls，收敛数据源）。
+// 留空 user/name 则关闭双写（仅写 wjoy_log）。
+$admin_db_host = '127.0.0.1';
+$admin_db_port = 3306;
+$admin_db_user = '';
+$admin_db_pwd = '';
+$admin_db_name = '';
+
+// 会员 JWT 密钥（与 Go 后端 config.yaml 的 jwt.member_secret 保持一致）。
+// 用于会员后台鉴权，签发会员 token。
+$member_secret = '';
+
 // 统计页默认关闭。若要启用，建议同时设置足够长的随机令牌。
 $stats_enabled = false;
 $stats_token = '';
