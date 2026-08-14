@@ -8,12 +8,12 @@
 <meta property="og:title" content="DWZ ShortURL · 高性能企业级短链接平台">
 <meta property="og:description" content="PHP + Go + Vue3 混合架构短链接服务：SSRF 防护、2FA、GeoIP 分析、RBAC、Webhook、自动化运维。">
 <meta property="og:type" content="website">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
 <link rel="stylesheet" href="assets/site.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%235e6ad2'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white'>🔗</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23533afd'/><text x='50' y='68' font-size='50' text-anchor='middle' fill='white'>🔗</text></svg>">
 </head>
 <body>
 
@@ -43,12 +43,13 @@
 
 <!-- ============ Hero ============ -->
 <section class="hero">
+  <div class="hero-mesh" aria-hidden="true"></div>
   <div class="container">
-    <p class="hero-eyebrow mono"><span class="dot"></span>PHP · Go · Vue3 — 混合架构短链接平台</p>
-    <h1>一次生成，<br>随处链接<span class="brand">。</span></h1>
+    <p class="hero-eyebrow mono">PHP · Go · Vue3 — 混合架构短链接平台</p>
+    <h1>一次生成，随处链接<span class="grad">。</span><br>企业级短链，三引擎驱动</h1>
     <p class="hero-sub">
-      从普通短链到企业级安全管控、多维流量分析与自动化运维 ——
-      DWZ 短网址平台以三大引擎护航你的每一个链接。
+      从普通短链到安全管控、流量洞察与自动化运维 ——
+      DWZ 短网址平台以 PHP 前台、Go 核心、Vue3 管理台三大引擎，护航你的每一个链接。
     </p>
     <div class="hero-cta">
       <a class="btn btn-primary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">查看源码 →</a>
@@ -56,7 +57,7 @@
       <a class="btn btn-secondary" href="#docs">项目文档</a>
     </div>
 
-    <!-- 产品面板：短链管理示意 -->
+    <!-- 深海军蓝产品面板（Stripe DARK APP TRACK） -->
     <div class="app-panel">
       <div class="app-window">
         <div class="app-bar">
@@ -79,13 +80,13 @@
           <span class="code">/m4h2w</span>
           <span class="url">https://example.com/campaign/launch-notes</span>
           <span class="clicks">526</span>
-          <span class="status-badge">Review</span>
+          <span class="status-badge warn">Review</span>
         </div>
         <div class="app-row">
           <span class="code">/p8t1c</span>
           <span class="url">https://example.com/archive/2025-report</span>
           <span class="clicks">192</span>
-          <span class="status-badge">Expired</span>
+          <span class="status-badge err">Expired</span>
         </div>
       </div>
     </div>
@@ -96,35 +97,98 @@
 <section style="padding-top:0;">
   <div class="container">
     <div class="stats">
-      <div class="stat reveal"><b><em>3</em></b><span>引擎：PHP 前台 · Go 核心 · Vue3 管理台</span></div>
-      <div class="stat reveal"><b><em>22</em></b><span>RBAC 权限点，4 级角色精细化授权</span></div>
-      <div class="stat reveal"><b><em>13</em></b><span>批次深度审计，全部修复上线</span></div>
-      <div class="stat reveal"><b><em>7</em></b><span>幂等迁移，schema_migrations 版本管理</span></div>
+      <div class="stat reveal"><b class="tnum"><em>3</em></b><span>引擎：PHP 前台 · Go 核心 · Vue3 管理台</span></div>
+      <div class="stat reveal"><b class="tnum"><em>22</em></b><span>RBAC 权限点，4 级角色精细化授权</span></div>
+      <div class="stat reveal"><b class="tnum"><em>13</em></b><span>批次深度审计，全部修复上线</span></div>
+      <div class="stat reveal"><b class="tnum"><em>7</em></b><span>幂等迁移，schema_migrations 版本管理</span></div>
     </div>
   </div>
 </section>
 
-<!-- ============ 功能 ============ -->
+<!-- ============ 功能（Bento 12 栏网格） ============ -->
 <section id="features">
   <div class="container">
     <div class="section-head reveal">
-      <span class="section-tag">/ Features</span>
+      <span class="section-tag mono">/ Features</span>
       <h2>功能矩阵，不止于短链</h2>
       <p>覆盖前台体验、后台运营、安全防护、流量洞察与自动化运维五大维度。</p>
     </div>
-    <div class="features">
-      <div class="card reveal"><div class="card-icon">⚡</div><h3>双引擎跳转</h3><p>PHP 轻量前台与 Go 高性能网关双路径，Nginx 智能分流，P99 毫秒级响应。</p><div class="tags"><span class="tag">do.php</span><span class="tag">/r/:code</span></div></div>
-      <div class="card reveal"><div class="card-icon">🛡️</div><h3>SSRF 双向防护</h3><p>DNS 解析 + 拨号层私网与云元数据地址阻断，URL 创建与解析全程校验。</p><div class="tags"><span class="tag">169.254.169.254</span><span class="tag">dial</span></div></div>
-      <div class="card reveal"><div class="card-icon">🔐</div><h3>2FA 两步验证</h3><p>TOTP 双因素认证，配合 JWT 双令牌与 Redis 登出黑名单。</p><div class="tags"><span class="tag">TOTP</span><span class="tag">JWT</span></div></div>
-      <div class="card reveal"><div class="card-icon">🔗</div><h3>链接密码保护</h3><p>访问需输入密码，共享 HMAC Cookie 校验，适合企业敏感链接分发。</p><div class="tags"><span class="tag">HMAC</span><span class="tag">password_hash</span></div></div>
-      <div class="card reveal"><div class="card-icon">📊</div><h3>GeoIP 地域分析</h3><p>自研 ip2region v1 二进制读取器与 ISO 国家映射，零第三方依赖。</p><div class="tags"><span class="tag">ip2region</span><span class="tag">CountryCode</span></div></div>
-      <div class="card reveal"><div class="card-icon">📈</div><h3>Referer 来源洞察</h3><p>搜索引擎 / 社交媒体 / 直接访问 / 其他自动归类，Top N 可视化。</p><div class="tags"><span class="tag">search</span><span class="tag">social</span></div></div>
-      <div class="card reveal"><div class="card-icon">👥</div><h3>RBAC 权限体系</h3><p>4 级角色、22 个权限点、树形授权，管理员 / 运营 / 会员精细管控。</p><div class="tags"><span class="tag">super_admin</span><span class="tag">audit</span></div></div>
-      <div class="card reveal"><div class="card-icon">🛰️</div><h3>域名池管理</h3><p>多域名短链 + 负载均衡 + DNS/SSL 健康检测，单点失效自动切换。</p><div class="tags"><span class="tag">domains</span><span class="tag">load-balance</span></div></div>
-      <div class="card reveal"><div class="card-icon">📡</div><h3>Webhook 事件</h3><p>link.created / clicked / expired / deleted 事件订阅，HMAC 签名与重试投递。</p><div class="tags"><span class="tag">events</span><span class="tag">retry</span></div></div>
-      <div class="card reveal"><div class="card-icon">🚨</div><h3>违规内容检测</h3><p>菠菜 / 仿冒 / 恶意关键词规则库，blocked / review / passed 三态审核流。</p><div class="tags"><span class="tag">blocked</span><span class="tag">review</span></div></div>
-      <div class="card reveal"><div class="card-icon">🗃️</div><h3>迁移版本管理</h3><p>cmd/migrate 工具 + schema_migrations 表，全部幂等可重复执行。</p><div class="tags"><span class="tag">-dry-run</span><span class="tag">-status</span></div></div>
-      <div class="card reveal"><div class="card-icon">⚖️</div><h3>双写对账 Cron</h3><p>short_urls ↔ wjoy_log 数据对账、点击计数校准、click_logs 自动分区。</p><div class="tags"><span class="tag">reconcile</span><span class="tag">partition</span></div></div>
+    <div class="bento">
+      <!-- 大卡 ×2 -->
+      <div class="card s6 bg-peach reveal">
+        <div class="card-icon">⚡</div>
+        <h3>双引擎跳转</h3>
+        <p>PHP 轻量前台与 Go 高性能网关双路径，Nginx 智能分流。短链创建、解析、重定向各司其职，P99 毫秒级响应。</p>
+        <div class="tags"><span class="tag">do.php</span><span class="tag">/r/:code</span><span class="tag">302</span></div>
+      </div>
+      <div class="card s6 bg-blue reveal">
+        <div class="card-icon">🛡️</div>
+        <h3>企业级安全体系</h3>
+        <p>SSRF 双向防护阻断私网与云元数据地址；TOTP 双因素认证；JWT 双令牌 + Redis 登出黑名单；链接密码保护与违规内容检测。</p>
+        <div class="tags"><span class="tag">SSRF</span><span class="tag">2FA</span><span class="tag">JWT</span><span class="tag">HMAC</span></div>
+      </div>
+      <!-- 中卡 ×6 -->
+      <div class="card s4 bg-white reveal">
+        <div class="card-icon">📊</div>
+        <h3>GeoIP 地域分析</h3>
+        <p>自研 ip2region v1 二进制读取器与 ISO 国家映射，零第三方依赖。</p>
+        <div class="tags"><span class="tag">ip2region</span><span class="tag">CountryCode</span></div>
+      </div>
+      <div class="card s4 bg-white reveal">
+        <div class="card-icon">📈</div>
+        <h3>Referer 来源洞察</h3>
+        <p>搜索引擎 / 社交媒体 / 直接访问 / 其他自动归类，Top N 可视化。</p>
+        <div class="tags"><span class="tag">search</span><span class="tag">social</span></div>
+      </div>
+      <div class="card s4 bg-white reveal">
+        <div class="card-icon">👥</div>
+        <h3>RBAC 权限体系</h3>
+        <p>4 级角色、22 个权限点、树形授权，管理员 / 运营 / 会员精细管控。</p>
+        <div class="tags"><span class="tag">super_admin</span><span class="tag">audit</span></div>
+      </div>
+      <div class="card s4 bg-white reveal">
+        <div class="card-icon">🛰️</div>
+        <h3>域名池管理</h3>
+        <p>多域名短链 + 负载均衡 + DNS/SSL 健康检测，单点失效自动切换。</p>
+        <div class="tags"><span class="tag">domains</span><span class="tag">load-balance</span></div>
+      </div>
+      <div class="card s4 bg-white reveal">
+        <div class="card-icon">📡</div>
+        <h3>Webhook 事件</h3>
+        <p>link.created / clicked / expired / deleted 事件订阅，HMAC 签名与重试投递。</p>
+        <div class="tags"><span class="tag">events</span><span class="tag">retry</span></div>
+      </div>
+      <div class="card s4 bg-peach reveal">
+        <div class="card-icon">🗃️</div>
+        <h3>迁移版本管理</h3>
+        <p>cmd/migrate 工具 + schema_migrations 表，全部幂等可重复执行。</p>
+        <div class="tags"><span class="tag">-dry-run</span><span class="tag">-status</span></div>
+      </div>
+      <!-- 小卡 ×4 -->
+      <div class="card s3 bg-white reveal">
+        <div class="card-icon">🔐</div>
+        <h3>2FA 两步验证</h3>
+        <p>TOTP 双因素认证，支持 Google Authenticator。</p>
+        <div class="tags"><span class="tag">TOTP</span></div>
+      </div>
+      <div class="card s3 bg-white reveal">
+        <div class="card-icon">🔗</div>
+        <h3>链接密码保护</h3>
+        <p>共享 HMAC Cookie 校验，敏感链接安全分发。</p>
+        <div class="tags"><span class="tag">HMAC</span></div>
+      </div>
+      <div class="card s3 bg-white reveal">
+        <div class="card-icon">🚨</div>
+        <h3>违规检测</h3>
+        <p>关键词规则库，blocked / review / passed 三态。</p>
+        <div class="tags"><span class="tag">blocked</span></div>
+      </div>
+      <div class="card s3 bg-blue reveal">
+        <div class="card-icon">⚖️</div>
+        <h3>双写对账</h3>
+        <p>short_urls ↔ wjoy_log 对账，点击计数校准、自动分区。</p>
+        <div class="tags"><span class="tag">reconcile</span></div>
+      </div>
     </div>
   </div>
 </section>
@@ -133,7 +197,7 @@
 <section id="arch">
   <div class="container">
     <div class="section-head reveal">
-      <span class="section-tag">/ Architecture</span>
+      <span class="section-tag mono">/ Architecture</span>
       <h2>系统架构</h2>
       <p>三层解耦 + 双写对账，前后台数据永远一致。</p>
     </div>
@@ -168,7 +232,7 @@
 <section id="stack">
   <div class="container">
     <div class="section-head reveal">
-      <span class="section-tag">/ Stack</span>
+      <span class="section-tag mono">/ Stack</span>
       <h2>技术栈</h2>
       <p>克制而现代的工程组合，每层都选最适合的工具。</p>
     </div>
@@ -191,14 +255,14 @@
 <section id="quickstart">
   <div class="container">
     <div class="section-head reveal">
-      <span class="section-tag">/ Quickstart</span>
+      <span class="section-tag mono">/ Quickstart</span>
       <h2>快速开始</h2>
       <p>三分钟跑起来，Docker 一条命令搞定全部依赖。</p>
     </div>
     <div class="quick-grid">
       <div class="code-block reveal">
         <div class="code-head">
-          <div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+          <div class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
           <span>docker-compose.yml</span>
           <button class="copy-btn" data-copy="c1">复制</button>
         </div>
@@ -210,7 +274,7 @@ docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
       </div>
       <div class="code-block reveal">
         <div class="code-head">
-          <div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+          <div class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
           <span>本地开发</span>
           <button class="copy-btn" data-copy="c2">复制</button>
         </div>
@@ -233,7 +297,7 @@ docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
 <section id="docs">
   <div class="container">
     <div class="section-head reveal">
-      <span class="section-tag">/ Docs</span>
+      <span class="section-tag mono">/ Docs</span>
       <h2>项目文档</h2>
       <p>从接口说明到架构审计，一站式了解 DWZ 短网址平台。</p>
     </div>
@@ -281,7 +345,7 @@ docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
 <footer class="footer">
   <div class="container footer-inner">
     <p>© 2026 <b>DWZ ShortURL</b> · 作者 <a href="https://github.com/motao123" target="_blank" rel="noopener">陌涛</a> · MIT License</p>
-    <p class="mono" style="color:var(--ink-tertiary);">Design inspired by Linear · Built with ❤️</p>
+    <p class="mono" style="color:var(--ink-mute);">Design by Stripe × Bento · Built with ❤️</p>
   </div>
 </footer>
 
