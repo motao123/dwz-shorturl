@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
 import { Refresh, Check } from '@element-plus/icons-vue'
 import { getAllConfigs, batchUpdateConfigs, type ConfigItem } from '@/api/configs'
 

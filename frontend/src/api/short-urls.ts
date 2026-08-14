@@ -20,6 +20,7 @@ export interface ShortUrl {
   ip: string | null
   domain_id?: number | null
   domain?: string
+  has_password?: boolean
   short_url?: string
   created_at: string
   updated_at: string
@@ -33,6 +34,8 @@ export interface ShortUrlQuery extends PageParams {
   date_to?: string
   sort?: string
   order?: 'asc' | 'desc'
+  /** 1=只看已删除（回收站） */
+  include_deleted?: 1 | 0
 }
 
 export interface ShortUrlPayload {
@@ -44,6 +47,8 @@ export interface ShortUrlPayload {
   expire_at?: string | null
   status?: ShortUrlStatus
   domain_id?: number | null
+  /** 访问密码；编辑时省略=不修改，空串=清除 */
+  password?: string
 }
 
 /** 分页列表 */
@@ -76,6 +81,45 @@ export function batchRemoveShortUrls(ids: number[]): Promise<{ deleted: number }
   return request.post<{ deleted: number }>('/short-urls/batch-delete', { ids })
 }
 
+/** 恢复已删除短链（回收站） */
+export function restoreShortUrl(id: number): Promise<ShortUrl> {
+  return request.post<ShortUrl>(`/short-urls/${id}/restore`)
+}
+
+/** 批量更新（状态/有效期） */
+export function batchUpdateShortUrls(ids: number[], data: { status?: number; expire_days?: number }): Promise<{ updated: number }> {
+  return request.post<{ updated: number }>('/short-urls/batch-update', { ids, ...data })
+}
+
+export interface LinkStat {
+  uid: string
+  total: number
+  trend: { label: string; clicks: number }[]
+  referrers: { label: string; clicks: number }[]
+  referrer_types?: { label: string; clicks: number }[]
+  devices?: { label: string; clicks: number }[]
+  browsers?: { label: string; clicks: number }[]
+  countries?: { label: string; clicks: number }[]
+}
+
+/** 单链统计数据 */
+export function getShortUrlStats(id: number): Promise<LinkStat> {
+  return request.get<LinkStat>(`/stats/link/${id}`)
+}
+
+export interface LinkCheckResult {
+  id: number
+  url: string
+  ok: boolean
+  status: number
+  error?: string
+}
+
+/** 链接健康检查（HEAD 目标 URL） */
+export function checkShortUrl(id: number): Promise<LinkCheckResult> {
+  return request.get<LinkCheckResult>(`/short-urls/${id}/check`)
+}
+
 export interface BatchCreateResult {
   results: ShortUrl[]
   errors: string[]
@@ -93,4 +137,25 @@ export function batchCreateShortUrls(urls: string[], domainId?: number | null): 
 /** 导出 CSV（二进制流） */
 export function exportShortUrlsCsv(params: Omit<ShortUrlQuery, 'page' | 'per_page'>): Promise<Blob> {
   return request.get<Blob>('/short-urls/export', { params, responseType: 'blob' })
+}
+
+export interface ImportResult {
+  results: ShortUrl[]
+  errors: string[]
+  total: number
+}
+
+export interface ImportShortUrlPayload {
+  format: 'csv' | 'json'
+  content: string
+  domain_id?: number | null
+}
+
+/** CSV/JSON 导入 */
+export function importShortUrls(data: ImportShortUrlPayload): Promise<ImportResult> {
+  return request.post<ImportResult>('/short-urls/import', {
+    format: data.format,
+    content: data.content,
+    domain_id: data.domain_id || undefined
+  })
 }

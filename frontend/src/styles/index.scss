@@ -296,3 +296,197 @@ body {
   opacity: 0;
   transform: translateY(-4px);
 }
+
+/* ============================================================
+   暗色模式（html.dark 时覆盖）
+   ============================================================ */
+html.dark {
+  --dwz-paper: #0d171c;
+  --dwz-line: #24333a;
+  --dwz-text: #d6e2e5;
+  --dwz-text-dim: #7d9299;
+  --dwz-ink: #0a1f25;
+  --dwz-ink-2: #10262c;
+  --dwz-petrol: #2aa3ab;
+  --dwz-petrol-strong: #1f8a92;
+  --dwz-amber: #f5a623;
+  --dwz-amber-deep: #ffb94d;
+
+  --el-color-primary: var(--dwz-petrol);
+  --el-color-primary-dark-2: var(--dwz-petrol-strong);
+  --el-color-primary-light-3: #1f6a70;
+  --el-color-primary-light-5: #1c545a;
+  --el-color-primary-light-7: #183f44;
+  --el-color-primary-light-8: #14363a;
+  --el-color-primary-light-9: #102d31;
+
+  --el-bg-color: #0d171c;
+  --el-bg-color-overlay: #142127;
+  --el-fill-color-blank: #0d171c;
+  --el-fill-color-light: #142127;
+  --el-fill-color-lighter: #1a282e;
+  --el-border-color: #24333a;
+  --el-border-color-light: #24333a;
+  --el-border-color-lighter: #24333a;
+  --el-text-color-primary: #d6e2e5;
+  --el-text-color-regular: #c4d2d6;
+  --el-text-color-secondary: #7d9299;
+  --el-mask-color: rgba(0, 0, 0, 0.6);
+}
+
+html.dark body {
+  background: var(--dwz-paper);
+  color: var(--dwz-text);
+}
+
+html.dark .app-card {
+  background: #122027;
+  border-color: var(--dwz-line);
+}
+
+html.dark .app-page__title {
+  color: var(--dwz-text);
+}
+
+html.dark .el-table {
+  --el-table-bg-color: #122027;
+  --el-table-tr-bg-color: #122027;
+  --el-table-header-bg-color: #16262d;
+  --el-table-border-color: var(--dwz-line);
+  --el-table-header-text-color: #c4d2d6;
+  --el-table-text-color: #d6e2e5;
+}
+
+/* ─── 会员中心暗色覆盖 ─── */
+html.dark body {
+  background: #0d171c;
+}
+
+html.dark .member-shell .topbar {
+  border-bottom-color: var(--dwz-line);
+}
+
+html.dark .member-shell .card {
+  background: #122027;
+  border-color: var(--dwz-line);
+}
+
+html.dark .member-shell .card h2 {
+  color: var(--dwz-text);
+}
+
+html.dark .member-shell .user-name {
+  color: var(--dwz-text);
+}
+
+html.dark .member-login .login-card {
+  background: #122027;
+  border-color: var(--dwz-line);
+}
+
+html.dark .member-login .login-card h1 {
+  color: var(--dwz-text);
+}
+
+html.dark .member-shell .stats-block-title,
+html.dark .member-shell .trend-val,
+html.dark .member-shell .trend-date,
+html.dark .member-shell .stats-empty,
+html.dark .member-shell .stats-total-label,
+html.dark .member-shell .long,
+html.dark .member-shell .mono {
+  color: var(--dwz-text-dim);
+}
+
+html.dark .member-shell .stats-total-num {
+  color: var(--dwz-petrol);
+}
+
+html.dark .member-shell .summary-card {
+  background: #122027;
+  border-color: var(--dwz-line);
+}
+
+html.dark .member-shell .verify-banner {
+  background: #2a2417;
+  border-color: #5c4a1f;
+  color: #ffd591;
+}
+
+html.dark .member-shell .summary-num {
+  color: var(--dwz-petrol);
+}
+
+html.dark .member-shell .summary-label {
+  color: var(--dwz-text-dim);
+}
+
+html.dark .member-shell .title {
+  color: var(--dwz-text);
+}
+
+html.dark .member-shell .home-link {
+  color: var(--dwz-petrol);
+}
+
+/* ==================== 可访问性与响应式（全局） ==================== */
+
+/* 键盘焦点可见环：覆盖所有自定义按钮/链接（Element Plus 组件自带） */
+:focus-visible {
+  outline: 2px solid var(--dwz-petrol);
+  outline-offset: 2px;
+}
+
+/* 窄屏表格横向滚动保护：宽表格在小屏上不再压缩列导致 fixed 列重叠 */
+@media (max-width: 992px) {
+  .el-table {
+    min-width: 720px;
+  }
+  .app-card,
+  .el-card,
+  .el-main {
+    overflow-x: auto;
+  }
+  .el-table__header-wrapper,
+  .el-table__body-wrapper {
+    overflow-x: auto;
+  }
+}
+
+/* 暗色模式补全：覆盖各页面 scoped 样式里散落的硬编码浅色背景 */
+html.dark .stat,
+html.dark .mini-btn,
+html.dark .summary-card,
+html.dark .stats-block,
+html.dark .stats-total,
+html.dark .toolbar,
+html.dark .app-toolbar,
+html.dark .head-actions,
+html.dark .user-cell,
+html.dark .empty-box {
+  background: #122027 !important;
+  border-color: var(--dwz-line) !important;
+  color: var(--dwz-text);
+}
+
+html.dark .stat .stat__label,
+html.dark .stat .mini-label,
+html.dark .mini-btn,
+html.dark .stats-block-title,
+html.dark .stats-empty,
+html.dark .stats-total-label {
+  color: var(--dwz-text-dim);
+}
+
+html.dark .stat .stat__num {
+  color: var(--dwz-petrol);
+}
+
+html.dark .mini-btn {
+  border-color: var(--dwz-line) !important;
+}
+
+html.dark .mini-btn:hover:not(:disabled) {
+  background: var(--el-fill-color-light) !important;
+  color: var(--dwz-petrol) !important;
+}

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Search, Plus, EditPen, Delete, Refresh } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import type { FormRules, FormInstance } from 'element-plus'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { Search, Plus, EditPen, Delete, Refresh, CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import {
   listDomains,
   createDomain,
@@ -228,14 +230,14 @@ onMounted(loadData)
       </div>
       <div class="head-actions">
         <el-button
-          :icon="Refresh"
+          :icon="CircleCheck"
           :disabled="!selected.length"
           @click="handleBatchStatus(1)"
         >
           批量启用<span v-if="selected.length" class="mono">&nbsp;({{ selected.length }})</span>
         </el-button>
         <el-button
-          :icon="Refresh"
+          :icon="CircleClose"
           :disabled="!selected.length"
           @click="handleBatchStatus(0)"
         >

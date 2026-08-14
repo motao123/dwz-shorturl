@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import type { TableInstance } from 'element-plus'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import {
   Search,
   Plus,
@@ -8,16 +10,27 @@ import {
   DocumentCopy,
   EditPen,
   Download,
-  Position
+  Upload,
+  Position,
+  TrendCharts,
+  CircleCheck,
+  DeleteFilled,
+  RefreshLeft
 } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import {
   listShortUrls,
   removeShortUrl,
   batchRemoveShortUrls,
+  batchUpdateShortUrls,
   exportShortUrlsCsv,
+  importShortUrls,
+  getShortUrlStats,
+  checkShortUrl,
+  restoreShortUrl,
   type ShortUrl,
-  type ShortUrlQuery
+  type ShortUrlQuery,
+  type LinkStat
 } from '@/api/short-urls'
 import {
   SHORT_URL_STATUS,
@@ -43,8 +56,12 @@ const query = reactive<ShortUrlQuery>({
   date_from: '',
   date_to: '',
   sort: 'created_at',
-  order: 'desc'
+  order: 'desc',
+  include_deleted: 0
 })
+
+/** 回收站视图开关：为 1 时只看已删除短链 */
+const showTrash = ref(false)
 
 const dateRange = ref<[string, string] | null>(null)
 
@@ -54,6 +71,7 @@ const editingRow = ref<ShortUrl | null>(null)
 
 function buildParams(): ShortUrlQuery {
   const params: ShortUrlQuery = { ...query }
+  params.include_deleted = showTrash.value ? 1 : 0
   if (dateRange.value) {
     params.date_from = dayjs(dateRange.value[0]).format('YYYY-MM-DD')
     params.date_to = dayjs(dateRange.value[1]).format('YYYY-MM-DD')
@@ -62,6 +80,31 @@ function buildParams(): ShortUrlQuery {
     params.date_to = ''
   }
   return params
+}
+
+function toggleTrash() {
+  showTrash.value = !showTrash.value
+  query.page = 1
+  loadData()
+}
+
+async function handleRestore(row: ShortUrl) {
+  try {
+    await ElMessageBox.confirm(`确定恢复短链「${row.uid}」吗？恢复后链接将重新可用。`, '恢复短链', {
+      confirmButtonText: '恢复',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  try {
+    await restoreShortUrl(row.id)
+    ElMessage.success('短链已恢复')
+    loadData()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '恢复失败')
+  }
 }
 
 async function loadData() {
@@ -136,6 +179,74 @@ function openEdit(row: ShortUrl) {
   formVisible.value = true
 }
 
+const statsVisible = ref(false)
+const statsLoading = ref(false)
+const stats = ref<LinkStat | null>(null)
+
+async function handleCheck(row: ShortUrl) {
+  try {
+    const r = await checkShortUrl(row.id)
+    if (r.ok) {
+      ElMessage.success(`目标可达（HTTP ${r.status}）`)
+    } else {
+      ElMessage.warning(`目标不可达（HTTP ${r.status || '无响应'}${r.error ? '：' + r.error : ''}）`)
+    }
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '检查失败')
+  }
+}
+
+async function handleStats(row: ShortUrl) {
+  statsVisible.value = true
+  statsLoading.value = true
+  stats.value = null
+  try {
+    stats.value = await getShortUrlStats(row.id)
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '加载统计失败')
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+function statsMax(items: { clicks: number }[]): number {
+  return items.reduce((m, t) => Math.max(m, t.clicks), 0) || 1
+}
+
+/** ISO 3166-1 alpha-2 → 中文名（地域分布展示） */
+const COUNTRY_NAMES: Record<string, string> = {
+  CN: '中国', HK: '中国香港', MO: '中国澳门', TW: '中国台湾', US: '美国', JP: '日本',
+  KR: '韩国', SG: '新加坡', GB: '英国', DE: '德国', FR: '法国', IT: '意大利',
+  ES: '西班牙', RU: '俄罗斯', NL: '荷兰', CA: '加拿大', AU: '澳大利亚', NZ: '新西兰',
+  IN: '印度', MY: '马来西亚', TH: '泰国', VN: '越南', ID: '印度尼西亚', PH: '菲律宾',
+  BR: '巴西', TR: '土耳其', AE: '阿联酋', SA: '沙特阿拉伯', MX: '墨西哥',
+  CH: '瑞士', SE: '瑞典', NO: '挪威', FI: '芬兰', DK: '丹麦', PL: '波兰',
+  UA: '乌克兰', IE: '爱尔兰', AT: '奥地利', PT: '葡萄牙', GR: '希腊', CZ: '捷克',
+  AR: '阿根廷', CL: '智利', CO: '哥伦比亚', ZA: '南非', EG: '埃及', IL: '以色列',
+  IR: '伊朗', PK: '巴基斯坦', BD: '孟加拉国', KZ: '哈萨克斯坦'
+}
+
+function countryName(code: string): string {
+  return COUNTRY_NAMES[code.toUpperCase()] ?? code.toUpperCase()
+}
+
+function countryFlag(code: string): string {
+  // ISO alpha-2 → 地区指示符号 (regional indicator symbols) 生成旗帜 emoji
+  const c = code.toUpperCase()
+  if (!/^[A-Z]{2}$/.test(c)) return '🌐'
+  const base = 0x1f1e6
+  return String.fromCodePoint(base + c.charCodeAt(0) - 65, base + c.charCodeAt(1) - 65)
+}
+
+function refTypeIcon(type: string): string {
+  switch (type) {
+    case '搜索引擎': return '🔍'
+    case '社交媒体': return '📣'
+    case '直接访问': return '🔗'
+    default: return '🌐'
+  }
+}
+
 async function handleRemove(row: ShortUrl) {
   try {
     await ElMessageBox.confirm(
@@ -152,6 +263,46 @@ async function handleRemove(row: ShortUrl) {
     loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '删除失败')
+  }
+}
+
+const batchEditVisible = ref(false)
+const batchStatus = ref<number | ''>('')
+const batchExpire = ref(0)
+const batchUpdating = ref(false)
+
+function openBatchEdit() {
+  if (!selected.value.length) {
+    ElMessage.warning('请先勾选要操作的短链')
+    return
+  }
+  batchStatus.value = ''
+  batchExpire.value = 0
+  batchEditVisible.value = true
+}
+
+async function submitBatchEdit() {
+  const data: { status?: number; expire_days?: number } = {}
+  if (batchStatus.value !== '') data.status = Number(batchStatus.value)
+  if (batchExpire.value === -1) {
+    data.expire_days = 0 // 永久有效：清空有效期
+  } else if (batchExpire.value > 0) {
+    data.expire_days = batchExpire.value
+  }
+  if (Object.keys(data).length === 0) {
+    ElMessage.warning('请选择要修改的状态或有效期')
+    return
+  }
+  batchUpdating.value = true
+  try {
+    const r = await batchUpdateShortUrls(selected.value.map((s) => s.id), data)
+    ElMessage.success(`已更新 ${r.updated} 条短链`)
+    batchEditVisible.value = false
+    loadData()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '批量更新失败')
+  } finally {
+    batchUpdating.value = false
   }
 }
 
@@ -185,8 +336,11 @@ async function handleExport() {
     const a = document.createElement('a')
     a.href = url
     a.download = `short-urls-${dayjs().format('YYYYMMDD-HHmm')}.csv`
+    document.body.appendChild(a)
     a.click()
-    URL.revokeObjectURL(url)
+    a.remove()
+    // 延迟释放 blob URL，确保下载已开始（旧浏览器立即 revoke 可能中断下载）
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
     ElMessage.success('CSV 导出成功')
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '导出失败')
@@ -197,6 +351,39 @@ async function handleExport() {
 
 function truncateUrl(url: string, len = 46): string {
   return url.length > len ? url.slice(0, len) + '…' : url
+}
+
+/* ---------------- 导入 ---------------- */
+
+const importVisible = ref(false)
+const importing = ref(false)
+const importFormat = ref<'csv' | 'json'>('csv')
+const importContent = ref('')
+const importResult = ref<{ ok: number; fail: number; errors: string[] } | null>(null)
+
+function openImport() {
+  importResult.value = null
+  importContent.value = ''
+  importVisible.value = true
+}
+
+async function handleImport() {
+  if (!importContent.value.trim()) {
+    ElMessage.warning('请输入要导入的内容')
+    return
+  }
+  importing.value = true
+  importResult.value = null
+  try {
+    const res = await importShortUrls({ format: importFormat.value, content: importContent.value })
+    importResult.value = { ok: res.total, fail: res.errors.length, errors: res.errors }
+    ElMessage.success(`导入完成：成功 ${res.total} 条，失败 ${res.errors.length} 条`)
+    loadData()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '导入失败')
+  } finally {
+    importing.value = false
+  }
 }
 
 function formatExpire(row: ShortUrl): string {
@@ -219,6 +406,15 @@ onMounted(loadData)
       </div>
       <div class="head-actions">
         <el-button :icon="Download" :loading="exporting" @click="handleExport">导出 CSV</el-button>
+        <el-button :icon="Upload" :loading="importing" @click="openImport">导入</el-button>
+        <el-button
+          :icon="showTrash ? DeleteFilled : Delete"
+          :type="showTrash ? 'warning' : 'default'"
+          plain
+          @click="toggleTrash"
+        >
+          {{ showTrash ? '返回列表' : '回收站' }}
+        </el-button>
         <el-button
           type="danger"
           plain
@@ -227,6 +423,14 @@ onMounted(loadData)
           @click="handleBatchRemove"
         >
           批量删除<span v-if="selected.length" class="mono">&nbsp;({{ selected.length }})</span>
+        </el-button>
+        <el-button
+          plain
+          :icon="EditPen"
+          :disabled="!selected.length"
+          @click="openBatchEdit"
+        >
+          批量修改<span v-if="selected.length" class="mono">&nbsp;({{ selected.length }})</span>
         </el-button>
         <el-button type="primary" :icon="Plus" @click="openCreate">新建</el-button>
       </div>
@@ -296,8 +500,11 @@ onMounted(loadData)
                 <a :href="row.short_url || buildShortUrl(row.uid)" target="_blank" rel="noopener" class="uid mono">
                   {{ row.uid }}
                 </a>
+                <el-tooltip v-if="row.has_password" content="此链接已设置访问密码" placement="top">
+                  <span class="lock-badge" aria-label="已设置访问密码">🔒</span>
+                </el-tooltip>
                 <el-tooltip content="复制短链" placement="top">
-                  <button class="mini-btn" @click="handleCopy(row as ShortUrl)">
+                  <button class="mini-btn" aria-label="复制短链" @click="handleCopy(row as ShortUrl)">
                     <el-icon :size="13"><DocumentCopy /></el-icon>
                   </button>
                 </el-tooltip>
@@ -351,22 +558,37 @@ onMounted(loadData)
               <span class="mono row-sub">{{ dayjs(row.created_at).format('YYYY-MM-DD HH:mm') }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="122" fixed="right" align="center">
+          <el-table-column label="操作" width="200" fixed="right" align="center">
             <template #default="{ row }">
               <div class="ops">
                 <el-tooltip content="访问短链" placement="top">
-                  <a class="mini-btn" :href="buildShortUrl(row.uid)" target="_blank" rel="noopener">
+                  <a class="mini-btn" aria-label="访问短链" :href="buildShortUrl(row.uid)" target="_blank" rel="noopener">
                     <el-icon :size="13"><Position /></el-icon>
                   </a>
                 </el-tooltip>
+                <el-tooltip content="统计" placement="top">
+                  <button class="mini-btn" aria-label="查看统计" @click="handleStats(row as ShortUrl)">
+                    <el-icon :size="13"><TrendCharts /></el-icon>
+                  </button>
+                </el-tooltip>
+                <el-tooltip content="检查目标" placement="top">
+                  <button class="mini-btn" aria-label="检查目标链接" @click="handleCheck(row as ShortUrl)">
+                    <el-icon :size="13"><CircleCheck /></el-icon>
+                  </button>
+                </el-tooltip>
                 <el-tooltip content="编辑" placement="top">
-                  <button class="mini-btn" @click="openEdit(row as ShortUrl)">
+                  <button class="mini-btn" aria-label="编辑短链" @click="openEdit(row as ShortUrl)">
                     <el-icon :size="13"><EditPen /></el-icon>
                   </button>
                 </el-tooltip>
                 <el-tooltip content="删除" placement="top">
-                  <button class="mini-btn mini-btn--danger" @click="handleRemove(row as ShortUrl)">
+                  <button class="mini-btn mini-btn--danger" aria-label="删除短链" @click="handleRemove(row as ShortUrl)">
                     <el-icon :size="13"><Delete /></el-icon>
+                  </button>
+                </el-tooltip>
+                <el-tooltip v-if="showTrash" content="恢复" placement="top">
+                  <button class="mini-btn" aria-label="恢复短链" @click="handleRestore(row as ShortUrl)">
+                    <el-icon :size="13"><RefreshLeft /></el-icon>
                   </button>
                 </el-tooltip>
               </div>
@@ -394,6 +616,154 @@ onMounted(loadData)
     </section>
 
     <ShortUrlForm v-model="formVisible" :editing="editingRow" @saved="loadData" />
+
+    <!-- 导入弹窗 -->
+    <el-dialog v-model="importVisible" title="批量导入短链" width="580px" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <el-form-item label="格式">
+          <el-radio-group v-model="importFormat">
+            <el-radio value="csv">CSV</el-radio>
+            <el-radio value="json">JSON</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="内容">
+          <el-input
+            v-model="importContent"
+            type="textarea"
+            :rows="10"
+            placeholder="CSV 每行一条：url,title,custom,expire_days&#10;示例：https://example.com/a,标题A,,7&#10;&#10;JSON 数组：&#10;[{&quot;url&quot;:&quot;https://example.com/a&quot;,&quot;title&quot;:&quot;标题A&quot;,&quot;expire_days&quot;:7}]"
+          />
+        </el-form-item>
+        <div v-if="importResult" class="import-result">
+          <p>成功 {{ importResult.ok }} 条，失败 {{ importResult.fail }} 条</p>
+          <ul v-if="importResult.errors.length">
+            <li v-for="(e, i) in importResult.errors.slice(0, 20)" :key="i" class="mono">{{ e }}</li>
+          </ul>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="importVisible = false">取消</el-button>
+        <el-button type="primary" :loading="importing" @click="handleImport">开始导入</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 批量修改弹窗 -->
+    <el-dialog v-model="batchEditVisible" title="批量修改短链" width="420px" :close-on-click-modal="false">
+      <el-form label-position="top">
+        <el-form-item label="状态（不修改请留空）">
+          <el-select v-model="batchStatus" placeholder="不修改" clearable style="width: 100%">
+            <el-option label="启用" :value="1" />
+            <el-option label="禁用" :value="0" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="有效期（不修改请选 0）">
+          <el-select v-model="batchExpire" style="width: 100%">
+            <el-option label="不修改" :value="0" />
+            <el-option label="永久有效" :value="-1" />
+            <el-option label="7 天" :value="7" />
+            <el-option label="30 天" :value="30" />
+            <el-option label="1 年" :value="365" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="batchEditVisible = false">取消</el-button>
+        <el-button type="primary" :loading="batchUpdating" @click="submitBatchEdit">确定修改</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 单链统计弹窗 -->
+    <el-dialog v-model="statsVisible" title="短链统计" width="560px" :close-on-click-modal="false">
+      <div v-loading="statsLoading" class="stats-body">
+        <template v-if="stats">
+          <div class="stats-total">
+            <span class="stats-total-num">{{ stats.total.toLocaleString() }}</span>
+            <span class="stats-total-label">总点击</span>
+          </div>
+
+          <div class="stats-block">
+            <div class="stats-block-title">近 7 天趋势</div>
+            <div v-if="stats.trend.length" class="trend-bars">
+              <div v-for="t in stats.trend" :key="t.label" class="trend-col">
+                <div class="trend-bar" :style="{ height: (t.clicks / statsMax(stats.trend)) * 100 + '%' }">
+                  <span class="trend-val">{{ t.clicks }}</span>
+                </div>
+                <span class="trend-date">{{ t.label.slice(5) }}</span>
+              </div>
+            </div>
+            <p v-else class="stats-empty">近 7 天暂无点击</p>
+          </div>
+
+          <div class="stats-block">
+            <div class="stats-block-title">来源 Top 10</div>
+            <el-table v-if="stats.referrers.length" :data="stats.referrers" size="small">
+              <el-table-column label="来源" min-width="200">
+                <template #default="{ row }">
+                  <span class="mono">{{ row.label || '直接访问' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="clicks" label="次数" width="90" align="center" />
+            </el-table>
+            <p v-else class="stats-empty">暂无来源数据</p>
+          </div>
+
+          <div class="stats-block">
+            <div class="stats-block-title">来源类型</div>
+            <el-table v-if="stats.referrer_types && stats.referrer_types.length" :data="stats.referrer_types" size="small">
+              <el-table-column label="类型" min-width="120">
+                <template #default="{ row }">
+                  <span>{{ refTypeIcon(row.label) }}</span>
+                  <span style="margin-left: 6px">{{ row.label }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="clicks" label="次数" width="90" align="center" />
+            </el-table>
+            <p v-else class="stats-empty">暂无来源类型数据</p>
+          </div>
+
+          <div class="stats-block">
+            <div class="stats-block-title">设备分布</div>
+            <el-table v-if="stats.devices && stats.devices.length" :data="stats.devices" size="small">
+              <el-table-column label="设备" min-width="120">
+                <template #default="{ row }">
+                  <span style="margin-right: 4px">{{ row.label === '手机' ? '📱' : row.label === '平板' ? '📲' : '💻' }}</span>
+                  <span>{{ row.label }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="clicks" label="次数" width="90" align="center" />
+            </el-table>
+            <p v-else class="stats-empty">暂无设备数据</p>
+          </div>
+
+          <div class="stats-block">
+            <div class="stats-block-title">浏览器分布</div>
+            <el-table v-if="stats.browsers && stats.browsers.length" :data="stats.browsers" size="small">
+              <el-table-column label="浏览器" min-width="120">
+                <template #default="{ row }">
+                  <span>{{ row.label }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="clicks" label="次数" width="90" align="center" />
+            </el-table>
+            <p v-else class="stats-empty">暂无浏览器数据</p>
+          </div>
+
+          <div class="stats-block">
+            <div class="stats-block-title">地域分布</div>
+            <el-table v-if="stats.countries && stats.countries.length" :data="stats.countries" size="small">
+              <el-table-column label="国家/地区" min-width="120">
+                <template #default="{ row }">
+                  <span>{{ countryFlag(row.label) }}</span>
+                  <span style="margin-left: 6px">{{ countryName(row.label) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="clicks" label="次数" width="90" align="center" />
+            </el-table>
+            <p v-else class="stats-empty">暂无地域数据</p>
+          </div>
+        </template>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -407,6 +777,12 @@ onMounted(loadData)
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.lock-badge {
+  font-size: 12px;
+  line-height: 1;
+  cursor: default;
 }
 
 .uid {
@@ -482,5 +858,86 @@ onMounted(loadData)
   display: inline-flex;
   gap: 6px;
   justify-content: center;
+}
+
+.stats-body {
+  min-height: 120px;
+}
+
+.stats-total {
+  text-align: center;
+  padding: 8px 0 18px;
+}
+
+.stats-total-num {
+  font-size: 40px;
+  font-weight: 700;
+  color: var(--dwz-petrol);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-total-label {
+  display: block;
+  margin-top: 2px;
+  color: var(--dwz-text-dim);
+  font-size: 12px;
+}
+
+.stats-block {
+  margin-top: 18px;
+}
+
+.stats-block-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dwz-text-dim);
+  margin-bottom: 10px;
+}
+
+.trend-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 140px;
+  padding: 0 4px;
+}
+
+.trend-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+}
+
+.trend-bar {
+  width: 100%;
+  max-width: 34px;
+  min-height: 2px;
+  background: linear-gradient(180deg, #2aa3ab, #0e6e75);
+  border-radius: 4px 4px 0 0;
+  position: relative;
+}
+
+.trend-val {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--dwz-text-dim);
+}
+
+.trend-date {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--dwz-text-dim);
+}
+
+.stats-empty {
+  color: var(--dwz-text-dim);
+  font-size: 13px;
+  padding: 12px 0;
 }
 </style>

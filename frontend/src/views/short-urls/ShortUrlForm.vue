@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage } from 'element-plus/es/components/message/index'
+import type { FormRules, FormInstance } from 'element-plus'
 import { Link } from '@element-plus/icons-vue'
 import { createShortUrl, updateShortUrl, type ShortUrl, type ShortUrlPayload } from '@/api/short-urls'
 import { getActiveDomains, type ActiveDomain } from '@/api/domains'
@@ -48,6 +49,7 @@ interface FormState {
   expire_days: number | null
   status: 0 | 1
   domain_id: number | null
+  password: string
 }
 
 const form = reactive<FormState>({
@@ -57,10 +59,15 @@ const form = reactive<FormState>({
   category_id: null,
   expire_days: null,
   status: 1,
-  domain_id: null
+  domain_id: null,
+  password: ''
 })
 
-/** -1 作为「永久有效」的选择器哨兵值 */
+/** 编辑模式的密码策略：keep=不修改 set=设置新密码 clear=清除密码 */
+const passwordMode = ref<'keep' | 'set' | 'clear'>('keep')
+
+/** -1 作为「永久有效」的选择器哨兵值；-2 仅编辑模式使用，表示「不修改」 */
+const EXPIRE_UNCHANGED = -2
 const expireOptions = [
   { label: '永久有效', value: -1 },
   { label: '1 天', value: 1 },
@@ -71,12 +78,18 @@ const expireOptions = [
   { label: '1 年', value: 365 }
 ]
 
-const expireModel = computed<number>({
-  get: () => form.expire_days ?? -1,
-  set: (v: number) => {
-    form.expire_days = v === -1 ? null : v
-  }
-})
+/** 有效期下拉当前选中值（与 form.expire_days 分离，-2 不修改 不写入 form） */
+const expireSel = ref(-1)
+
+/** 编辑模式是否改动过有效期；未改动时提交 payload 省略 expire_days，避免把原有有效期清成永久 */
+const expireChanged = ref(false)
+
+function setExpireSel(v: number) {
+  if (v === EXPIRE_UNCHANGED) return // 保持 form.expire_days 原值，提交时省略该字段
+  expireChanged.value = true
+  expireSel.value = v
+  form.expire_days = v === -1 ? null : v
+}
 
 const urlValidator = (_: unknown, value: string, callback: (err?: Error) => void) => {
   if (!value) return callback(new Error('请输入目标 URL'))
@@ -111,6 +124,10 @@ function resetForm() {
   form.expire_days = null
   form.status = 1
   form.domain_id = null
+  form.password = ''
+  passwordMode.value = 'keep'
+  expireSel.value = -1
+  expireChanged.value = false
   formRef.value?.clearValidate()
 }
 
@@ -121,9 +138,27 @@ watch(visible, (v) => {
     form.uid = props.editing.uid
     form.title = props.editing.title ?? ''
     form.category_id = props.editing.category_id
+    // 回填当前有效期：永久 → 永久；剩余天数能精确匹配选项 → 该天数；否则 → 不修改
+    expireChanged.value = false
+    expireSel.value = -1
     form.expire_days = null
-    form.status = props.editing.status === 0 ? 0 : 1
+    if (props.editing.expire_at) {
+      const remainingDays = Math.round((new Date(props.editing.expire_at).getTime() - Date.now()) / 86400000)
+      const matched = expireOptions.find((o) => o.value !== -1 && o.value === remainingDays)
+      if (matched) {
+        expireSel.value = matched.value
+        form.expire_days = matched.value
+        expireChanged.value = true
+      } else {
+        expireSel.value = EXPIRE_UNCHANGED
+      }
+    }
+    // status: 仅 1=启用，其余（禁用/已过期）都按不可用展示为「禁用」，避免编辑过期链接被静默改为启用
+    form.status = props.editing.status === 1 ? 1 : 0
     form.domain_id = props.editing.domain_id ?? null
+    // 密码：默认「不修改」，仅当用户显式选择设置/清除时才随提交发送
+    form.password = ''
+    passwordMode.value = props.editing.has_password ? 'keep' : 'keep'
   } else {
     resetForm()
   }
@@ -142,8 +177,21 @@ async function handleSubmit() {
     const payload: ShortUrlPayload = {
       long_url: form.long_url.trim(),
       title: form.title.trim() || undefined,
-      category_id: form.category_id,
-      expire_days: form.expire_days
+      category_id: form.category_id
+    }
+    // 编辑模式未改动有效期时省略 expire_days，后端保持原有效期不变
+    if (!(isEdit.value && !expireChanged.value)) {
+      payload.expire_days = form.expire_days
+    }
+    if (isEdit.value) {
+      // 密码：仅当用户显式选择「设置/清除」时才发送，避免误清
+      if (passwordMode.value === 'set' && form.password) {
+        payload.password = form.password
+      } else if (passwordMode.value === 'clear') {
+        payload.password = ''
+      }
+    } else if (form.password) {
+      payload.password = form.password
     }
     if (isEdit.value && props.editing) {
       payload.status = form.status
@@ -204,7 +252,8 @@ async function handleSubmit() {
         </el-col>
         <el-col :span="12">
           <el-form-item label="有效期">
-            <el-select v-model="expireModel" placeholder="选择有效期" style="width: 100%">
+            <el-select v-model="expireSel" placeholder="选择有效期" style="width: 100%" @change="setExpireSel">
+              <el-option v-if="isEdit" label="不修改（保留当前有效期）" :value="EXPIRE_UNCHANGED" />
               <el-option
                 v-for="opt in expireOptions"
                 :key="String(opt.value)"
@@ -252,6 +301,35 @@ async function handleSubmit() {
         </el-select>
       </el-form-item>
 
+      <el-form-item label="访问密码">
+        <div v-if="isEdit" class="pw-mode">
+          <el-radio-group v-model="passwordMode" class="pw-mode__radios">
+            <el-radio value="keep">{{ editing?.has_password ? '保留现有密码' : '不设置' }}</el-radio>
+            <el-radio value="set">设置新密码</el-radio>
+            <el-radio v-if="editing?.has_password" value="clear">清除密码</el-radio>
+          </el-radio-group>
+          <el-input
+            v-if="passwordMode === 'set'"
+            v-model="form.password"
+            type="password"
+            show-password
+            placeholder="可选，访问此链接需输入密码"
+            :maxlength="72"
+            clearable
+            class="pw-mode__input"
+          />
+        </div>
+        <el-input
+          v-else
+          v-model="form.password"
+          type="password"
+          show-password
+          placeholder="可选，访问此链接需输入密码"
+          :maxlength="72"
+          clearable
+        />
+      </el-form-item>
+
       <el-form-item v-if="isEdit" label="状态">
         <el-radio-group v-model="form.status">
           <el-radio :value="1">启用</el-radio>
@@ -282,5 +360,20 @@ async function handleSubmit() {
   font-weight: 700;
   color: var(--dwz-ink);
   padding-bottom: 4px;
+}
+
+.pw-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.pw-mode__radios {
+  width: 100%;
+}
+
+.pw-mode__input {
+  width: 100%;
 }
 </style>

@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import NProgress from 'nprogress'
 import { useAuthStore } from '@/stores/auth'
+import { hasPermission } from '@/utils/permission'
 
 NProgress.configure({ showSpinner: false, easing: 'ease', speed: 500 })
 
@@ -10,6 +11,12 @@ const routes: RouteRecordRaw[] = [
     name: 'Login',
     component: () => import('@/views/login/LoginView.vue'),
     meta: { title: '登录', public: true }
+  },
+  {
+    path: '/403',
+    name: 'Forbidden',
+    component: () => import('@/views/error/ForbiddenView.vue'),
+    meta: { title: '无权限', public: true }
   },
   {
     path: '/',
@@ -41,6 +48,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '用户管理', icon: 'User', perm: 'users.read' }
       },
       {
+        path: 'members',
+        name: 'Members',
+        component: () => import('@/views/members/MemberList.vue'),
+        meta: { title: '注册用户', icon: 'UserFilled', perm: 'users.read' }
+      },
+      {
         path: 'roles',
         name: 'Roles',
         component: () => import('@/views/roles/RoleList.vue'),
@@ -51,6 +64,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Stats',
         component: () => import('@/views/stats/StatsView.vue'),
         meta: { title: '统计分析', icon: 'TrendCharts', perm: 'stats.read' }
+      },
+      {
+        path: 'monitor',
+        name: 'Monitor',
+        component: () => import('@/views/monitor/MonitorView.vue'),
+        meta: { title: '系统监控', icon: 'Monitor', perm: 'stats.read' }
       },
       {
         path: 'configs',
@@ -65,10 +84,28 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '审计日志', icon: 'Document', perm: 'audit.read' }
       },
       {
+        path: 'violations',
+        name: 'Violations',
+        component: () => import('@/views/violations/ViolationReviewList.vue'),
+        meta: { title: '违规审核', icon: 'WarningFilled', perm: 'audit.read' }
+      },
+      {
         path: 'api-keys',
         name: 'ApiKeys',
         component: () => import('@/views/api-keys/ApiKeyList.vue'),
         meta: { title: 'API 密钥', icon: 'Key', perm: 'api_keys.read' }
+      },
+      {
+        path: 'api-docs',
+        name: 'ApiDocs',
+        component: () => import('@/views/api-docs/ApiDocsView.vue'),
+        meta: { title: 'API 文档', icon: 'Document', perm: 'api_keys.read' }
+      },
+      {
+        path: 'webhooks',
+        name: 'Webhooks',
+        component: () => import('@/views/webhooks/WebhookList.vue'),
+        meta: { title: 'Webhook', icon: 'BellFilled', perm: 'api_keys.read' }
       }
     ]
   },
@@ -109,6 +146,11 @@ router.beforeEach(async (to) => {
       auth.logoutLocal()
       return { path: '/login', query: { redirect: to.fullPath } }
     }
+  }
+
+  // P1: 路由级权限校验，防止低权限用户直接改 URL 进入无权限页面
+  if (to.meta.perm && !hasPermission(to.meta.perm as string)) {
+    return { path: '/403' }
   }
 
   return true
