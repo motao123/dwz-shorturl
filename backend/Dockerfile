@@ -16,17 +16,21 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /app/server ./cmd/server
 
 # Runtime stage
-FROM alpine:3.19
+FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates tzdata \
     && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
-    && echo "Asia/Shanghai" > /etc/timezone
+    && echo "Asia/Shanghai" > /etc/timezone \
+    && addgroup -S app && adduser -S -G app app
 
 WORKDIR /app
 
 # Copy binary and configs
 COPY --from=builder /app/server .
 COPY configs/ ./configs/
+
+# Drop privileges: run as an unprivileged user so a container escape is not root.
+USER app
 
 EXPOSE 8080
 

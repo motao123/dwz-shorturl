@@ -63,6 +63,43 @@ type UserRole struct {
 
 func (UserRole) TableName() string { return "user_roles" }
 
+// Member is a public-facing registered user (lives in the public frontend DB,
+// separate from the admin `users` table).
+type Member struct {
+	ID           uint64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	Username     string     `gorm:"size:32;uniqueIndex:uk_username;not null" json:"username"`
+	Email        string     `gorm:"size:128;uniqueIndex:uk_email;not null" json:"email"`
+	PasswordHash string     `gorm:"size:255;not null" json:"-"`
+	Status       int8       `gorm:"default:1;not null" json:"status"`
+	LastLoginAt  *time.Time `json:"last_login_at"`
+	LastLoginIP  string     `gorm:"size:45" json:"last_login_ip"`
+	TokenVersion int        `gorm:"default:0;not null" json:"token_version"`
+	EmailVerified int8      `gorm:"default:0;not null" json:"email_verified"`
+	VerifyToken  string     `gorm:"size:64" json:"-"`
+	VerifyExpiresAt *time.Time `json:"-"`
+	ResetToken   string     `gorm:"size:64" json:"-"`
+	ResetExpiresAt *time.Time `json:"-"`
+	CreatedAt    time.Time  `json:"created_at"`
+}
+
+func (Member) TableName() string { return "members" }
+
+// ViolationReview records a blocked URL submission for manual review. Lives in
+// the public frontend DB alongside members.
+type ViolationReview struct {
+	ID         uint64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	URL        string     `gorm:"type:text;not null" json:"url"`
+	Reason     string     `gorm:"size:64;default:''" json:"reason"`
+	IP         string     `gorm:"size:45" json:"ip"`
+	Source     string     `gorm:"size:16;default:api" json:"source"`
+	Reviewed   int8       `gorm:"default:0;not null" json:"reviewed"`
+	ReviewedAt *time.Time `json:"reviewed_at"`
+	Note       string     `gorm:"size:255" json:"note"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+func (ViolationReview) TableName() string { return "violation_reviews" }
+
 // ShortUrl represents a shortened URL record.
 type ShortUrl struct {
 	ID         uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
@@ -75,12 +112,18 @@ type ShortUrl struct {
 	Clicks     uint32         `gorm:"default:0;not null" json:"clicks"`
 	Status     int8           `gorm:"default:1;not null" json:"status"`
 	ExpireAt   *time.Time     `json:"expire_at"`
-	CreatedBy  *uint64        `json:"created_by"`
-	Source     string         `gorm:"size:16;default:web;not null" json:"source"`
-	IP         string         `gorm:"size:45" json:"ip"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
-	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+	// PasswordHash is the bcrypt hash of the optional access password; never
+	// serialised. HasPassword is computed for the UI (lock indicator).
+	PasswordHash string         `gorm:"size:255" json:"-"`
+	HasPassword  bool           `gorm:"-" json:"has_password"`
+	CreatedBy    *uint64        `json:"created_by"`
+	MemberID     *uint64        `gorm:"index" json:"member_id"`
+	Source       string         `gorm:"size:16;default:web;not null" json:"source"`
+	IP           string         `gorm:"size:45" json:"ip"`
+	ReminderSentAt *time.Time   `json:"reminder_sent_at"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 func (ShortUrl) TableName() string { return "short_urls" }
@@ -158,3 +201,34 @@ type ApiKey struct {
 }
 
 func (ApiKey) TableName() string { return "api_keys" }
+
+// WebhookSub is a webhook subscription for outbound event notifications.
+type WebhookSub struct {
+	ID        uint64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	Name      string     `gorm:"size:64;not null" json:"name"`
+	URL       string     `gorm:"size:512;not null" json:"url"`
+	Events    string     `gorm:"type:json;not null" json:"events"` // JSON array of event names
+	Secret    string     `gorm:"size:64" json:"-"`
+	Status    int8       `gorm:"default:1;not null" json:"status"`
+	CreatedBy *uint64    `json:"created_by"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+func (WebhookSub) TableName() string { return "webhooks" }
+
+// WebhookDelivery records an outbound webhook delivery attempt.
+type WebhookDelivery struct {
+	ID             uint64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	WebhookID      uint64     `gorm:"not null" json:"webhook_id"`
+	Event          string     `gorm:"size:32;not null" json:"event"`
+	Payload        string     `gorm:"type:json;not null" json:"payload"`
+	ResponseStatus int        `json:"response_status"`
+	ResponseBody   string     `gorm:"type:text" json:"response_body"`
+	Attempt        int        `gorm:"default:1;not null" json:"attempt"`
+	Success        int8       `gorm:"default:0;not null" json:"success"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+func (WebhookDelivery) TableName() string { return "webhook_deliveries" }

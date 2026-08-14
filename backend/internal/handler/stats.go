@@ -73,6 +73,20 @@ func (h *StatsHandler) TopN(c *gin.Context) {
 	pkg.Success(c, result)
 }
 
+func (h *StatsHandler) LinkStats(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, "invalid id")
+		return
+	}
+	result, err := h.svc.LinkStats(id)
+	if err != nil {
+		pkg.Fail(c, http.StatusNotFound, pkg.CodeNotFound, "short url not found")
+		return
+	}
+	pkg.Success(c, result)
+}
+
 func (h *StatsHandler) Recent(c *gin.Context) {
 	n := 20
 	if ns := c.Query("n"); ns != "" {
@@ -87,5 +101,37 @@ func (h *StatsHandler) Recent(c *gin.Context) {
 		return
 	}
 
+	pkg.Success(c, result)
+}
+
+// Countries returns the global traffic-source country distribution (30 days).
+func (h *StatsHandler) Countries(c *gin.Context) {
+	limit := 12
+	if ns := c.Query("limit"); ns != "" {
+		if v, err := strconv.Atoi(ns); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	result, err := h.svc.Countries(limit)
+	if err != nil {
+		pkg.Fail(c, http.StatusInternalServerError, pkg.CodeInternalError, "failed to get country distribution")
+		return
+	}
+	pkg.Success(c, result)
+}
+
+// ReferrerTypes returns the global referrer-type breakdown (30 days).
+func (h *StatsHandler) ReferrerTypes(c *gin.Context) {
+	limit := 8
+	if ns := c.Query("limit"); ns != "" {
+		if v, err := strconv.Atoi(ns); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	result, err := h.svc.ReferrerTypes(limit)
+	if err != nil {
+		pkg.Fail(c, http.StatusInternalServerError, pkg.CodeInternalError, "failed to get referrer types")
+		return
+	}
 	pkg.Success(c, result)
 }

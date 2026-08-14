@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"dwz-admin/internal/model"
 	"dwz-admin/internal/pkg"
@@ -35,7 +36,25 @@ func (h *ConfigHandler) GetAll(c *gin.Context) {
 		return
 	}
 
+	// P1-6: never return secret-ish values (passwords, API tokens, SMTP creds)
+	// to the frontend. The keys stay visible so admins know the setting exists.
+	for i := range configs {
+		if isSensitiveConfigKey(configs[i].ConfigKey) && configs[i].ConfigValue != "" {
+			configs[i].ConfigValue = "******"
+		}
+	}
+
 	pkg.Success(c, configs)
+}
+
+func isSensitiveConfigKey(key string) bool {
+	k := strings.ToLower(key)
+	for _, part := range []string{"password", "secret", "token", "apikey", "api_key", "appkey", "app_key", "private"} {
+		if strings.Contains(k, part) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *ConfigHandler) BatchUpdate(c *gin.Context) {

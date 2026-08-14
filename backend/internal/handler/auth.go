@@ -2,19 +2,22 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	"dwz-admin/internal/pkg"
 	"dwz-admin/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 )
 
 type AuthHandler struct {
 	svc service.AuthService
+	rdb *redis.Client
 }
 
-func NewAuthHandler(svc service.AuthService) *AuthHandler {
-	return &AuthHandler{svc: svc}
+func NewAuthHandler(svc service.AuthService, rdb *redis.Client) *AuthHandler {
+	return &AuthHandler{svc: svc, rdb: rdb}
 }
 
 type LoginRequest struct {
@@ -59,8 +62,20 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	// Token blacklisting can be implemented with Redis in production.
-	// For now, we simply return success since JWT is stateless.
+	// P1-4: revoke the current access token by blacklisting its jti until it
+	// would naturally expire. The Auth middleware rejects blacklisted jtis.
+	if h.rdb != nil {
+		jti := c.GetString("token_jti")
+		if jti != "" {
+			if exp, ok := c.Get("token_exp"); ok {
+				if t, ok2 := exp.(time.Time); ok2 {
+					if ttl := time.Until(t); ttl > 0 {
+						h.rdb.Set(c.Request.Context(), "jwt:blacklist:"+jti, 1, ttl)
+					}
+				}
+			}
+		}
+	}
 	pkg.Success(c, nil)
 }
 

@@ -47,6 +47,10 @@ func (m *mockShortRepo) FindByHash(hash string) (*model.ShortUrl, error) {
 	}
 	return nil, gorm.ErrRecordNotFound
 }
+func (m *mockShortRepo) FindByHashIncludingDeleted(hash string) (*model.ShortUrl, error) {
+	// Tests never exercise resurrection, so behave like FindByHash.
+	return m.FindByHash(hash)
+}
 func (m *mockShortRepo) FindByID(id uint64) (*model.ShortUrl, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -55,6 +59,19 @@ func (m *mockShortRepo) FindByID(id uint64) (*model.ShortUrl, error) {
 		return &cp, nil
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+func (m *mockShortRepo) FindByIDIncludingDeleted(id uint64) (*model.ShortUrl, error) {
+	return m.FindByID(id)
+}
+func (m *mockShortRepo) RestoreWithDomainCount(url *model.ShortUrl) error {
+	// Tests never exercise restore domain counting; clear the deleted flag.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	url.DeletedAt = gorm.DeletedAt{}
+	if r, ok := m.records[url.ID]; ok {
+		r.DeletedAt = gorm.DeletedAt{}
+	}
+	return nil
 }
 func (m *mockShortRepo) Create(u *model.ShortUrl) error {
 	m.mu.Lock()
@@ -176,7 +193,10 @@ type mockDomainRepo struct {
 }
 
 func (m *mockDomainRepo) List(*int8) ([]model.Domain, error)     { return nil, nil }
-func (m *mockDomainRepo) FindByID(uint64) (*model.Domain, error) { return nil, gorm.ErrRecordNotFound }
+func (m *mockDomainRepo) FindByID(id uint64) (*model.Domain, error) {
+	// Tests exercise domain counting, so any requested domain is active.
+	return &model.Domain{ID: id, Status: 1}, nil
+}
 func (m *mockDomainRepo) FindByDomain(string) (*model.Domain, error) {
 	return nil, gorm.ErrRecordNotFound
 }
@@ -205,7 +225,7 @@ func (m *mockDomainRepo) PickAvailable() (*model.Domain, error) { return nil, go
 func buildService(sr *mockShortRepo, dr *mockDomainRepo) ShortUrlService {
 	sr.domains = dr
 	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:0"}) // never dialed in these tests
-	return NewShortUrlService(sr, rdb, nil)
+	return NewShortUrlService(sr, rdb, nil, nil, dr, nil)
 }
 
 // --- tests ---
@@ -217,7 +237,7 @@ func TestCreate_IncrementsDomainLinkCount(t *testing.T) {
 	svc := buildService(sr, dr)
 
 	domainID := uint64(7)
-	rec, err := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1")
+	rec, err := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -241,7 +261,7 @@ func TestCreate_NoDomain_NoCountChange(t *testing.T) {
 	dr := &mockDomainRepo{}
 	svc := buildService(sr, dr)
 
-	if _, err := svc.Create("https://www.example.com", "", 0, nil, nil, "test", "127.0.0.1"); err != nil {
+	if _, err := svc.Create("https://www.example.com", "", 0, nil, nil, "test", "127.0.0.1", ""); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 	if dr.incrCnt != 0 || dr.decrCnt != 0 {
@@ -256,11 +276,11 @@ func TestCreate_Dedup_DoesNotDoubleIncrement(t *testing.T) {
 	svc := buildService(sr, dr)
 
 	domainID := uint64(7)
-	if _, err := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1"); err != nil {
+	if _, err := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1", ""); err != nil {
 		t.Fatalf("first Create failed: %v", err)
 	}
 	// second create same URL -> dedup, should NOT increment again
-	if _, err := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1"); err != nil {
+	if _, err := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1", ""); err != nil {
 		t.Fatalf("second Create failed: %v", err)
 	}
 	if dr.incrCnt != 1 {
@@ -275,7 +295,7 @@ func TestDelete_DecrementsDomainLinkCount(t *testing.T) {
 	svc := buildService(sr, dr)
 
 	domainID := uint64(7)
-	rec, err := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1")
+	rec, err := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -326,7 +346,7 @@ func TestUpdate_DomainChange_AdjustsCounts(t *testing.T) {
 
 	oldDomain := uint64(1)
 	newDomain := uint64(2)
-	rec, err := svc.Create("https://www.example.com", "", 0, &oldDomain, nil, "test", "127.0.0.1")
+	rec, err := svc.Create("https://www.example.com", "", 0, &oldDomain, nil, "test", "127.0.0.1", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -334,7 +354,7 @@ func TestUpdate_DomainChange_AdjustsCounts(t *testing.T) {
 		t.Fatalf("setup: expected 1 increment, got %d", dr.incrCnt)
 	}
 
-	if _, err := svc.Update(rec.ID, "", "", nil, nil, nil, &newDomain); err != nil {
+	if _, err := svc.Update(rec.ID, "", "", nil, nil, nil, &newDomain, nil); err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
 	if dr.incrCnt != 2 {
@@ -352,13 +372,13 @@ func TestUpdate_SameDomain_NoCountChange(t *testing.T) {
 	svc := buildService(sr, dr)
 
 	domainID := uint64(1)
-	rec, err := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1")
+	rec, err := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1", "")
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 	beforeIncr, beforeDecr := dr.incrCnt, dr.decrCnt
 
-	if _, err := svc.Update(rec.ID, "", "new title", nil, nil, nil, &domainID); err != nil {
+	if _, err := svc.Update(rec.ID, "", "new title", nil, nil, nil, &domainID, nil); err != nil {
 		t.Fatalf("Update failed: %v", err)
 	}
 	if dr.incrCnt != beforeIncr || dr.decrCnt != beforeDecr {
@@ -373,7 +393,7 @@ func TestDelete_RepoFailure_NoDecrement(t *testing.T) {
 	svc := buildService(sr, dr)
 
 	domainID := uint64(1)
-	rec, _ := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1")
+	rec, _ := svc.Create("https://www.example.com", "", 0, &domainID, nil, "test", "127.0.0.1", "")
 
 	// Force SoftDelete to fail by deleting the record from the mock store first is not enough;
 	// instead patch via a second delete attempt on an already-deleted id.

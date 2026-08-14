@@ -11,11 +11,12 @@ import (
 )
 
 type DomainHandler struct {
-	svc service.DomainService
+	svc      service.DomainService
+	auditSvc service.AuditService
 }
 
-func NewDomainHandler(svc service.DomainService) *DomainHandler {
-	return &DomainHandler{svc: svc}
+func NewDomainHandler(svc service.DomainService, auditSvc service.AuditService) *DomainHandler {
+	return &DomainHandler{svc: svc, auditSvc: auditSvc}
 }
 
 type CreateDomainRequest struct {
@@ -96,6 +97,7 @@ func (h *DomainHandler) Create(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "domain", "domain_create", domain.ID, `{"domain":`+strconv.Quote(domain.Domain)+`}`)
 	pkg.Success(c, domain)
 }
 
@@ -118,6 +120,7 @@ func (h *DomainHandler) Update(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "domain", "domain_update", id, "")
 	pkg.Success(c, domain)
 }
 
@@ -133,6 +136,7 @@ func (h *DomainHandler) Delete(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "domain", "domain_delete", id, "")
 	pkg.Success(c, nil)
 }
 
@@ -149,6 +153,7 @@ func (h *DomainHandler) Check(c *gin.Context) {
 		return
 	}
 
+	auditLog(c, h.auditSvc, "domain", "domain_check", id, "")
 	domain, err := h.svc.GetByID(id)
 	if err != nil {
 		pkg.Success(c, gin.H{"id": id})
@@ -170,6 +175,8 @@ func (h *DomainHandler) BatchStatus(c *gin.Context) {
 		_, err := h.svc.Update(id, "", "", "", "", &req.Status, nil)
 		if err != nil {
 			failed = append(failed, id)
+		} else {
+			auditLog(c, h.auditSvc, "domain", "domain_batch_status", id, `{"status":`+strconv.Itoa(int(req.Status))+`}`)
 		}
 	}
 
