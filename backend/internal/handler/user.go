@@ -126,6 +126,77 @@ func (h *UserHandler) List(c *gin.Context) {
 	pkg.Paginated(c, list, total, page, perPage)
 }
 
+// TotpStatus reports whether the user has 2FA enabled.
+func (h *UserHandler) TotpStatus(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, "invalid id")
+		return
+	}
+	enabled, err := h.svc.TotpStatus(id)
+	if err != nil {
+		pkg.Fail(c, http.StatusNotFound, pkg.CodeNotFound, "user not found")
+		return
+	}
+	pkg.Success(c, gin.H{"enabled": enabled})
+}
+
+// ProvisionTotp generates a fresh TOTP secret + otpauth URI for enrollment.
+// The secret is NOT persisted until EnableTotp validates a code.
+func (h *UserHandler) ProvisionTotp(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, "invalid id")
+		return
+	}
+	secret, uri, err := h.svc.ProvisionTotp(id)
+	if err != nil {
+		pkg.Fail(c, http.StatusNotFound, pkg.CodeNotFound, "user not found")
+		return
+	}
+	pkg.Success(c, gin.H{"secret": secret, "uri": uri})
+}
+
+// EnableTotp validates a TOTP code against the provisioned secret and persists it.
+type EnableTotpRequest struct {
+	Code   string `json:"code" binding:"required"`
+	Secret string `json:"secret" binding:"required"`
+}
+
+func (h *UserHandler) EnableTotp(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, "invalid id")
+		return
+	}
+	var req EnableTotpRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "code and secret are required")
+		return
+	}
+	if err := h.svc.EnableTotp(id, req.Code, req.Secret); err != nil {
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+		return
+	}
+	auditLog(c, h.auditSvc, "user", "user_totp_enable", id, "")
+	pkg.Success(c, nil)
+}
+
+// DisableTotp clears the user's TOTP secret (2FA off).
+func (h *UserHandler) DisableTotp(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, "invalid id")
+		return
+	}
+	if err := h.svc.DisableTotp(id); err != nil {
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+		return
+	}
+	auditLog(c, h.auditSvc, "user", "user_totp_disable", id, "")
+	pkg.Success(c, nil)
+}
+
 func (h *UserHandler) ResetPassword(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {

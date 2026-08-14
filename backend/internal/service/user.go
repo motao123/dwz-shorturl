@@ -23,6 +23,14 @@ type UserService interface {
 	List(page, perPage int, keyword string) ([]model.User, int64, error)
 	AssignRoles(userID uint64, roleIDs []uint64) error
 	ResetPassword(id uint64, newPassword string) error
+	// TotpStatus reports whether the user has 2FA enabled (never returns the secret).
+	TotpStatus(id uint64) (bool, error)
+	// ProvisionTotp generates a new TOTP secret for enrollment (not yet saved).
+	ProvisionTotp(id uint64) (secret, uri string, err error)
+	// EnableTotp validates a code against a provisioned secret and persists it.
+	EnableTotp(id uint64, code, secret string) error
+	// DisableTotp clears the user's TOTP secret.
+	DisableTotp(id uint64) error
 }
 
 type userService struct {
@@ -104,11 +112,23 @@ func (s *userService) Delete(id uint64) error {
 }
 
 func (s *userService) GetByID(id uint64) (*model.User, error) {
-	return s.userRepo.FindByID(id)
+	user, err := s.userRepo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	user.TotpEnabled = user.TotpSecret != ""
+	return user, nil
 }
 
 func (s *userService) List(page, perPage int, keyword string) ([]model.User, int64, error) {
-	return s.userRepo.List(page, perPage, keyword)
+	users, total, err := s.userRepo.List(page, perPage, keyword)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range users {
+		users[i].TotpEnabled = users[i].TotpSecret != ""
+	}
+	return users, total, nil
 }
 
 func (s *userService) AssignRoles(userID uint64, roleIDs []uint64) error {
@@ -134,5 +154,47 @@ func (s *userService) ResetPassword(id uint64, newPassword string) error {
 	}
 
 	user.PasswordHash = hash
+	return s.userRepo.Update(user)
+}
+
+func (s *userService) TotpStatus(id uint64) (bool, error) {
+	user, err := s.userRepo.FindByID(id)
+	if err != nil {
+		return false, err
+	}
+	return user.TotpSecret != "", nil
+}
+
+func (s *userService) ProvisionTotp(id uint64) (string, string, error) {
+	user, err := s.userRepo.FindByID(id)
+	if err != nil {
+		return "", "", err
+	}
+	secret, err := pkg.GenerateTotpSecret()
+	if err != nil {
+		return "", "", err
+	}
+	uri := pkg.TotpSecretURI(secret, user.Username)
+	return secret, uri, nil
+}
+
+func (s *userService) EnableTotp(id uint64, code, secret string) error {
+	if !pkg.ValidateTotp(code, secret) {
+		return errors.New("验证码无效，请重试")
+	}
+	user, err := s.userRepo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	user.TotpSecret = secret
+	return s.userRepo.Update(user)
+}
+
+func (s *userService) DisableTotp(id uint64) error {
+	user, err := s.userRepo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	user.TotpSecret = ""
 	return s.userRepo.Update(user)
 }

@@ -2,8 +2,9 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import { Search, Plus, EditPen, Delete, RefreshLeft } from '@element-plus/icons-vue'
+import { Search, Plus, EditPen, Delete, RefreshLeft, Lock } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
+import QRCode from 'qrcode'
 import {
   listUsers,
   createUser,
@@ -11,6 +12,10 @@ import {
   removeUser,
   resetUserPassword,
   assignUserRoles,
+  getTotpStatus,
+  provisionTotp,
+  enableTotp,
+  disableTotp,
   type AdminUser,
   type UserPayload
 } from '@/api/users'
@@ -23,6 +28,79 @@ const total = ref(0)
 const allRoles = ref<Role[]>([])
 
 const query = reactive({ page: 1, per_page: 20, keyword: '' })
+
+/* ---------------- 2FA (TOTP) 管理 ---------------- */
+
+const totpVisible = ref(false)
+const totpUser = ref<AdminUser | null>(null)
+const totpEnabled = ref(false)
+const totpSecret = ref('')
+const totpUri = ref('')
+const totpQr = ref('')
+const totpCode = ref('')
+const totpSubmitting = ref(false)
+
+async function openTotp(row: AdminUser) {
+  totpUser.value = row
+  totpCode.value = ''
+  totpQr.value = ''
+  totpVisible.value = true
+  totpSubmitting.value = true
+  try {
+    const status = await getTotpStatus(row.id)
+    totpEnabled.value = status.enabled
+    if (!status.enabled) {
+      const prov = await provisionTotp(row.id)
+      totpSecret.value = prov.secret
+      totpUri.value = prov.uri
+      totpQr.value = await QRCode.toDataURL(prov.uri, { width: 220, margin: 1 })
+    }
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '加载 2FA 状态失败')
+    totpVisible.value = false
+  } finally {
+    totpSubmitting.value = false
+  }
+}
+
+async function handleEnableTotp() {
+  if (!totpUser.value || !/^\d{6}$/.test(totpCode.value.trim())) {
+    ElMessage.warning('请输入 6 位验证码')
+    return
+  }
+  totpSubmitting.value = true
+  try {
+    await enableTotp(totpUser.value.id, totpCode.value.trim(), totpSecret.value)
+    ElMessage.success('两步验证已开启')
+    totpVisible.value = false
+    loadData()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '启用失败')
+  } finally {
+    totpSubmitting.value = false
+  }
+}
+
+async function handleDisableTotp() {
+  if (!totpUser.value) return
+  try {
+    await ElMessageBox.confirm(`确定关闭用户「${totpUser.value.username}」的两步验证吗？`, '关闭两步验证', {
+      confirmButtonText: '关闭',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  try {
+    await disableTotp(totpUser.value.id)
+    ElMessage.success('两步验证已关闭')
+    totpVisible.value = false
+    loadData()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '关闭失败')
+  }
+}
 
 /* ---------------- 弹窗 ---------------- */
 
@@ -304,7 +382,7 @@ onMounted(() => {
               <span v-else class="user-cell__sub">从未登录</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="168" fixed="right" align="center">
+          <el-table-column label="操作" width="200" fixed="right" align="center">
             <template #default="{ row }">
               <div class="ops">
                 <el-tooltip content="编辑" placement="top">
@@ -315,6 +393,11 @@ onMounted(() => {
                 <el-tooltip content="重置密码" placement="top">
                   <button class="mini-btn" @click="handleResetPassword(row as AdminUser)">
                     <el-icon :size="13"><RefreshLeft /></el-icon>
+                  </button>
+                </el-tooltip>
+                <el-tooltip :content="(row as AdminUser).totp_enabled ? '2FA 已开启，管理' : '开启两步验证'" placement="top">
+                  <button class="mini-btn" aria-label="管理两步验证" @click="openTotp(row as AdminUser)">
+                    <el-icon :size="13"><Lock /></el-icon>
                   </button>
                 </el-tooltip>
                 <el-tooltip content="删除" placement="top">
@@ -406,6 +489,43 @@ onMounted(() => {
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 两步验证 (2FA) 管理弹窗 -->
+    <el-dialog
+      v-model="totpVisible"
+      :title="totpEnabled ? `两步验证 · ${totpUser?.username}` : `开启两步验证 · ${totpUser?.username}`"
+      width="460px"
+      :close-on-click-modal="false"
+    >
+      <div v-loading="totpSubmitting" class="totp-body">
+        <template v-if="totpEnabled">
+          <div class="totp-enabled">
+            <el-icon :size="40" color="#2aa3ab"><Lock /></el-icon>
+            <p>该账号已开启两步验证（TOTP）。</p>
+            <p class="totp-hint">登录时需同时输入动态验证码。关闭后账号将回到仅密码验证。</p>
+            <el-button type="danger" plain :loading="totpSubmitting" @click="handleDisableTotp">关闭两步验证</el-button>
+          </div>
+        </template>
+        <template v-else>
+          <p class="totp-step">1. 使用身份验证器 App（Google Authenticator 等）扫描二维码，或手动输入密钥：</p>
+          <div class="totp-qr">
+            <img v-if="totpQr" :src="totpQr" alt="TOTP 二维码" width="220" height="220" />
+          </div>
+          <div class="totp-secret mono">{{ totpSecret }}</div>
+          <p class="totp-step">2. 输入 App 显示的 6 位动态验证码完成绑定：</p>
+          <el-input
+            v-model="totpCode"
+            placeholder="6 位验证码"
+            :maxlength="6"
+            inputmode="numeric"
+            class="totp-code"
+          />
+          <el-button type="primary" class="totp-submit" :loading="totpSubmitting" @click="handleEnableTotp">
+            确认并开启
+          </el-button>
+        </template>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -490,5 +610,60 @@ onMounted(() => {
 :deep(.el-form-item__label) {
   font-weight: 700;
   color: var(--dwz-ink);
+}
+
+.totp-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.totp-enabled {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+}
+
+.totp-hint {
+  color: var(--dwz-text-dim);
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.totp-step {
+  width: 100%;
+  font-size: 13px;
+  color: var(--dwz-text);
+  margin: 4px 0;
+}
+
+.totp-qr {
+  border: 1px solid var(--dwz-line);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.totp-secret {
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--dwz-text-dim);
+  background: var(--dwz-paper);
+  padding: 6px 10px;
+  border-radius: 6px;
+  width: 100%;
+  text-align: center;
+}
+
+.totp-code {
+  width: 180px;
+}
+
+.totp-submit {
+  width: 100%;
 }
 </style>

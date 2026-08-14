@@ -3,7 +3,7 @@ import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import type { FormRules, FormInstance } from 'element-plus'
-import { User, Lock, Right } from '@element-plus/icons-vue'
+import { User, Lock, Right, Key } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
@@ -12,10 +12,12 @@ const authStore = useAuthStore()
 
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+const totpRequired = ref(false)
 
 const form = reactive({
   username: '',
-  password: ''
+  password: '',
+  totp_code: ''
 })
 
 const rules: FormRules = {
@@ -26,6 +28,10 @@ const rules: FormRules = {
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
     { min: 6, max: 64, message: '密码长度至少 6 位', trigger: 'blur' }
+  ],
+  totp_code: [
+    { required: true, message: '请输入 6 位验证码', trigger: 'blur' },
+    { pattern: /^\d{6}$/, message: '验证码为 6 位数字', trigger: 'blur' }
   ]
 }
 
@@ -39,11 +45,29 @@ async function handleLogin() {
 
   loading.value = true
   try {
-    await authStore.login({ username: form.username.trim(), password: form.password })
+    const payload = { username: form.username.trim(), password: form.password } as {
+      username: string
+      password: string
+      totp_code?: string
+    }
+    if (totpRequired.value) payload.totp_code = form.totp_code.trim()
+    await authStore.login(payload)
     ElMessage.success('登录成功，欢迎回来')
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
     router.push(redirect.startsWith('/') ? redirect : '/dashboard')
   } catch (err) {
+    const e = err as Error & { data?: unknown }
+    const data = e.data as { totp_required?: boolean } | undefined
+    if (data?.totp_required) {
+      totpRequired.value = true
+      ElMessage.warning('该账号已开启两步验证，请输入验证码')
+      // 聚焦验证码输入
+      setTimeout(() => {
+        const input = document.querySelector<HTMLInputElement>('input[name="totp"]')
+        input?.focus()
+      }, 100)
+      return
+    }
     ElMessage.error(err instanceof Error ? err.message : '登录失败，请检查用户名或密码')
   } finally {
     loading.value = false
@@ -128,6 +152,19 @@ async function handleLogin() {
               show-password
               :prefix-icon="Lock"
               autocomplete="current-password"
+              @keyup.enter="handleLogin"
+            />
+          </el-form-item>
+
+          <el-form-item v-if="totpRequired" prop="totp_code">
+            <el-input
+              v-model="form.totp_code"
+              name="totp"
+              placeholder="6 位动态验证码"
+              :prefix-icon="Key"
+              maxlength="6"
+              inputmode="numeric"
+              autocomplete="one-time-code"
               @keyup.enter="handleLogin"
             />
           </el-form-item>

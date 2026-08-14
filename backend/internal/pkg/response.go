@@ -45,6 +45,15 @@ func Fail(c *gin.Context, httpStatus, code int, msg string) {
 	})
 }
 
+// FailWithData is like Fail but carries extra payload (e.g. totp_required).
+func FailWithData(c *gin.Context, httpStatus, code int, msg string, data interface{}) {
+	c.JSON(httpStatus, Response{
+		Code: code,
+		Msg:  msg,
+		Data: data,
+	})
+}
+
 func FailWithError(c *gin.Context, code int, msg string) {
 	httpStatus := http.StatusOK
 	switch {

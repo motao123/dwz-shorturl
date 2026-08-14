@@ -152,6 +152,11 @@ func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, err
 				users.PUT("/:id/password", middleware.RequirePermission("users", "update"), h.User.ResetPassword)
 				users.PUT("/:id/roles", middleware.RequirePermission("users", "assign_roles"), h.User.AssignRoles)
 				users.DELETE("/:id", middleware.RequirePermission("users", "delete"), h.User.Delete)
+				// 2FA (TOTP) management
+				users.GET("/:id/totp", middleware.RequirePermission("users", "read"), h.User.TotpStatus)
+				users.POST("/:id/totp/provision", middleware.RequirePermission("users", "update"), h.User.ProvisionTotp)
+				users.POST("/:id/totp/enable", middleware.RequirePermission("users", "update"), h.User.EnableTotp)
+				users.DELETE("/:id/totp", middleware.RequirePermission("users", "update"), h.User.DisableTotp)
 			}
 
 			// Public members (registered users on the PHP frontend).

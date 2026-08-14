@@ -15,11 +15,15 @@ type User struct {
 	DisplayName  string         `gorm:"size:64" json:"display_name"`
 	AvatarURL    string         `gorm:"size:512" json:"avatar_url"`
 	Status       int8           `gorm:"default:1;not null" json:"status"`
-	LastLoginAt  *time.Time     `json:"last_login_at"`
-	LastLoginIP  string         `gorm:"size:45" json:"last_login_ip"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `gorm:"index:idx_deleted_at" json:"-"`
+	// TotpSecret is the base32 TOTP shared secret; non-empty = 2FA enabled.
+	// Never serialised. TotpEnabled is computed for the UI.
+	TotpSecret  string         `gorm:"size:64" json:"-"`
+	TotpEnabled bool           `gorm:"-" json:"totp_enabled"`
+	LastLoginAt *time.Time     `json:"last_login_at"`
+	LastLoginIP string         `gorm:"size:45" json:"last_login_ip"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"index:idx_deleted_at" json:"-"`
 }
 
 func (User) TableName() string { return "users" }

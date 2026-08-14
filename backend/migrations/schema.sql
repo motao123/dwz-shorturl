@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `display_name`  VARCHAR(64)  NULL,
   `avatar_url`    VARCHAR(512) NULL,
   `status`        TINYINT      NOT NULL DEFAULT 1 COMMENT '1=active 0=disabled',
+  `totp_secret`   VARCHAR(64)  NULL COMMENT 'base32 TOTP secret; non-empty = 2FA enabled',
   `last_login_at` DATETIME(3)  NULL,
   `last_login_ip` VARCHAR(45)  NULL,
   `created_at`    DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3),

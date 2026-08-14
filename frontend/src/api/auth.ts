@@ -5,6 +5,7 @@ export interface LoginParams {
   password: string
   captcha?: string
   captcha_id?: string
+  totp_code?: string
 }
 
 export interface LoginUser {
