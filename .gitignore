@@ -1,11 +1,6 @@
 .workbuddy/
-.zcode/plans/
-.zcode/sshx.py
-.zcode/patch_nginx.py
-.zcode/patch_nginx2.py
-.zcode/test_resurrect.sh
-.zcode/test_password.sh
-.zcode/convert_ep_imports.py
+# Local helper scripts (may contain server/DB credentials) - never commit
+.zcode/
 config.php
 logs/
 *.log
