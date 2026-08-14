@@ -9,8 +9,11 @@
 <meta property="og:description" content="PHP + Go + Vue3 混合架构短链接服务：SSRF 防护、2FA、GeoIP 分析、RBAC、Webhook、自动化运维。">
 <meta property="og:type" content="website">
 <meta name="color-scheme" content="dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="assets/site.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔗</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%235e6ad2'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white'>🔗</text></svg>">
 </head>
 <body>
 
@@ -19,7 +22,7 @@
   <div class="container nav-inner">
     <a class="nav-logo" href="#top">
       <span class="mark">🔗</span>
-      <span>DWZ <span class="mono" style="color:var(--muted);font-weight:400">shorturl</span></span>
+      <span>DWZ&nbsp;ShortURL</span>
     </a>
     <nav class="nav-links" id="navLinks">
       <a href="#features">功能</a>
@@ -27,8 +30,11 @@
       <a href="#stack">技术栈</a>
       <a href="#quickstart">快速开始</a>
       <a href="#docs">文档</a>
-      <a class="nav-badge" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">GitHub ↗</a>
     </nav>
+    <div class="nav-cta">
+      <a class="btn btn-secondary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">GitHub</a>
+      <a class="btn btn-primary" href="#quickstart">快速开始</a>
+    </div>
     <button class="nav-toggle" id="navToggle" aria-label="切换导航" aria-expanded="false">☰</button>
   </div>
 </header>
@@ -37,27 +43,63 @@
 
 <!-- ============ Hero ============ -->
 <section class="hero">
-  <div class="hero-bg" aria-hidden="true"></div>
-  <div class="hero-grid" aria-hidden="true"></div>
-  <canvas id="net" aria-hidden="true"></canvas>
   <div class="container">
-    <div class="hero-eyebrow mono">PHP · Go · Vue3 — 混合架构短链接平台</div>
-    <h1>一次生成<br>随处链接 <span class="grad">世界</span></h1>
+    <p class="hero-eyebrow mono"><span class="dot"></span>PHP · Go · Vue3 — 混合架构短链接平台</p>
+    <h1>一次生成，<br>随处链接<span class="brand">。</span></h1>
     <p class="hero-sub">
-      从普通短链到企业级安全管控、多维流量分析、自动化运维 ——
-      DWZ 短网址平台集三大引擎于一身，为你的每一个链接保驾护航。
+      从普通短链到企业级安全管控、多维流量分析与自动化运维 ——
+      DWZ 短网址平台以三大引擎护航你的每一个链接。
     </p>
     <div class="hero-cta">
-      <a class="btn btn-primary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">⭐ 查看源码</a>
-      <a class="btn btn-ghost" href="#quickstart">🚀 快速开始</a>
-      <a class="btn btn-ghost" href="#docs">📖 项目文档</a>
+      <a class="btn btn-primary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">查看源码 →</a>
+      <a class="btn btn-secondary" href="#quickstart">快速开始</a>
+      <a class="btn btn-secondary" href="#docs">项目文档</a>
     </div>
 
+    <!-- 产品面板：短链管理示意 -->
+    <div class="app-panel">
+      <div class="app-window">
+        <div class="app-bar">
+          <span>short-urls · 短链列表</span>
+          <span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+        </div>
+        <div class="app-row">
+          <span class="code">/ab3x9</span>
+          <span class="url">https://example.com/promotion/spring-2026</span>
+          <span class="clicks">1,284</span>
+          <span class="status-badge ok">Active</span>
+        </div>
+        <div class="app-row">
+          <span class="code">/k2q7f</span>
+          <span class="url">https://example.com/docs/api-reference</span>
+          <span class="clicks">847</span>
+          <span class="status-badge ok">Active</span>
+        </div>
+        <div class="app-row">
+          <span class="code">/m4h2w</span>
+          <span class="url">https://example.com/campaign/launch-notes</span>
+          <span class="clicks">526</span>
+          <span class="status-badge">Review</span>
+        </div>
+        <div class="app-row">
+          <span class="code">/p8t1c</span>
+          <span class="url">https://example.com/archive/2025-report</span>
+          <span class="clicks">192</span>
+          <span class="status-badge">Expired</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 统计 ============ -->
+<section style="padding-top:0;">
+  <div class="container">
     <div class="stats">
-      <div class="stat"><b><em>3</em> 引擎</b><span>PHP 前台 · Go 核心 · Vue3 管理台</span></div>
-      <div class="stat"><b><em>22</em> 权限点</b><span>RBAC 4 级角色精细化授权</span></div>
-      <div class="stat"><b><em>13</em> 批次</b><span>深度审计 · 全部修复上线</span></div>
-      <div class="stat"><b><em>100%</em> 幂等</b><span>schema_migrations 版本化管理</span></div>
+      <div class="stat reveal"><b><em>3</em></b><span>引擎：PHP 前台 · Go 核心 · Vue3 管理台</span></div>
+      <div class="stat reveal"><b><em>22</em></b><span>RBAC 权限点，4 级角色精细化授权</span></div>
+      <div class="stat reveal"><b><em>13</em></b><span>批次深度审计，全部修复上线</span></div>
+      <div class="stat reveal"><b><em>7</em></b><span>幂等迁移，schema_migrations 版本管理</span></div>
     </div>
   </div>
 </section>
@@ -67,19 +109,19 @@
   <div class="container">
     <div class="section-head reveal">
       <span class="section-tag">/ Features</span>
-      <h2>功能矩阵 · 不止于短链</h2>
+      <h2>功能矩阵，不止于短链</h2>
       <p>覆盖前台体验、后台运营、安全防护、流量洞察与自动化运维五大维度。</p>
     </div>
     <div class="features">
       <div class="card reveal"><div class="card-icon">⚡</div><h3>双引擎跳转</h3><p>PHP 轻量前台与 Go 高性能网关双路径，Nginx 智能分流，P99 毫秒级响应。</p><div class="tags"><span class="tag">do.php</span><span class="tag">/r/:code</span></div></div>
-      <div class="card reveal"><div class="card-icon">🛡️</div><h3>SSRF 双向防护</h3><p>DNS 解析 + 拨号层私网/云元数据地址阻断，URL 创建与解析全程校验。</p><div class="tags"><span class="tag">169.254.169.254</span><span class="tag">dial</span></div></div>
-      <div class="card reveal"><div class="card-icon">🔐</div><h3>2FA 两步验证</h3><p>TOTP 双因素认证（Google Authenticator），配合 JWT 双令牌 + Redis 登出黑名单。</p><div class="tags"><span class="tag">TOTP</span><span class="tag">JWT</span></div></div>
+      <div class="card reveal"><div class="card-icon">🛡️</div><h3>SSRF 双向防护</h3><p>DNS 解析 + 拨号层私网与云元数据地址阻断，URL 创建与解析全程校验。</p><div class="tags"><span class="tag">169.254.169.254</span><span class="tag">dial</span></div></div>
+      <div class="card reveal"><div class="card-icon">🔐</div><h3>2FA 两步验证</h3><p>TOTP 双因素认证，配合 JWT 双令牌与 Redis 登出黑名单。</p><div class="tags"><span class="tag">TOTP</span><span class="tag">JWT</span></div></div>
       <div class="card reveal"><div class="card-icon">🔗</div><h3>链接密码保护</h3><p>访问需输入密码，共享 HMAC Cookie 校验，适合企业敏感链接分发。</p><div class="tags"><span class="tag">HMAC</span><span class="tag">password_hash</span></div></div>
-      <div class="card reveal"><div class="card-icon">📊</div><h3>GeoIP 地域分析</h3><p>自研 ip2region v1 二进制读取器 + ISO 国家映射，零第三方依赖。</p><div class="tags"><span class="tag">ip2region</span><span class="tag">CountryCode</span></div></div>
-      <div class="card reveal"><div class="card-icon">📈</div><h3>Referer 来源洞察</h3><p>搜索引擎 / 社交媒体 / 直接访问 / 其他 自动归类，来源域名 Top N 可视化。</p><div class="tags"><span class="tag">search</span><span class="tag">social</span></div></div>
+      <div class="card reveal"><div class="card-icon">📊</div><h3>GeoIP 地域分析</h3><p>自研 ip2region v1 二进制读取器与 ISO 国家映射，零第三方依赖。</p><div class="tags"><span class="tag">ip2region</span><span class="tag">CountryCode</span></div></div>
+      <div class="card reveal"><div class="card-icon">📈</div><h3>Referer 来源洞察</h3><p>搜索引擎 / 社交媒体 / 直接访问 / 其他自动归类，Top N 可视化。</p><div class="tags"><span class="tag">search</span><span class="tag">social</span></div></div>
       <div class="card reveal"><div class="card-icon">👥</div><h3>RBAC 权限体系</h3><p>4 级角色、22 个权限点、树形授权，管理员 / 运营 / 会员精细管控。</p><div class="tags"><span class="tag">super_admin</span><span class="tag">audit</span></div></div>
       <div class="card reveal"><div class="card-icon">🛰️</div><h3>域名池管理</h3><p>多域名短链 + 负载均衡 + DNS/SSL 健康检测，单点失效自动切换。</p><div class="tags"><span class="tag">domains</span><span class="tag">load-balance</span></div></div>
-      <div class="card reveal"><div class="card-icon">📡</div><h3>Webhook 事件</h3><p>link.created / clicked / expired / deleted 事件订阅，HMAC 签名 + 重试投递。</p><div class="tags"><span class="tag">events</span><span class="tag">retry</span></div></div>
+      <div class="card reveal"><div class="card-icon">📡</div><h3>Webhook 事件</h3><p>link.created / clicked / expired / deleted 事件订阅，HMAC 签名与重试投递。</p><div class="tags"><span class="tag">events</span><span class="tag">retry</span></div></div>
       <div class="card reveal"><div class="card-icon">🚨</div><h3>违规内容检测</h3><p>菠菜 / 仿冒 / 恶意关键词规则库，blocked / review / passed 三态审核流。</p><div class="tags"><span class="tag">blocked</span><span class="tag">review</span></div></div>
       <div class="card reveal"><div class="card-icon">🗃️</div><h3>迁移版本管理</h3><p>cmd/migrate 工具 + schema_migrations 表，全部幂等可重复执行。</p><div class="tags"><span class="tag">-dry-run</span><span class="tag">-status</span></div></div>
       <div class="card reveal"><div class="card-icon">⚖️</div><h3>双写对账 Cron</h3><p>short_urls ↔ wjoy_log 数据对账、点击计数校准、click_logs 自动分区。</p><div class="tags"><span class="tag">reconcile</span><span class="tag">partition</span></div></div>
@@ -97,24 +139,24 @@
     </div>
     <div class="arch reveal">
 <pre>                  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
-                  │ <b>☁️ 访客浏览器</b> │   │ <b>🎛️ 管理后台</b>  │   │ <b>👤 会员中心</b>  │
+                  │ <b>访客浏览器</b>   │   │ <b>管理后台</b>    │   │ <b>会员中心</b>    │
                   │  PHP 首页     │   │  Vue3 + EP   │   │  Vue3 SPA   │
                   └──────┬──────┘   └──────┬──────┘   └──────┬──────┘
                          │                  │                  │
                          ▼                  ▼                  ▼
                   ┌────────────────────────────────────────────────┐
-                  │              <b>🌐 Nginx 反向代理</b>                │
+                  │              <b>Nginx 反向代理</b>                │
                   └───┬──────────────┬────────────────┬───────────┘
                       │ /do.php      │ /admin/api     │ /r/:code
                       ▼              ▼                ▼
                ┌────────────┐  ┌──────────────────────────┐  ┌──────────────┐
-               │ <b>PHP 前台</b>   │  │  <b>⚙️ Go 后端 (Gin+GORM)</b> │  │ <b>跳转网关</b>     │
-               │ 限流/SSRF  │  │ JWT/RBAC/2FA/Cron/Webhook │  │ GeoIP/Referer│
+               │ <b>PHP 前台</b>   │  │  <b>Go 后端</b> (Gin+GORM)   │  │ <b>跳转网关</b>     │
+               │ 限流/SSRF  │  │ JWT/RBAC/2FA/Cron/Wbhk  │  │ GeoIP/Referer│
                └─────┬──────┘  └────┬────┬────┬────┬──────┘  └──────┬───────┘
                      │              │    │    │    │                │
                      ▼              ▼    ▼    ▼    ▼                ▼
                ┌────────┐    ┌────────┐ ┌──────┐ ┌────────┐  ┌──────────┐
-               │ MySQL  │◄──►│ MySQL  │ │ Redis│ │MySQL   │  │ ip2region│
+               │ MySQL  │◄──►│ MySQL  │ │ Redis│ │ MySQL  │  │ ip2region│
                │wjoy_log│ 双写│ dwz    │ │JWT黑名│ │click_  │  │ GeoIP 库 │
                │ 对账    │     │ admin  │ │单/限流│ │logs 分区│  └──────────┘
                └────────┘    └────────┘ └──────┘ └────────┘</pre>
@@ -136,8 +178,8 @@
       <div class="stack-item reveal"><span class="ico">💚</span><b>Vue 3</b><span>管理后台</span></div>
       <div class="stack-item reveal"><span class="ico">🧩</span><b>Element Plus</b><span>UI 组件</span></div>
       <div class="stack-item reveal"><span class="ico">🐬</span><b>MySQL 8</b><span>数据存储</span></div>
-      <div class="stack-item reveal"><span class="ico">🔥</span><b>Redis 7</b><span>缓存/限流</span></div>
-      <div class="stack-item reveal"><span class="ico">📊</span><b>ECharts</b><span>数据可视化</span></div>
+      <div class="stack-item reveal"><span class="ico">🔥</span><b>Redis 7</b><span>缓存 / 限流</span></div>
+      <div class="stack-item reveal"><span class="ico">📊</span><b>ECharts</b><span>可视化</span></div>
       <div class="stack-item reveal"><span class="ico">🚀</span><b>Gin + GORM</b><span>Web 框架</span></div>
       <div class="stack-item reveal"><span class="ico">🌐</span><b>Nginx</b><span>反向代理</span></div>
       <div class="stack-item reveal"><span class="ico">🐳</span><b>Docker</b><span>容器部署</span></div>
@@ -156,7 +198,7 @@
     <div class="quick-grid">
       <div class="code-block reveal">
         <div class="code-head">
-          <div class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+          <div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
           <span>docker-compose.yml</span>
           <button class="copy-btn" data-copy="c1">复制</button>
         </div>
@@ -168,7 +210,7 @@ docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
       </div>
       <div class="code-block reveal">
         <div class="code-head">
-          <div class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+          <div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
           <span>本地开发</span>
           <button class="copy-btn" data-copy="c2">复制</button>
         </div>
@@ -225,8 +267,10 @@ docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
     <div class="cta-band reveal">
       <h2>准备好缩短你的第一个链接了吗？</h2>
       <p>开源 · 免费 · 企业级 —— DWZ 短网址平台等你来用。</p>
-      <a class="btn btn-primary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">⭐ Star 支持</a>
-      <a class="btn btn-ghost" href="https://github.com/motao123/dwz-shorturl/fork" target="_blank" rel="noopener">⑂ Fork</a>
+      <div class="hero-cta" style="justify-content:center;">
+        <a class="btn btn-primary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">Star 支持</a>
+        <a class="btn btn-secondary" href="https://github.com/motao123/dwz-shorturl/fork" target="_blank" rel="noopener">Fork</a>
+      </div>
     </div>
   </div>
 </section>
@@ -237,7 +281,7 @@ docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
 <footer class="footer">
   <div class="container footer-inner">
     <p>© 2026 <b>DWZ ShortURL</b> · 作者 <a href="https://github.com/motao123" target="_blank" rel="noopener">陌涛</a> · MIT License</p>
-    <p class="mono">Powered by GitHub Pages · Built with ❤️</p>
+    <p class="mono" style="color:var(--ink-tertiary);">Design inspired by Linear · Built with ❤️</p>
   </div>
 </footer>
 
