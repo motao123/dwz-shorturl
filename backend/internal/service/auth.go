@@ -96,12 +96,7 @@ func (s *authService) Login(username, password, totpCode, ip string) (*LoginResu
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresIn:    7200,
-		User: UserInfo{
-			ID:       user.ID,
-			Username: user.Username,
-			Email:    user.Email,
-			Roles:    roleNames,
-		},
+		User:         buildUserInfo(user, roleNames),
 	}, nil
 }
 
@@ -144,13 +139,33 @@ func (s *authService) Refresh(refreshToken string) (*LoginResult, error) {
 		AccessToken:  accessToken,
 		RefreshToken: newRefreshToken,
 		ExpiresIn:    7200,
-		User: UserInfo{
-			ID:       user.ID,
-			Username: user.Username,
-			Email:    user.Email,
-			Roles:    roleNames,
-		},
+		User:         buildUserInfo(user, roleNames),
 	}, nil
+}
+
+// buildUserInfo assembles the full user info payload for login/refresh
+// responses (mirrors GetMe so the client always sees status/display fields).
+func buildUserInfo(user *model.User, roleNames []string) UserInfo {
+	var lastLoginAt *string
+	if user.LastLoginAt != nil {
+		s := user.LastLoginAt.Format("2006-01-02T15:04:05Z")
+		lastLoginAt = &s
+	}
+	var lastLoginIP *string
+	if user.LastLoginIP != "" {
+		lastLoginIP = &user.LastLoginIP
+	}
+	return UserInfo{
+		ID:          user.ID,
+		Username:    user.Username,
+		Email:       user.Email,
+		DisplayName: user.DisplayName,
+		AvatarUrl:   user.AvatarURL,
+		Status:      user.Status,
+		LastLoginAt: lastLoginAt,
+		LastLoginIP: lastLoginIP,
+		Roles:       roleNames,
+	}
 }
 
 func (s *authService) GetMe(userID uint64) (*UserInfo, error) {
