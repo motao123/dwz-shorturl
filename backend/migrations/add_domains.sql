@@ -22,12 +22,21 @@ CREATE TABLE IF NOT EXISTS `domains` (
   KEY `idx_pick_domain` (`status`, `link_count`, `priority`, `id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 2. domain_id on short_urls -------------------------------------------------
-ALTER TABLE `short_urls`
-  ADD COLUMN `domain_id` BIGINT UNSIGNED NULL COMMENT 'domain pool entry this link belongs to' AFTER `category_id`;
+-- 2. domain_id on short_urls (idempotent) ------------------------------------
+SET @schema = DATABASE();
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = 'short_urls' AND COLUMN_NAME = 'domain_id');
+SET @sql = IF(@col_exists = 0,
+  'ALTER TABLE short_urls ADD COLUMN domain_id BIGINT UNSIGNED NULL COMMENT ''domain pool entry this link belongs to'' AFTER category_id',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-ALTER TABLE `short_urls`
-  ADD KEY `idx_domain` (`domain_id`);
+SET @idx_exists = (SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = 'short_urls' AND INDEX_NAME = 'idx_domain');
+SET @sql = IF(@idx_exists = 0,
+  'ALTER TABLE short_urls ADD KEY idx_domain (domain_id)',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 3. permissions -------------------------------------------------------------
 INSERT INTO `permissions` (`resource`, `action`, `description`) VALUES
