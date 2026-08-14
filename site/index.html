@@ -8,12 +8,12 @@
 <meta property="og:title" content="DWZ ShortURL · 高性能企业级短链接平台">
 <meta property="og:description" content="PHP + Go + Vue3 混合架构短链接服务：SSRF 防护、2FA、GeoIP 分析、RBAC、Webhook、自动化运维。">
 <meta property="og:type" content="website">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="dark">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="assets/site.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23533afd'/><text x='50' y='68' font-size='50' text-anchor='middle' fill='white'>🔗</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%235e6ad2'/><text x='50' y='66' font-size='44' font-weight='600' text-anchor='middle' fill='white' font-family='monospace'>/</text></svg>">
 </head>
 <body>
 
@@ -21,77 +21,80 @@
 <header class="nav">
   <div class="container nav-inner">
     <a class="brand" href="#top">
-      <span class="brand-mark">🔗</span>
+      <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-name">DWZ&nbsp;ShortURL</span>
     </a>
-    <nav class="nav-links" id="navLinks">
+    <nav class="nav-links" id="navLinks" aria-label="主导航">
       <a href="#features">功能</a>
       <a href="#arch">架构</a>
       <a href="#quickstart">快速开始</a>
       <a href="#docs">文档</a>
     </nav>
     <div class="nav-actions">
-      <a class="btn btn-ghost" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">GitHub</a>
+      <a class="btn btn-secondary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">GitHub</a>
       <a class="btn btn-primary" href="#quickstart">快速开始</a>
     </div>
-    <button class="nav-toggle" id="navToggle" aria-label="切换导航" aria-expanded="false">☰</button>
+    <button class="nav-toggle" id="navToggle" aria-label="切换导航" aria-expanded="false" aria-controls="navLinks">☰</button>
   </div>
 </header>
 
-<main>
+<main id="top">
 
-<!-- ============ Hero（左右双栏） ============ -->
+<!-- ============ Hero ============ -->
 <section class="hero">
-  <div class="hero-mesh" aria-hidden="true"></div>
-  <div class="container hero-grid">
-    <div class="hero-copy">
-      <p class="eyebrow mono">PHP · Go · Vue3</p>
-      <h1>一次生成，<br>随处链接。</h1>
-      <p class="lead">
-        DWZ 短网址平台 —— 三引擎驱动的企业级短链接服务，
-        从生成到分发，安全、可控、可分析。
-      </p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">查看源码 →</a>
-        <a class="btn btn-secondary" href="#quickstart">快速开始</a>
-      </div>
-      <ul class="hero-points">
-        <li><span class="tick">✓</span>企业级安全防护</li>
-        <li><span class="tick">✓</span>多维流量分析</li>
-        <li><span class="tick">✓</span>自动化运维</li>
-      </ul>
+  <div class="container hero-copy">
+    <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>PHP · Go · Vue3</p>
+    <h1>一次生成，随处链接。</h1>
+    <p class="lead">
+      DWZ 短网址平台 —— 三引擎驱动的企业级短链接服务，
+      从生成到分发，安全、可控、可分析。
+    </p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">查看源码</a>
+      <a class="btn btn-secondary" href="#quickstart">快速开始</a>
     </div>
+    <ul class="hero-points">
+      <li><span class="tick" aria-hidden="true"></span>企业级安全防护</li>
+      <li><span class="tick" aria-hidden="true"></span>多维流量分析</li>
+      <li><span class="tick" aria-hidden="true"></span>自动化运维</li>
+    </ul>
+  </div>
 
-    <div class="app-panel">
-      <div class="app-window">
-        <div class="app-bar">
-          <span class="mono">short-urls</span>
-          <span class="dots"><i></i><i></i><i></i></span>
-        </div>
-        <div class="app-row">
-          <span class="code">/ab3x9</span>
-          <span class="url">example.com/promotion/spring-2026</span>
-          <span class="clicks">1,284</span>
-          <span class="badge ok">Active</span>
-        </div>
-        <div class="app-row">
-          <span class="code">/k2q7f</span>
-          <span class="url">example.com/docs/api-reference</span>
-          <span class="clicks">847</span>
-          <span class="badge ok">Active</span>
-        </div>
-        <div class="app-row">
-          <span class="code">/m4h2w</span>
-          <span class="url">example.com/campaign/launch-notes</span>
-          <span class="clicks">526</span>
-          <span class="badge warn">Review</span>
-        </div>
-        <div class="app-row">
-          <span class="code">/p8t1c</span>
-          <span class="url">example.com/archive/2025-report</span>
-          <span class="clicks">192</span>
-          <span class="badge err">Expired</span>
-        </div>
+  <div class="container">
+    <div class="app-panel" role="img" aria-label="短链接管理列表界面示意">
+      <div class="app-bar">
+        <span class="app-bar-title mono">/r/links</span>
+        <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      </div>
+      <div class="app-row app-row-head">
+        <span class="mono">Short Code</span>
+        <span class="url">Target URL</span>
+        <span class="clicks">Clicks</span>
+        <span class="status">Status</span>
+      </div>
+      <div class="app-row">
+        <span class="code">/ab3x9</span>
+        <span class="url">example.com/promotion/spring-2026</span>
+        <span class="clicks">1,284</span>
+        <span class="badge ok">Active</span>
+      </div>
+      <div class="app-row">
+        <span class="code">/k2q7f</span>
+        <span class="url">example.com/docs/api-reference</span>
+        <span class="clicks">847</span>
+        <span class="badge ok">Active</span>
+      </div>
+      <div class="app-row">
+        <span class="code">/m4h2w</span>
+        <span class="url">example.com/campaign/launch-notes</span>
+        <span class="clicks">526</span>
+        <span class="badge warn">Review</span>
+      </div>
+      <div class="app-row">
+        <span class="code">/p8t1c</span>
+        <span class="url">example.com/archive/2025-report</span>
+        <span class="clicks">192</span>
+        <span class="badge err">Expired</span>
       </div>
     </div>
   </div>
@@ -113,77 +116,69 @@
 <section id="features" class="section">
   <div class="container">
     <div class="sec-head reveal">
-      <span class="eyebrow mono">/ Features</span>
+      <span class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>/ Features</span>
       <h2>功能矩阵</h2>
       <p>前台体验、后台运营、安全防护、流量洞察与自动化运维，五大维度全覆盖。</p>
     </div>
 
-    <div class="bento">
-      <article class="card lg peach reveal">
-        <div class="card-icon">⚡</div>
+    <div class="card-grid">
+      <article class="card reveal">
+        <div class="tags"><span class="tag">do.php</span><span class="tag">/r/:code</span><span class="tag">302</span></div>
         <h3>双引擎跳转</h3>
         <p>PHP 轻量前台与 Go 高性能网关双路径，Nginx 智能分流。短链创建、解析、重定向各司其职，P99 毫秒级响应。</p>
-        <div class="tags"><span class="tag">do.php</span><span class="tag">/r/:code</span><span class="tag">302</span></div>
       </article>
-      <article class="card lg blue reveal">
-        <div class="card-icon">🛡️</div>
+      <article class="card reveal">
+        <div class="tags"><span class="tag">SSRF</span><span class="tag">2FA</span><span class="tag">JWT</span><span class="tag">HMAC</span></div>
         <h3>企业级安全</h3>
         <p>SSRF 双向防护阻断私网与云元数据地址；TOTP 双因素认证；JWT 双令牌 + Redis 登出黑名单；链接密码保护与违规检测。</p>
-        <div class="tags"><span class="tag">SSRF</span><span class="tag">2FA</span><span class="tag">JWT</span><span class="tag">HMAC</span></div>
       </article>
-      <article class="card md white reveal">
-        <div class="card-icon">📊</div>
+      <article class="card reveal">
+        <div class="tags"><span class="tag">ip2region</span></div>
         <h3>GeoIP 地域分析</h3>
         <p>自研 ip2region v1 读取器与 ISO 国家映射，零第三方依赖。</p>
-        <div class="tags"><span class="tag">ip2region</span></div>
       </article>
-      <article class="card md white reveal">
-        <div class="card-icon">📈</div>
+      <article class="card reveal">
+        <div class="tags"><span class="tag">search</span></div>
         <h3>Referer 来源</h3>
         <p>搜索引擎 / 社交媒体 / 直接访问自动归类，Top N 可视化。</p>
-        <div class="tags"><span class="tag">search</span></div>
       </article>
-      <article class="card md white reveal">
-        <div class="card-icon">👥</div>
+      <article class="card reveal">
+        <div class="tags"><span class="tag">audit</span></div>
         <h3>RBAC 权限</h3>
         <p>4 级角色、22 个权限点、树形授权，精细管控。</p>
-        <div class="tags"><span class="tag">audit</span></div>
       </article>
-      <article class="card md white reveal">
-        <div class="card-icon">🛰️</div>
+      <article class="card reveal">
+        <div class="tags"><span class="tag">domains</span></div>
         <h3>域名池</h3>
         <p>多域名短链 + 负载均衡 + DNS/SSL 健康检测，自动切换。</p>
-        <div class="tags"><span class="tag">domains</span></div>
       </article>
-      <article class="card md peach reveal">
-        <div class="card-icon">📡</div>
+      <article class="card reveal">
+        <div class="tags"><span class="tag">events</span></div>
         <h3>Webhook 事件</h3>
         <p>created / clicked / expired / deleted 订阅，HMAC 签名重试。</p>
-        <div class="tags"><span class="tag">events</span></div>
       </article>
-      <article class="card md white reveal">
-        <div class="card-icon">🗃️</div>
+      <article class="card reveal">
+        <div class="tags"><span class="tag">-dry-run</span></div>
         <h3>迁移版本管理</h3>
         <p>cmd/migrate + schema_migrations，全部幂等可重复执行。</p>
-        <div class="tags"><span class="tag">-dry-run</span></div>
       </article>
-      <article class="card sm white reveal">
-        <div class="card-icon">🔐</div>
+      <article class="card reveal">
+        <div class="tags"><span class="tag">TOTP</span></div>
         <h3>2FA</h3>
         <p>TOTP 双因素认证，支持 Google Authenticator。</p>
       </article>
-      <article class="card sm white reveal">
-        <div class="card-icon">🔗</div>
+      <article class="card reveal">
+        <div class="tags"><span class="tag">HMAC</span></div>
         <h3>链接密码</h3>
         <p>共享 HMAC Cookie 校验，敏感链接安全分发。</p>
       </article>
-      <article class="card sm white reveal">
-        <div class="card-icon">🚨</div>
+      <article class="card reveal">
+        <div class="tags"><span class="tag">rules</span></div>
         <h3>违规检测</h3>
         <p>关键词规则库，三态审核流。</p>
       </article>
-      <article class="card sm blue reveal">
-        <div class="card-icon">⚖️</div>
+      <article class="card reveal">
+        <div class="tags"><span class="tag">click_logs</span></div>
         <h3>双写对账</h3>
         <p>点击计数校准，click_logs 自动分区。</p>
       </article>
@@ -195,12 +190,12 @@
 <section id="arch" class="section">
   <div class="container">
     <div class="sec-head reveal">
-      <span class="eyebrow mono">/ Architecture</span>
+      <span class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>/ Architecture</span>
       <h2>系统架构</h2>
       <p>三层解耦 + 双写对账，前后台数据永远一致。</p>
     </div>
-    <div class="arch reveal">
-<pre>                  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
+    <div class="arch reveal" role="img" aria-label="DWZ 短网址平台三层架构图">
+      <pre>                  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
                   │ <b>访客浏览器</b>   │   │ <b>管理后台</b>    │   │ <b>会员中心</b>    │
                   │  PHP 首页     │   │  Vue3 + EP   │   │  Vue3 SPA   │
                   └──────┬──────┘   └──────┬──────┘   └──────┬──────┘
@@ -230,7 +225,7 @@
 <section id="quickstart" class="section">
   <div class="container">
     <div class="sec-head reveal">
-      <span class="eyebrow mono">/ Quickstart</span>
+      <span class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>/ Quickstart</span>
       <h2>快速开始</h2>
       <p>Docker 一条命令起服务，三分钟跑通全部依赖。</p>
     </div>
@@ -264,33 +259,33 @@ docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
 <section id="docs" class="section">
   <div class="container">
     <div class="sec-head reveal">
-      <span class="eyebrow mono">/ Docs</span>
+      <span class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>/ Docs</span>
       <h2>项目文档</h2>
       <p>从接口说明到架构审计，一站式了解 DWZ 短网址平台。</p>
     </div>
     <div class="docs-grid">
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/blob/master/README.md" target="_blank" rel="noopener">
-        <span class="ico">📘</span><h3>README</h3><p>项目总览、架构与部署指引。</p>
+        <h3>README</h3><p>项目总览、架构与部署指引。</p>
         <span class="go">readme →</span>
       </a>
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/blob/master/api.html" target="_blank" rel="noopener">
-        <span class="ico">🔌</span><h3>API 文档</h3><p>接口说明、错误码表、curl 示例。</p>
+        <h3>API 文档</h3><p>接口说明、错误码表、curl 示例。</p>
         <span class="go">api.html →</span>
       </a>
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/blob/master/docs/BACKEND_ADMIN_DESIGN.md" target="_blank" rel="noopener">
-        <span class="ico">🎨</span><h3>后台设计</h3><p>管理后台技术架构与设计文档。</p>
+        <h3>后台设计</h3><p>管理后台技术架构与设计文档。</p>
         <span class="go">design →</span>
       </a>
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/blob/master/docs/FEATURE_ROADMAP.md" target="_blank" rel="noopener">
-        <span class="ico">🗺️</span><h3>功能路线图</h3><p>5 个 Phase / 10 大模块规划。</p>
+        <h3>功能路线图</h3><p>5 个 Phase / 10 大模块规划。</p>
         <span class="go">roadmap →</span>
       </a>
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/blob/master/docs/ANALYSIS_REPORT_2026-08.md" target="_blank" rel="noopener">
-        <span class="ico">🔬</span><h3>分析报告</h3><p>四维审计 + 13 批修复记录。</p>
+        <h3>分析报告</h3><p>四维审计 + 13 批修复记录。</p>
         <span class="go">report →</span>
       </a>
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/issues" target="_blank" rel="noopener">
-        <span class="ico">🐛</span><h3>Issues</h3><p>提 Bug、提需求、参与共建。</p>
+        <h3>Issues</h3><p>提 Bug、提需求、参与共建。</p>
         <span class="go">issues →</span>
       </a>
     </div>
@@ -311,7 +306,7 @@ docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
 <footer class="footer">
   <div class="container footer-inner">
     <p>© 2026 <b>DWZ ShortURL</b> · 作者 <a href="https://github.com/motao123" target="_blank" rel="noopener">陌涛</a> · MIT License</p>
-    <p class="mono">Stripe × Bento · Built with ❤️</p>
+    <p class="mono">Linear dark · Built with ❤️</p>
   </div>
 </footer>
 
