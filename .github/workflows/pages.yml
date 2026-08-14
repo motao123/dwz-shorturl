@@ -1,0 +1,65 @@
+# ============================================================
+# 构建并发布项目宣传站到 GitHub Pages
+#
+# 触发条件:
+#   - push 到 master 且改动涉及 site/ 或本工作流
+#   - 手动触发 (workflow_dispatch)
+#
+# 首次启用: 仓库 Settings → Pages → Source 选择 "GitHub Actions"
+# 发布地址: https://<user>.github.io/<repo>/
+# ============================================================
+name: Deploy Site to GitHub Pages
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# 赋予 GITHUB_TOKEN 发布 Pages 的权限
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只运行一个 Pages 部署，新的 push 会取消进行中的旧任务
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  # ---------- 构建 ----------
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Pages 环境
+        uses: actions/configure-pages@v5
+
+      - name: 构建静态站（复制 site/ → _site/）
+        run: |
+          mkdir -p _site
+          cp -r site/. _site/
+          echo "构建产物:"
+          find _site -type f | sort
+
+      - name: 上传 Pages 产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+  # ---------- 部署 ----------
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 发布到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
