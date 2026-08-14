@@ -1,10 +1,19 @@
 .workbuddy/
 .zcode/plans/
+.zcode/sshx.py
+.zcode/patch_nginx.py
+.zcode/patch_nginx2.py
+.zcode/test_resurrect.sh
+.zcode/test_password.sh
+.zcode/convert_ep_imports.py
 config.php
 logs/
 *.log
 frontend/dist
+backend/dist/
 backend/dwz-admin.exe
+backend/dwz-admin-linux
+domains-page.png
 
 # Production configs - never commit real credentials
 backend/configs/config.yaml
