@@ -11,7 +11,7 @@
 <meta name="color-scheme" content="light">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
 <link rel="stylesheet" href="assets/site.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23533afd'/><text x='50' y='68' font-size='50' text-anchor='middle' fill='white'>🔗</text></svg>">
 </head>
@@ -20,184 +20,182 @@
 <!-- ============ 导航 ============ -->
 <header class="nav">
   <div class="container nav-inner">
-    <a class="nav-logo" href="#top">
-      <span class="mark">🔗</span>
-      <span>DWZ&nbsp;ShortURL</span>
+    <a class="brand" href="#top">
+      <span class="brand-mark">🔗</span>
+      <span class="brand-name">DWZ&nbsp;ShortURL</span>
     </a>
     <nav class="nav-links" id="navLinks">
       <a href="#features">功能</a>
       <a href="#arch">架构</a>
-      <a href="#stack">技术栈</a>
       <a href="#quickstart">快速开始</a>
       <a href="#docs">文档</a>
     </nav>
-    <div class="nav-cta">
-      <a class="btn btn-secondary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">GitHub</a>
+    <div class="nav-actions">
+      <a class="btn btn-ghost" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">GitHub</a>
       <a class="btn btn-primary" href="#quickstart">快速开始</a>
     </div>
     <button class="nav-toggle" id="navToggle" aria-label="切换导航" aria-expanded="false">☰</button>
   </div>
 </header>
 
-<main id="top">
+<main>
 
-<!-- ============ Hero ============ -->
+<!-- ============ Hero（左右双栏） ============ -->
 <section class="hero">
   <div class="hero-mesh" aria-hidden="true"></div>
-  <div class="container">
-    <p class="hero-eyebrow mono">PHP · Go · Vue3 — 混合架构短链接平台</p>
-    <h1>一次生成，随处链接<span class="grad">。</span></h1>
-    <p class="hero-sub">
-      DWZ 短网址平台 —— PHP 前台、Go 核心、Vue3 管理台三引擎驱动，
-      覆盖短链生成、企业级安全、流量洞察与自动化运维。
-    </p>
-    <div class="hero-cta">
-      <a class="btn btn-primary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">查看源码 →</a>
-      <a class="btn btn-secondary" href="#quickstart">快速开始</a>
-      <a class="btn btn-secondary" href="#docs">项目文档</a>
+  <div class="container hero-grid">
+    <div class="hero-copy">
+      <p class="eyebrow mono">PHP · Go · Vue3</p>
+      <h1>一次生成，<br>随处链接。</h1>
+      <p class="lead">
+        DWZ 短网址平台 —— 三引擎驱动的企业级短链接服务，
+        从生成到分发，安全、可控、可分析。
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">查看源码 →</a>
+        <a class="btn btn-secondary" href="#quickstart">快速开始</a>
+      </div>
+      <ul class="hero-points">
+        <li><span class="tick">✓</span>企业级安全防护</li>
+        <li><span class="tick">✓</span>多维流量分析</li>
+        <li><span class="tick">✓</span>自动化运维</li>
+      </ul>
     </div>
 
-    <!-- 深海军蓝产品面板（Stripe DARK APP TRACK） -->
     <div class="app-panel">
       <div class="app-window">
         <div class="app-bar">
-          <span>short-urls · 短链列表</span>
-          <span class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+          <span class="mono">short-urls</span>
+          <span class="dots"><i></i><i></i><i></i></span>
         </div>
         <div class="app-row">
           <span class="code">/ab3x9</span>
-          <span class="url">https://example.com/promotion/spring-2026</span>
+          <span class="url">example.com/promotion/spring-2026</span>
           <span class="clicks">1,284</span>
-          <span class="status-badge ok">Active</span>
+          <span class="badge ok">Active</span>
         </div>
         <div class="app-row">
           <span class="code">/k2q7f</span>
-          <span class="url">https://example.com/docs/api-reference</span>
+          <span class="url">example.com/docs/api-reference</span>
           <span class="clicks">847</span>
-          <span class="status-badge ok">Active</span>
+          <span class="badge ok">Active</span>
         </div>
         <div class="app-row">
           <span class="code">/m4h2w</span>
-          <span class="url">https://example.com/campaign/launch-notes</span>
+          <span class="url">example.com/campaign/launch-notes</span>
           <span class="clicks">526</span>
-          <span class="status-badge warn">Review</span>
+          <span class="badge warn">Review</span>
         </div>
         <div class="app-row">
           <span class="code">/p8t1c</span>
-          <span class="url">https://example.com/archive/2025-report</span>
+          <span class="url">example.com/archive/2025-report</span>
           <span class="clicks">192</span>
-          <span class="status-badge err">Expired</span>
+          <span class="badge err">Expired</span>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ============ 统计 ============ -->
-<section style="padding-top:0;">
+<!-- ============ 数据 ============ -->
+<section class="band">
   <div class="container">
-    <div class="stats">
-      <div class="stat reveal"><b class="tnum"><em>3</em></b><span>引擎：PHP 前台 · Go 核心 · Vue3 管理台</span></div>
-      <div class="stat reveal"><b class="tnum"><em>22</em></b><span>RBAC 权限点，4 级角色精细化授权</span></div>
-      <div class="stat reveal"><b class="tnum"><em>13</em></b><span>批次深度审计，全部修复上线</span></div>
-      <div class="stat reveal"><b class="tnum"><em>7</em></b><span>幂等迁移，schema_migrations 版本管理</span></div>
+    <div class="metrics">
+      <div class="metric"><b class="tnum">3</b><span>核心引擎</span></div>
+      <div class="metric"><b class="tnum">22</b><span>权限点</span></div>
+      <div class="metric"><b class="tnum">13</b><span>审计批次</span></div>
+      <div class="metric"><b class="tnum">7</b><span>幂等迁移</span></div>
     </div>
   </div>
 </section>
 
-<!-- ============ 功能（Bento 12 栏网格） ============ -->
-<section id="features">
+<!-- ============ 功能 ============ -->
+<section id="features" class="section">
   <div class="container">
-    <div class="section-head reveal">
-      <span class="section-tag mono">/ Features</span>
-      <h2>功能矩阵，不止于短链</h2>
-      <p>覆盖前台体验、后台运营、安全防护、流量洞察与自动化运维五大维度。</p>
+    <div class="sec-head reveal">
+      <span class="eyebrow mono">/ Features</span>
+      <h2>功能矩阵</h2>
+      <p>前台体验、后台运营、安全防护、流量洞察与自动化运维，五大维度全覆盖。</p>
     </div>
+
     <div class="bento">
-      <!-- 大卡 ×2 -->
-      <div class="card s6 bg-peach reveal">
+      <article class="card lg peach reveal">
         <div class="card-icon">⚡</div>
         <h3>双引擎跳转</h3>
         <p>PHP 轻量前台与 Go 高性能网关双路径，Nginx 智能分流。短链创建、解析、重定向各司其职，P99 毫秒级响应。</p>
         <div class="tags"><span class="tag">do.php</span><span class="tag">/r/:code</span><span class="tag">302</span></div>
-      </div>
-      <div class="card s6 bg-blue reveal">
+      </article>
+      <article class="card lg blue reveal">
         <div class="card-icon">🛡️</div>
-        <h3>企业级安全体系</h3>
-        <p>SSRF 双向防护阻断私网与云元数据地址；TOTP 双因素认证；JWT 双令牌 + Redis 登出黑名单；链接密码保护与违规内容检测。</p>
+        <h3>企业级安全</h3>
+        <p>SSRF 双向防护阻断私网与云元数据地址；TOTP 双因素认证；JWT 双令牌 + Redis 登出黑名单；链接密码保护与违规检测。</p>
         <div class="tags"><span class="tag">SSRF</span><span class="tag">2FA</span><span class="tag">JWT</span><span class="tag">HMAC</span></div>
-      </div>
-      <!-- 中卡 ×6 -->
-      <div class="card s4 bg-white reveal">
+      </article>
+      <article class="card md white reveal">
         <div class="card-icon">📊</div>
         <h3>GeoIP 地域分析</h3>
-        <p>自研 ip2region v1 二进制读取器与 ISO 国家映射，零第三方依赖。</p>
-        <div class="tags"><span class="tag">ip2region</span><span class="tag">CountryCode</span></div>
-      </div>
-      <div class="card s4 bg-white reveal">
+        <p>自研 ip2region v1 读取器与 ISO 国家映射，零第三方依赖。</p>
+        <div class="tags"><span class="tag">ip2region</span></div>
+      </article>
+      <article class="card md white reveal">
         <div class="card-icon">📈</div>
-        <h3>Referer 来源洞察</h3>
-        <p>搜索引擎 / 社交媒体 / 直接访问 / 其他自动归类，Top N 可视化。</p>
-        <div class="tags"><span class="tag">search</span><span class="tag">social</span></div>
-      </div>
-      <div class="card s4 bg-white reveal">
+        <h3>Referer 来源</h3>
+        <p>搜索引擎 / 社交媒体 / 直接访问自动归类，Top N 可视化。</p>
+        <div class="tags"><span class="tag">search</span></div>
+      </article>
+      <article class="card md white reveal">
         <div class="card-icon">👥</div>
-        <h3>RBAC 权限体系</h3>
-        <p>4 级角色、22 个权限点、树形授权，管理员 / 运营 / 会员精细管控。</p>
-        <div class="tags"><span class="tag">super_admin</span><span class="tag">audit</span></div>
-      </div>
-      <div class="card s4 bg-white reveal">
+        <h3>RBAC 权限</h3>
+        <p>4 级角色、22 个权限点、树形授权，精细管控。</p>
+        <div class="tags"><span class="tag">audit</span></div>
+      </article>
+      <article class="card md white reveal">
         <div class="card-icon">🛰️</div>
-        <h3>域名池管理</h3>
-        <p>多域名短链 + 负载均衡 + DNS/SSL 健康检测，单点失效自动切换。</p>
-        <div class="tags"><span class="tag">domains</span><span class="tag">load-balance</span></div>
-      </div>
-      <div class="card s4 bg-white reveal">
+        <h3>域名池</h3>
+        <p>多域名短链 + 负载均衡 + DNS/SSL 健康检测，自动切换。</p>
+        <div class="tags"><span class="tag">domains</span></div>
+      </article>
+      <article class="card md peach reveal">
         <div class="card-icon">📡</div>
         <h3>Webhook 事件</h3>
-        <p>link.created / clicked / expired / deleted 事件订阅，HMAC 签名与重试投递。</p>
-        <div class="tags"><span class="tag">events</span><span class="tag">retry</span></div>
-      </div>
-      <div class="card s4 bg-peach reveal">
+        <p>created / clicked / expired / deleted 订阅，HMAC 签名重试。</p>
+        <div class="tags"><span class="tag">events</span></div>
+      </article>
+      <article class="card md white reveal">
         <div class="card-icon">🗃️</div>
         <h3>迁移版本管理</h3>
-        <p>cmd/migrate 工具 + schema_migrations 表，全部幂等可重复执行。</p>
-        <div class="tags"><span class="tag">-dry-run</span><span class="tag">-status</span></div>
-      </div>
-      <!-- 小卡 ×4 -->
-      <div class="card s3 bg-white reveal">
+        <p>cmd/migrate + schema_migrations，全部幂等可重复执行。</p>
+        <div class="tags"><span class="tag">-dry-run</span></div>
+      </article>
+      <article class="card sm white reveal">
         <div class="card-icon">🔐</div>
-        <h3>2FA 两步验证</h3>
+        <h3>2FA</h3>
         <p>TOTP 双因素认证，支持 Google Authenticator。</p>
-        <div class="tags"><span class="tag">TOTP</span></div>
-      </div>
-      <div class="card s3 bg-white reveal">
+      </article>
+      <article class="card sm white reveal">
         <div class="card-icon">🔗</div>
-        <h3>链接密码保护</h3>
+        <h3>链接密码</h3>
         <p>共享 HMAC Cookie 校验，敏感链接安全分发。</p>
-        <div class="tags"><span class="tag">HMAC</span></div>
-      </div>
-      <div class="card s3 bg-white reveal">
+      </article>
+      <article class="card sm white reveal">
         <div class="card-icon">🚨</div>
         <h3>违规检测</h3>
-        <p>关键词规则库，blocked / review / passed 三态。</p>
-        <div class="tags"><span class="tag">blocked</span></div>
-      </div>
-      <div class="card s3 bg-blue reveal">
+        <p>关键词规则库，三态审核流。</p>
+      </article>
+      <article class="card sm blue reveal">
         <div class="card-icon">⚖️</div>
         <h3>双写对账</h3>
-        <p>short_urls ↔ wjoy_log 对账，点击计数校准、自动分区。</p>
-        <div class="tags"><span class="tag">reconcile</span></div>
-      </div>
+        <p>点击计数校准，click_logs 自动分区。</p>
+      </article>
     </div>
   </div>
 </section>
 
 <!-- ============ 架构 ============ -->
-<section id="arch">
+<section id="arch" class="section">
   <div class="container">
-    <div class="section-head reveal">
-      <span class="section-tag mono">/ Architecture</span>
+    <div class="sec-head reveal">
+      <span class="eyebrow mono">/ Architecture</span>
       <h2>系统架构</h2>
       <p>三层解耦 + 双写对账，前后台数据永远一致。</p>
     </div>
@@ -228,65 +226,34 @@
   </div>
 </section>
 
-<!-- ============ 技术栈 ============ -->
-<section id="stack">
-  <div class="container">
-    <div class="section-head reveal">
-      <span class="section-tag mono">/ Stack</span>
-      <h2>技术栈</h2>
-      <p>克制而现代的工程组合，每层都选最适合的工具。</p>
-    </div>
-    <div class="stack">
-      <div class="stack-item reveal"><span class="ico">🐘</span><b>PHP 8</b><span>前台引擎</span></div>
-      <div class="stack-item reveal"><span class="ico">🐹</span><b>Go 1.22</b><span>核心引擎</span></div>
-      <div class="stack-item reveal"><span class="ico">💚</span><b>Vue 3</b><span>管理后台</span></div>
-      <div class="stack-item reveal"><span class="ico">🧩</span><b>Element Plus</b><span>UI 组件</span></div>
-      <div class="stack-item reveal"><span class="ico">🐬</span><b>MySQL 8</b><span>数据存储</span></div>
-      <div class="stack-item reveal"><span class="ico">🔥</span><b>Redis 7</b><span>缓存 / 限流</span></div>
-      <div class="stack-item reveal"><span class="ico">📊</span><b>ECharts</b><span>可视化</span></div>
-      <div class="stack-item reveal"><span class="ico">🚀</span><b>Gin + GORM</b><span>Web 框架</span></div>
-      <div class="stack-item reveal"><span class="ico">🌐</span><b>Nginx</b><span>反向代理</span></div>
-      <div class="stack-item reveal"><span class="ico">🐳</span><b>Docker</b><span>容器部署</span></div>
-    </div>
-  </div>
-</section>
-
 <!-- ============ 快速开始 ============ -->
-<section id="quickstart">
+<section id="quickstart" class="section">
   <div class="container">
-    <div class="section-head reveal">
-      <span class="section-tag mono">/ Quickstart</span>
+    <div class="sec-head reveal">
+      <span class="eyebrow mono">/ Quickstart</span>
       <h2>快速开始</h2>
-      <p>三分钟跑起来，Docker 一条命令搞定全部依赖。</p>
+      <p>Docker 一条命令起服务，三分钟跑通全部依赖。</p>
     </div>
     <div class="quick-grid">
       <div class="code-block reveal">
         <div class="code-head">
-          <div class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
-          <span>docker-compose.yml</span>
+          <span class="mono">docker-compose</span>
           <button class="copy-btn" data-copy="c1">复制</button>
         </div>
-        <pre id="c1"><span class="cm"># 推荐：Docker Compose 一键起服务</span>
+        <pre id="c1"><span class="cm"># 一键起服务</span>
 git <span class="fn">clone</span> https://github.com/motao123/dwz-shorturl.git
 <span class="fn">cd</span> dwz-shorturl
-<span class="fn">cp</span> deploy/.env.example deploy/.env   <span class="cm"># 填 DB/Redis/JWT 配置</span>
+<span class="fn">cp</span> deploy/.env.example deploy/.env
 docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
       </div>
       <div class="code-block reveal">
         <div class="code-head">
-          <div class="dots"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
-          <span>本地开发</span>
+          <span class="mono">local-dev</span>
           <button class="copy-btn" data-copy="c2">复制</button>
         </div>
-        <pre id="c2"><span class="cm"># Go 后端</span>
-<span class="fn">cd</span> backend
-<span class="fn">cp</span> configs/config.example.yaml configs/config.yaml
-<span class="fn">go run</span> ./cmd/server
-
-<span class="cm"># Vue3 管理台</span>
+        <pre id="c2"><span class="cm"># 本地开发</span>
+<span class="fn">cd</span> backend && <span class="fn">go run</span> ./cmd/server
 <span class="fn">cd</span> frontend && npm install && npm run dev
-
-<span class="cm"># 幂等迁移（schema_migrations）</span>
 <span class="fn">go run</span> ./cmd/migrate -status</pre>
       </div>
     </div>
@@ -294,20 +261,20 @@ docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
 </section>
 
 <!-- ============ 文档 ============ -->
-<section id="docs">
+<section id="docs" class="section">
   <div class="container">
-    <div class="section-head reveal">
-      <span class="section-tag mono">/ Docs</span>
+    <div class="sec-head reveal">
+      <span class="eyebrow mono">/ Docs</span>
       <h2>项目文档</h2>
       <p>从接口说明到架构审计，一站式了解 DWZ 短网址平台。</p>
     </div>
     <div class="docs-grid">
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/blob/master/README.md" target="_blank" rel="noopener">
-        <span class="ico">📘</span><h3>README</h3><p>项目总览、架构、技术栈与部署指引。</p>
+        <span class="ico">📘</span><h3>README</h3><p>项目总览、架构与部署指引。</p>
         <span class="go">readme →</span>
       </a>
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/blob/master/api.html" target="_blank" rel="noopener">
-        <span class="ico">🔌</span><h3>API 文档</h3><p>接口完整说明、错误码表、curl 示例。</p>
+        <span class="ico">🔌</span><h3>API 文档</h3><p>接口说明、错误码表、curl 示例。</p>
         <span class="go">api.html →</span>
       </a>
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/blob/master/docs/BACKEND_ADMIN_DESIGN.md" target="_blank" rel="noopener">
@@ -315,23 +282,22 @@ docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
         <span class="go">design →</span>
       </a>
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/blob/master/docs/FEATURE_ROADMAP.md" target="_blank" rel="noopener">
-        <span class="ico">🗺️</span><h3>功能路线图</h3><p>5 个 Phase / 10 大模块 / 79.5 人日规划。</p>
+        <span class="ico">🗺️</span><h3>功能路线图</h3><p>5 个 Phase / 10 大模块规划。</p>
         <span class="go">roadmap →</span>
       </a>
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/blob/master/docs/ANALYSIS_REPORT_2026-08.md" target="_blank" rel="noopener">
-        <span class="ico">🔬</span><h3>深度分析报告</h3><p>功能/UI/交互/架构四维审计 + 13 批修复记录。</p>
+        <span class="ico">🔬</span><h3>分析报告</h3><p>四维审计 + 13 批修复记录。</p>
         <span class="go">report →</span>
       </a>
       <a class="doc-card reveal" href="https://github.com/motao123/dwz-shorturl/issues" target="_blank" rel="noopener">
-        <span class="ico">🐛</span><h3>Issues</h3><p>提 Bug、提需求、参与开源共建。</p>
+        <span class="ico">🐛</span><h3>Issues</h3><p>提 Bug、提需求、参与共建。</p>
         <span class="go">issues →</span>
       </a>
     </div>
 
     <div class="cta-band reveal">
       <h2>准备好缩短你的第一个链接了吗？</h2>
-      <p>开源 · 免费 · 企业级 —— DWZ 短网址平台等你来用。</p>
-      <div class="hero-cta" style="justify-content:center;">
+      <div class="hero-actions" style="justify-content:center;">
         <a class="btn btn-primary" href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">Star 支持</a>
         <a class="btn btn-secondary" href="https://github.com/motao123/dwz-shorturl/fork" target="_blank" rel="noopener">Fork</a>
       </div>
@@ -345,7 +311,7 @@ docker compose -f deploy/docker-compose.yml <span class="fn">up -d</span></pre>
 <footer class="footer">
   <div class="container footer-inner">
     <p>© 2026 <b>DWZ ShortURL</b> · 作者 <a href="https://github.com/motao123" target="_blank" rel="noopener">陌涛</a> · MIT License</p>
-    <p class="mono" style="color:var(--ink-mute);">Design by Stripe × Bento · Built with ❤️</p>
+    <p class="mono">Stripe × Bento · Built with ❤️</p>
   </div>
 </footer>
 
