@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS `short_urls` (
   `id`          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   `uid`         VARCHAR(16)    NOT NULL COMMENT 'short code',
   `long_url`    TEXT           NOT NULL COMMENT 'target URL',
-  `url_hash`    CHAR(32)       NOT NULL COMMENT 'MD5 dedup',
+  `url_hash`    CHAR(32)       NOT NULL COMMENT 'MD5(url + 0x1F + owner scope) dedup',
   `title`       VARCHAR(255)   NULL COMMENT 'user-defined title',
   `category_id` BIGINT UNSIGNED NULL COMMENT 'category ID',
   `domain_id`   BIGINT UNSIGNED NULL COMMENT 'domain pool entry this link belongs to',

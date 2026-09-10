@@ -109,6 +109,10 @@ type ShortUrl struct {
 	ID         uint64         `gorm:"primaryKey;autoIncrement" json:"id"`
 	UID        string         `gorm:"size:16;uniqueIndex:uk_uid;not null" json:"uid"`
 	LongURL    string         `gorm:"type:text;not null" json:"long_url"`
+	// URLHash is MD5(long_url + 0x1F + owner scope). It is unique per owner
+	// instead of globally unique, so the same URL can back one link per member
+	// (each with its own expiry/password) while dedup no longer depends on a
+	// bare MD5 of the URL.
 	URLHash    string         `gorm:"size:32;uniqueIndex:uk_url_hash;not null" json:"url_hash"`
 	Title      string         `gorm:"size:255" json:"title"`
 	CategoryID *uint64        `json:"category_id"`

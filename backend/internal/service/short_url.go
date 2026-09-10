@@ -147,9 +147,9 @@ func (s *shortUrlService) Create(longURL, custom string, expireDays int, domainI
 		return nil, err
 	}
 
-	hash := md5Hash(longURL)
+	hash := urlHash(longURL, urlScopeKey(nil, createdBy))
 
-	// Check if URL already exists
+	// Check if this URL already has a link inside the same owner scope.
 	existing, err := s.repo.FindByHash(hash)
 	if err == nil && existing != nil {
 		if custom != "" && custom != existing.UID {
@@ -187,10 +187,10 @@ func (s *shortUrlService) Create(longURL, custom string, expireDays int, domainI
 		if custom != "" {
 			uid = custom
 		} else if attempt == 0 {
-			uid = pkg.ShortURL(longURL)
+			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy))
 		} else {
 			salt := fmt.Sprintf("|%d|%s", attempt, pkg.GenerateRandomCode(8))
-			uid = pkg.ShortURL(longURL + salt)
+			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy) + salt)
 		}
 
 		record := model.ShortUrl{
@@ -242,10 +242,11 @@ func (s *shortUrlService) CreatePublicAPI(longURL, custom string, expireDays int
 	return s.Create(longURL, custom, expireDays, domainID, nil, "api", ip, password)
 }
 
-// resurrectDeleted revives a soft-deleted row with the same url_hash so the URL
-// can be shortened again. The unique index on url_hash keeps a deleted row in
-// place, so without this a re-creation would fail with a duplicate-key error
-// forever. Returns nil when there is nothing to resurrect.
+// resurrectDeleted revives a soft-deleted row with the same scoped url_hash so
+// the URL can be shortened again. Since the unique index is scoped to
+// (url_hash), a soft-deleted row still occupies it, so without resurrection a
+// re-creation would fail with a duplicate-key error forever. Returns nil when
+// there is nothing to resurrect.
 func (s *shortUrlService) resurrectDeleted(hash string, expireDays int, domainID *uint64, createdBy *uint64, source, ip string) (*model.ShortUrl, error) {
 	deleted, err := s.repo.FindByHashIncludingDeleted(hash)
 	if err != nil || !deleted.DeletedAt.Valid {
@@ -399,7 +400,7 @@ func (s *shortUrlService) createWithTitle(longURL, title, custom string, expireD
 	if custom != "" && !isValidCustomCode(custom) {
 		return nil, ErrCustomCodeFormat
 	}
-	hash := md5Hash(longURL)
+	hash := urlHash(longURL, urlScopeKey(nil, createdBy))
 
 	if existing, err := s.repo.FindByHash(hash); err == nil && existing != nil {
 		if custom != "" && custom != existing.UID {
@@ -434,10 +435,10 @@ func (s *shortUrlService) createWithTitle(longURL, title, custom string, expireD
 		if custom != "" {
 			uid = custom
 		} else if attempt == 0 {
-			uid = pkg.ShortURL(longURL)
+			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy))
 		} else {
 			salt := fmt.Sprintf("|%d|%s", attempt, pkg.GenerateRandomCode(8))
-			uid = pkg.ShortURL(longURL + salt)
+			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy) + salt)
 		}
 		record := model.ShortUrl{
 			UID:          uid,
@@ -527,7 +528,7 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 			return nil, err
 		}
 		record.LongURL = longURL
-		record.URLHash = md5Hash(longURL)
+		record.URLHash = urlHash(longURL, urlScopeKey(record.MemberID, record.CreatedBy))
 	}
 
 	if title != "" {
@@ -1050,6 +1051,37 @@ func isValidCustomCode(code string) bool {
 func md5Hash(input string) string {
 	h := md5.Sum([]byte(input))
 	return hex.EncodeToString(h[:])
+}
+
+// urlScopeKey builds the per-owner dedup scope used by urlHash. It mirrors the
+// PHP-side url_scope_key()/url_scope_hash() so the Go and PHP paths land on the
+// same url_hash value for the same (URL, owner) pair.
+//
+// Scope semantics:
+//   - member scope "m:<id>" -> one short link per URL per member. Two different
+//     members shortening the same URL get separate links (each can set its own
+//     expiry/password), and the same member re-submitting gets the existing one.
+//   - admin/api-key scope "w:<id>" -> same per-owner semantics for
+//     admin-created / API-key links.
+//   - unknown owner "w:0" -> the legacy global semantics (one link per URL),
+//     which keeps pre-upgrade rows and anonymous submissions behaving as before.
+const urlScopeSeparator = "\x1f"
+
+func urlScopeKey(memberID, createdBy *uint64) string {
+	if memberID != nil && *memberID > 0 {
+		return fmt.Sprintf("m:%d", *memberID)
+	}
+	if createdBy != nil && *createdBy > 0 {
+		return fmt.Sprintf("w:%d", *createdBy)
+	}
+	return "w:0"
+}
+
+// urlHash returns the scoped MD5 of a URL. It replaces the plain MD5(url) that
+// was globally unique, so the same URL can back several links (one per member)
+// while collisions in the dedup key can no longer happen between distinct URLs.
+func urlHash(longURL, scopeKey string) string {
+	return md5Hash(longURL + urlScopeSeparator + scopeKey)
 }
 
 // hashPassword returns the bcrypt hash of an access password, or "" when the
