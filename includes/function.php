@@ -151,6 +151,9 @@ function rate_limit($ip, $max = 20, $window = 60, $cost = 1) {
     if (!$fp) return false;
     if (!flock($fp, LOCK_EX)) { fclose($fp); return false; }
     $now = time();
+    // 机会式清理：每约 1/200 次调用扫一次目录，删除 24h 未修改的过期桶文件，
+    // 避免每个 IP 一个文件在 IPv6/代理场景下无限膨胀耗尽 inode。
+    if (function_exists('rate_limit_gc')) rate_limit_gc($dir, $now);
     $data = json_decode(stream_get_contents($fp), true);
     if (!is_array($data) || !isset($data['start'], $data['count']) || ($now - (int)$data['start']) >= $window) $data = array('start' => $now, 'count' => 0);
     $cost = max(1, (int)$cost);
@@ -159,6 +162,23 @@ function rate_limit($ip, $max = 20, $window = 60, $cost = 1) {
     ftruncate($fp, 0); rewind($fp); fwrite($fp, json_encode($data)); fflush($fp);
     flock($fp, LOCK_UN); fclose($fp);
     return $allowed;
+}
+
+// Best-effort GC for the file-based rate limiter. Kept cheap: only runs on a
+// small random fraction of calls and deletes buckets untouched for $ttl seconds.
+function rate_limit_gc($dir, $now = null, $ttl = 86400) {
+    if (random_int(1, 200) !== 1) return;
+    $now = $now === null ? time() : (int)$now;
+    $handle = @opendir($dir);
+    if (!$handle) return;
+    while (($entry = readdir($handle)) !== false) {
+        if ($entry === '.' || $entry === '..') continue;
+        if (substr($entry, -3) !== '.rl') continue;
+        $path = rtrim($dir, '/\\') . '/' . $entry;
+        $mtime = @filemtime($path);
+        if ($mtime !== false && ($now - $mtime) > $ttl) @unlink($path);
+    }
+    closedir($handle);
 }
 
 // Reset a rate-limit key (e.g. after a successful login clears the failure count).

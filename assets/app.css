@@ -1,27 +1,6 @@
-:root {
-  color-scheme: light;
-  --ink: #111827;
-  --ink-strong: #09090b;
-  --muted: #6b7280;
-  --line: #e8e8ec;
-  --line-strong: #d4d4d8;
-  --surface: #ffffff;
-  --surface-soft: #f8f8fa;
-  --page: #fafafb;
-  --accent: #111827;
-  --accent-hover: #000000;
-  --success: #16a34a;
-  --success-soft: #f0fdf4;
-  --danger: #b91c1c;
-  --danger-soft: #fef2f2;
-  --focus: rgba(17, 24, 39, 0.14);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.1);
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-}
+/* NOTE: 设计令牌已抽取到 assets/tokens.css（需在 <link rel="stylesheet" href="tokens.css"> 之后引入本文件）。 */
+/* tokens.css 提供 :root 全部变量，本文件仅包含组件样式。 */
+
 
 * {
   box-sizing: border-box;
@@ -395,7 +374,11 @@ textarea:focus {
 }
 
 input[aria-invalid="true"],
-textarea[aria-invalid="true"] {
+input[aria-invalid="true"]:hover,
+textarea[aria-invalid="true"],
+textarea[aria-invalid="true"]:hover,
+.field-group.is-invalid input,
+.field-group.is-invalid input:hover {
   border-color: var(--danger);
   box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.1);
 }
@@ -720,6 +703,9 @@ textarea[aria-invalid="true"] {
   right: 20px;
   bottom: 20px;
   z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
   width: min(400px, calc(100% - 32px));
   padding: 14px 18px;
   color: #fff;
@@ -729,6 +715,33 @@ textarea[aria-invalid="true"] {
   box-shadow: var(--shadow-lg);
   font-size: 13px;
   font-weight: 500;
+}
+
+.status-toast-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.status-toast-close {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin: -2px -6px 0 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  opacity: 0.75;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.status-toast-close:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .status-toast.is-error {
@@ -944,7 +957,12 @@ body.dialog-open {
 }
 
 @media (max-width: 480px) {
+  /* 小屏保留状态点，仅收起文字，避免在线状态完全不可见 */
   .header-note {
+    padding: 5px 8px;
+  }
+
+  .header-note .status-label {
     display: none;
   }
 
@@ -983,7 +1001,8 @@ body.dialog-open {
   }
 }
 
-@media (min-width: 640px) {
+/* 断点统一为 480 / 768 / 1024 三级，避免 640–768 区间两套规则同时命中产生抖动 */
+@media (min-width: 768px) {
   .dialog-actions {
     grid-template-columns: 1fr 1fr;
   }
