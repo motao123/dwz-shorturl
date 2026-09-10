@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"dwz-admin/internal/config"
 	"dwz-admin/internal/model"
 	"dwz-admin/internal/pkg"
 	"dwz-admin/internal/repository"
@@ -413,7 +414,7 @@ func (s *memberApiService) RequestPasswordReset(email string) error {
 	if s.email == nil || !s.email.Enabled() {
 		return errors.New("邮件服务未配置")
 	}
-	link := "https://1.xk7.cn/member/reset?token=" + token
+	link := emailBaseURL() + "/member/reset?token=" + token
 	body := "您好，\n\n我们收到重置您短链账号密码的请求。请点击以下链接设置新密码（30 分钟内有效）：\n\n" + link + "\n\n如果不是您本人操作，请忽略此邮件。\n—— 陌涛短链"
 	return s.email.Send(m.Email, "重置密码 - 陌涛短链", body)
 }
@@ -462,7 +463,7 @@ func (s *memberApiService) SendVerification(email string) error {
 	if s.email == nil || !s.email.Enabled() {
 		return errors.New("邮件服务未配置")
 	}
-	link := "https://1.xk7.cn/member/verify?token=" + token
+	link := emailBaseURL() + "/member/verify?token=" + token
 	body := "您好，\n\n感谢注册短链账号。请点击以下链接验证您的邮箱（24 小时内有效）：\n\n" + link + "\n\n如果这不是您的操作，请忽略此邮件。\n—— 陌涛短链"
 	return s.email.Send(m.Email, "验证邮箱 - 陌涛短链", body)
 }
@@ -781,4 +782,14 @@ func classifyBrowser(ua string) string {
 
 func trimSpace(s string) string {
 	return strings.TrimSpace(s)
+}
+// emailBaseURL resolves the public base URL used in outbound emails. It follows
+// the public.base_url config (instead of a hardcoded domain) and trims trailing
+// slashes so link concatenation stays consistent.
+func emailBaseURL() string {
+	base := strings.TrimRight(strings.TrimSpace(config.Get().Public.BaseURL), "/")
+	if base == "" {
+		base = "https://1.xk7.cn"
+	}
+	return base
 }
