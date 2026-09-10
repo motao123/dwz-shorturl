@@ -208,6 +208,39 @@ function short_url_result($uid, $msg, $state = 'existing', $domain_id = null) {
     );
 }
 
+// C 类改造：url_hash 的唯一索引由「URL 全局唯一」改为「同一 owner 作用域内唯一」。
+// 哈希输入 = longurl + 0x1F + scope_key，与数据库端
+//   MD5(CONCAT(longurl, 0x1F, scope_key))
+// 完全一致，scope_key 取值：
+//   'w:0'           -> 匿名 / 历史数据，保留改造前的全局去重语义
+//   'm:<member_id>' -> 会员短链，同一会员内去重，不同会员可各建一条
+// 这样既避免 MD5 碰撞导致「完全不同 URL 无法创建」，也让同一 URL 可按会员/有效期分别建链。
+function url_scope_key($member_id = null) {
+    $mid = $member_id === null ? 0 : (int)$member_id;
+    return $mid > 0 ? 'm:' . $mid : 'w:' . 0;
+}
+
+// 计算作用域 MD5。与数据库端表达式
+//   MD5(CONCAT(longurl, 0x1F, scope_key)) / MD5(CONCAT(long_url, 0x1F, scopeKey))
+// 完全一致（utf8mb4 下 MD5(CONCAT(...)) 结果不受字符集影响）。
+function url_scope_hash($longurl, $scope_key) {
+    return md5((string)$longurl . "\x1f" . (string)$scope_key);
+}
+
+// 按作用域哈希查短码（返回 '' 表示不存在）。用于「同一会员/匿名池内同一 URL」
+// 的幂等复用：先查再复用，避免重复 INSERT 触发唯一索引冲突。
+function find_uid_by_scope($DB, $hash) {
+    if (!isset($DB) || empty($DB->link) || !is_string($hash) || $hash === '') return '';
+    $stmt = $DB->prepare('SELECT uid FROM wjoy_log WHERE url_hash=? AND status=1 LIMIT 1');
+    if (!$stmt) return '';
+    mysqli_stmt_bind_param($stmt, 's', $hash);
+    if (!mysqli_stmt_execute($stmt)) { mysqli_stmt_close($stmt); return ''; }
+    mysqli_stmt_bind_result($stmt, $uid);
+    $uid = mysqli_stmt_fetch($stmt) ? (string)$uid : '';
+    mysqli_stmt_close($stmt);
+    return $uid;
+}
+
 function find_short_by_hash($DB, $hash) {
     $stmt = $DB->prepare('SELECT uid, expire_at FROM wjoy_log WHERE url_hash=? LIMIT 1');
     if (!$stmt) return false;
@@ -229,7 +262,7 @@ function renew_short_expiry($DB, $hash, $expire_at) {
 }
 
 // Create or renew a short URL. Generated-code collisions are retried with the existing alphabet.
-function create_short_url($DB, $longurl, $custom = null, $expire_days = 0, $domain_id = null, $password = '') {
+function create_short_url($DB, $longurl, $custom = null, $expire_days = 0, $domain_id = null, $password = '', $member_id = null, $known_hash = null) {
     $custom = $custom === null ? '' : trim((string)$custom);
     if (!validate_custom_code($custom)) return array('code' => 0, 'short_url' => '', 'msg' => '自定义短码格式错误（需 6-8 位，仅含 a-z 与 0-5）', 'result' => 10006);
     $expire_days = validate_expire_days($expire_days);
@@ -238,7 +271,9 @@ function create_short_url($DB, $longurl, $custom = null, $expire_days = 0, $doma
     if (strlen($password) > 72) return array('code' => 0, 'short_url' => '', 'msg' => '访问密码过长（最多 72 字节）', 'result' => 10008);
     $password_hash = $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : null;
 
-    $hash = md5($longurl);
+    // $known_hash：由调用方（api.php / batch.php）预计算并传入的作用域哈希，
+    // 避免同一请求内对同一 URL 重复计算，也保证「查重」与「写入」用的是同一个值。
+    $hash = $known_hash !== null ? (string)$known_hash : url_scope_hash($longurl, url_scope_key($member_id));
     $expire_at = $expire_days > 0 ? date('Y-m-d H:i:s', time() + $expire_days * 86400) : null;
     $existing = find_short_by_hash($DB, $hash);
     if (is_array($existing) && !empty($existing['uid'])) {
@@ -372,7 +407,7 @@ function log_violation($DB, $url, $reason, $source = 'api') {
 function sync_short_url_to_admin($uid, $longurl, $expire_at = null, $member_id = null, $password_hash = null) {
     global $ADMIN_DB;
     if (!$ADMIN_DB || empty($ADMIN_DB->link)) return;
-    $hash = md5($longurl);
+    $hash = url_scope_hash($longurl, url_scope_key($member_id));
     $source = 'web';
     $member_id = $member_id > 0 ? (int)$member_id : null;
     $password_hash = $password_hash === null || $password_hash === '' ? null : (string)$password_hash;

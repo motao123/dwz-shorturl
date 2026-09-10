@@ -31,7 +31,7 @@
 | 统计展示 | `stats.php` | Token 认证的只读统计页，展示总量/Top10/最近20 |
 | 公共逻辑 | `includes/` | 数据库封装、SSRF 校验、限流、短码算法、配置加载 |
 
-**数据模型**：单表 `wjoy_log`，字段包括 `uid`(短码)、`longurl`(目标URL)、`url_hash`(MD5去重)、`clicks`(点击数)、`expire_at`(过期时间)。
+**数据模型**：单表 `wjoy_log`，字段包括 `uid`(短码)、`longurl`(目标URL)、`url_hash`(MD5(url + 0x1F + owner scope) 去重，见 `migrations/scope_url_hash.sql`)、`clicks`(点击数)、`expire_at`(过期时间)。
 
 **安全机制**：POST-only 接口、文件级速率限制、SSRF 双向校验（创建+跳转）、可信代理 IP 白名单、统计页 Token 认证。
 
@@ -172,7 +172,7 @@
 **短链创建流程：**
 ```
 客户端 → Nginx → 管理API/公开API
-  → 参数校验 → SSRF校验 → 去重查询(url_hash)
+  → 参数校验 → SSRF校验 → 去重查询(url_hash = MD5(url + 0x1F + owner scope))
   → [已存在] 返回已有短码
   → [不存在] 生成短码 → 写入DB → 写入Redis缓存
   → 记录审计日志 → 返回结果
@@ -283,7 +283,7 @@ CREATE TABLE short_urls (
   id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   uid         VARCHAR(16)    NOT NULL COMMENT '短码',
   long_url    TEXT           NOT NULL COMMENT '目标URL',
-  url_hash    CHAR(32)       NOT NULL COMMENT 'MD5去重',
+  url_hash    CHAR(32)       NOT NULL COMMENT 'MD5(url + 0x1F + owner scope) 去重',
   title       VARCHAR(255)   NULL COMMENT '用户自定义标题',
   category_id BIGINT UNSIGNED NULL COMMENT '分组ID',
   clicks      INT UNSIGNED   NOT NULL DEFAULT 0,
