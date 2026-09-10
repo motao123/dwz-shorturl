@@ -1061,18 +1061,24 @@ func md5Hash(input string) string {
 //   - member scope "m:<id>" -> one short link per URL per member. Two different
 //     members shortening the same URL get separate links (each can set its own
 //     expiry/password), and the same member re-submitting gets the existing one.
-//   - admin/api-key scope "w:<id>" -> same per-owner semantics for
-//     admin-created / API-key links.
-//   - unknown owner "w:0" -> the legacy global semantics (one link per URL),
-//     which keeps pre-upgrade rows and anonymous submissions behaving as before.
+//   - everything else -> "w:0", the legacy global semantics (one link per URL).
+//     This covers anonymous submissions, API-key calls AND admin-console
+//     creations.
+//
+// Note: admin-console creations deliberately fall into "w:0" rather than a
+// per-admin "w:<id>" bucket. The PHP front end (api.php / batch.php /
+// do.php) only knows a member id and can therefore never compute "w:<id>"; if
+// the admin console used a per-admin scope, a link created there would get a
+// different url_hash than the same URL submitted through the PHP front, and the
+// two redirect paths would disagree about whether the link already exists.
+// Keeping admins in the global bucket preserves the pre-upgrade behaviour and
+// guarantees the Go and PHP implementations stay interchangeable.
 const urlScopeSeparator = "\x1f"
 
 func urlScopeKey(memberID, createdBy *uint64) string {
+	_ = createdBy // kept for signature parity with the PHP/legacy call sites
 	if memberID != nil && *memberID > 0 {
 		return fmt.Sprintf("m:%d", *memberID)
-	}
-	if createdBy != nil && *createdBy > 0 {
-		return fmt.Sprintf("w:%d", *createdBy)
 	}
 	return "w:0"
 }
