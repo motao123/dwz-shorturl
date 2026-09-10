@@ -119,9 +119,13 @@ function validate_expire_days($value) {
 function public_short_url($uid, $domain_id = null) {
     global $public_base_url, $DB;
 
-    // If a domain_id is specified, try to look up the domain from the domains table
-    if ($domain_id !== null && $domain_id !== '' && isset($DB) && !empty($DB->link)) {
-        $stmt = $DB->prepare('SELECT domain, scheme FROM domains WHERE id=? AND status=1 LIMIT 1');
+    // A3：仅登录会员才允许按 domain_id 选择域名池中的域名。
+    // 匿名调用一律忽略外部传入的 domain_id，只用服务端 $public_base_url，
+    // 避免匿名用户枚举 domains 表探测未公开的备用短链域名。
+    // domain_id 还必须是纯数字，防止非预期类型进入查询。
+    $is_numeric_domain = $domain_id !== null && $domain_id !== '' && ctype_digit((string)$domain_id);
+    if ($is_numeric_domain && function_exists('member_id') && member_id() > 0 && isset($DB) && !empty($DB->link)) {
+        $stmt = $DB->prepare('SELECT domain, scheme FROM domains WHERE id=? AND status=1 AND deleted_at IS NULL LIMIT 1');
         if ($stmt) {
             mysqli_stmt_bind_param($stmt, 's', $domain_id);
             mysqli_stmt_execute($stmt);
@@ -129,9 +133,13 @@ function public_short_url($uid, $domain_id = null) {
             if (mysqli_stmt_fetch($stmt)) {
                 mysqli_stmt_close($stmt);
                 $scheme = !empty($d_scheme) ? $d_scheme : 'https';
-                return $scheme . '://' . $d_domain . '/' . rawurlencode($uid);
+                // 域名必须形如合法主机名，避免库中脏数据拼出非预期 URL
+                if (preg_match('/^[a-z0-9.-]+$/i', (string)$d_domain) && strpos((string)$d_domain, '.') !== false) {
+                    return $scheme . '://' . $d_domain . '/' . rawurlencode($uid);
+                }
+            } else {
+                mysqli_stmt_close($stmt);
             }
-            mysqli_stmt_close($stmt);
         }
     }
 
@@ -368,7 +376,13 @@ function sync_short_url_to_admin($uid, $longurl, $expire_at = null, $member_id =
     $source = 'web';
     $member_id = $member_id > 0 ? (int)$member_id : null;
     $password_hash = $password_hash === null || $password_hash === '' ? null : (string)$password_hash;
-    $stmt = $ADMIN_DB->prepare('INSERT INTO short_urls (uid, long_url, url_hash, expire_at, member_id, source, status, password_hash) VALUES (?,?,?,?,?,?,1,?) ON DUPLICATE KEY UPDATE expire_at=IFNULL(short_urls.expire_at, VALUES(expire_at))');
+    // A4：冲突时同步鉴权/可见性字段，避免 wjoy_log 与 short_urls 对同一条短链
+    // 给出不同的鉴权结果（Go 路径 vs PHP 路径）。
+    //   - long_url / password_hash：直接同步为本次提交的值。
+    //   - expire_at：IFNULL 保留已有有效期，不覆盖永久/更长有效期。
+    //   - status：仅当已过期（2）时复活为 1；管理员主动禁用（0）不被覆盖，
+    //     避免 API 重复提交把人工下线的短链重新启用。
+    $stmt = $ADMIN_DB->prepare('INSERT INTO short_urls (uid, long_url, url_hash, expire_at, member_id, source, status, password_hash) VALUES (?,?,?,?,?,?,1,?) ON DUPLICATE KEY UPDATE long_url=VALUES(long_url), password_hash=VALUES(password_hash), status=IF(short_urls.status=2, VALUES(status), short_urls.status), expire_at=IFNULL(short_urls.expire_at, VALUES(expire_at))');
     if (!$stmt) return;
     mysqli_stmt_bind_param($stmt, 'ssssiss', $uid, $longurl, $hash, $expire_at, $member_id, $source, $password_hash);
     mysqli_stmt_execute($stmt);

@@ -22,15 +22,19 @@ WEB_DIR="${DWZ_WEB_DIR:-/data/www/wwwroot/1.xk7.cn}"
 APP_DIR="${DWZ_APP_DIR:-/www/server/dwz-admin}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
+# B7：不再把密码拼进命令行（原 `sshpass -p '${DWZ_PASS}'` 会让密码出现在 ps
+# 输出与 shell history 中）。改用 sshpass -e 从环境变量 SSHPASS 读取。
 if [ -n "${DWZ_PASS:-}" ]; then
-  SSHPASS_CMD="sshpass -p '${DWZ_PASS}'"
+  export SSHPASS="$DWZ_PASS"
+  SSHPASS_CMD="sshpass -e"
   SCP="$SSHPASS_CMD scp"
   SSH="$SSHPASS_CMD ssh"
 else
   SCP="scp"
   SSH="ssh"
 fi
-SSH_ARGS="-o StrictHostKeyChecking=no"
+# B7：不再全局关闭主机密钥校验。首次连接由 accept-new 记录，之后严格校验。
+SSH_ARGS="-o StrictHostKeyChecking=accept-new"
 if [ -n "${DWZ_SSH_KEY:-}" ]; then SSH_ARGS="$SSH_ARGS -i $DWZ_SSH_KEY"; fi
 DEST="$USER@$SERVER"
 
@@ -61,6 +65,9 @@ $SSH $SSH_ARGS "$DEST" "
   mkdir -p '$WEB_DIR/member/assets'
   cp -r /tmp/dwz-dist/assets/* '$WEB_DIR/member/assets/'
   chown -R www:www '$WEB_DIR/admin' '$WEB_DIR/member'
+  # B7：敏感文件收敛权限位：config.php 仅属主可读，includes 目录不可被其他用户遍历
+  [ -f '$WEB_DIR/config.php' ] && chmod 600 '$WEB_DIR/config.php'
+  [ -d '$WEB_DIR/includes' ] && chmod 750 '$WEB_DIR/includes'
   systemctl is-active dwz-admin.service
 "
 echo "==> 完成"

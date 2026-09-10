@@ -50,9 +50,17 @@ func (r *RateLimiter) Allow(ctx context.Context, key string, max int, window tim
 	return r.AllowN(ctx, key, max, 1, window)
 }
 
-// AllowN atomically consumes cost tokens for key within the window. The window
-// TTL is (re)set on the first increment of a fresh window; subsequent calls
-// within the same window only bump the counter. A max <= 0 means unlimited.
+// AllowN atomically consumes cost tokens for key within the window. A max <= 0
+// means unlimited.
+//
+// B8 hardening:
+//   - The window TTL is (re)set on EVERY increment, not only on the first one.
+//     EXPIRE is idempotent and cheap; setting it unconditionally guarantees a
+//     key can never end up without an expiry (which would otherwise permanently
+//     ban the key after a Redis restart or a key deletion that lost the TTL).
+//   - When the request is over the limit the cost is refunded, so rejected
+//     requests no longer consume budget and block subsequent legitimate calls
+//     within the same window.
 func (r *RateLimiter) AllowN(ctx context.Context, key string, max, cost int, window time.Duration) (bool, error) {
 	if max <= 0 {
 		return true, nil
@@ -65,9 +73,15 @@ func (r *RateLimiter) AllowN(ctx context.Context, key string, max, cost int, win
 	if err != nil {
 		return false, err
 	}
-	// Best-effort TTL: only meaningful on the first increment of a window.
-	if n == int64(cost) {
-		_, _ = r.counter.Expire(ctx, ckey, window)
+	// 无论是否为窗口首次自增，都重申 TTL，确保计数器不会永不过期。
+	_, _ = r.counter.Expire(ctx, ckey, window)
+	if n <= int64(max) {
+		return true, nil
 	}
-	return n <= int64(max), nil
+	// 超额：退还本次消耗，避免被拒请求连带阻塞窗口内后续合法请求。
+	// 退款同样受 TTL 保护，不会生成不过期的 key。
+	if _, rerr := r.counter.IncrBy(ctx, ckey, -int64(cost)); rerr != nil {
+		return false, rerr
+	}
+	return false, nil
 }
