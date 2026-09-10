@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS `wjoy_log` (
   `Id` int unsigned NOT NULL AUTO_INCREMENT,
   `uid` varchar(16) NOT NULL,
   `longurl` text NOT NULL,
-  `url_hash` char(32) NOT NULL,
+  `url_hash` char(32) NOT NULL COMMENT 'MD5(url + 0x1F + owner scope); see migrations/scope_url_hash.sql',
   `clicks` int unsigned NOT NULL DEFAULT 0,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `expire_at` datetime DEFAULT NULL,

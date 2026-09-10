@@ -470,3 +470,75 @@ func TestBatchCreate_ReportsErrorsByInputIndex(t *testing.T) {
 
 // helper: ensure errors.Is still works for sentinel comparison if needed later
 var _ = errors.Is
+
+// C 类改造回归：url_hash 由「URL 全局唯一」改为「owner 作用域内唯一」。
+// 同一会员重复提交同一 URL 必须复用同一条短链（不新建、不重复计数）。
+func TestCreate_Dedup_SameScopeReusesExisting(t *testing.T) {
+	sr := newMockShortRepo()
+	dr := &mockDomainRepo{}
+	svc := buildService(sr, dr)
+
+	createdBy := uint64(1)
+	first, err := svc.Create("https://www.example.com/a", "", 0, nil, &createdBy, "test", "127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("first Create failed: %v", err)
+	}
+	second, err := svc.Create("https://www.example.com/a", "", 0, nil, &createdBy, "test", "127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("second Create failed: %v", err)
+	}
+	if first.UID != second.UID {
+		t.Fatalf("same owner + same URL must reuse the link, got %s vs %s", first.UID, second.UID)
+	}
+	if len(sr.records) != 1 {
+		t.Fatalf("expected a single stored record, got %d", len(sr.records))
+	}
+}
+
+// C 类改造回归：不同 owner 对同一 URL 应各自建链，互不复用。
+// 这是旧实现（MD5(url) 全局唯一）无法做到的核心能力。
+func TestCreate_DifferentScopesGetSeparateLinks(t *testing.T) {
+	sr := newMockShortRepo()
+	dr := &mockDomainRepo{}
+	svc := buildService(sr, dr)
+
+	ownerA := uint64(1)
+	ownerB := uint64(2)
+	a, err := svc.Create("https://www.example.com/same", "", 0, nil, &ownerA, "test", "127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("Create ownerA failed: %v", err)
+	}
+	b, err := svc.Create("https://www.example.com/same", "", 0, nil, &ownerB, "test", "127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("Create ownerB failed: %v", err)
+	}
+	if a.UID == b.UID {
+		t.Fatalf("different owners must not share a link, both got %s", a.UID)
+	}
+	if a.URLHash == b.URLHash {
+		t.Fatalf("scoped hashes must differ across owners: %s", a.URLHash)
+	}
+	if len(sr.records) != 2 {
+		t.Fatalf("expected two records, got %d", len(sr.records))
+	}
+}
+
+// C 类改造回归：作用域哈希必须与 PHP 侧 url_scope_hash() 的拼接口径一致
+// （longurl + 0x1F + scopeKey），否则两条跳转路径会各查到不同的行。
+func TestURLHash_MatchesPHPScopeSeparator(t *testing.T) {
+	if got, want := urlHash("https://example.com", "w:0"),
+		md5Hash("https://example.com\x1fw:0"); got != want {
+		t.Fatalf("urlHash mismatch: got %s want %s", got, want)
+	}
+	if got, want := urlHash("https://example.com", "m:42"),
+		md5Hash("https://example.com\x1fm:42"); got != want {
+		t.Fatalf("urlHash mismatch: got %s want %s", got, want)
+	}
+	// 作用域不同 -> 哈希必须不同，且不能退化为裸 MD5(url)
+	if urlHash("https://example.com", "w:0") == md5Hash("https://example.com") {
+		t.Fatal("scoped hash must not equal the legacy global hash")
+	}
+	if urlScopeKey(nil, nil) != "w:0" {
+		t.Fatalf("anonymous links must keep the legacy global scope, got %s", urlScopeKey(nil, nil))
+	}
+}
