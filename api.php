@@ -17,9 +17,23 @@ $custom = isset($_POST['custom']) && is_string($_POST['custom']) ? trim($_POST['
 $expire_raw = isset($_POST['expire']) ? $_POST['expire'] : 0;
 $password = isset($_POST['password']) && is_string($_POST['password']) ? $_POST['password'] : '';
 $domain_id = isset($_POST['domain']) && is_string($_POST['domain']) ? trim($_POST['domain']) : '';
-$domain_id = $domain_id !== '' ? $domain_id : null;
+// A3：domain 参数必须是纯数字 ID，且仅登录会员可用（匿名传 domain 一律忽略，
+// 避免匿名枚举域名池）。非法值直接忽略。
+if ($domain_id !== '' && !ctype_digit($domain_id)) {
+    $domain_id = null;
+}
+if ($domain_id !== null && $domain_id !== '' && member_id() <= 0) {
+    $domain_id = null;
+}
 
 if (!headers_sent() && $format !== 'txt') header('Content-Type: application/json; charset=utf-8');
+
+// B11：限流必须在任何昂贵的校验（validate_long_url 含 DNS 解析）之前执行，
+// 否则攻击者可用解析开销打满请求，导致限流失效。
+if (!rate_limit(real_ip(), 20, 60)) {
+    if (!headers_sent()) header('Retry-After: 60');
+    api_result(0, '请求过于频繁，请稍后再试', 10005, 429);
+}
 
 $validation = validate_long_url($longurl);
 if (!$validation[0]) api_result(0, $validation[1], $validation[2], 400);
@@ -31,10 +45,6 @@ if ($violation['blocked']) {
 if (!validate_custom_code($custom)) api_result(0, '自定义短码格式错误（需 6-8 位，仅含 a-z 与 0-5）', 10006, 422);
 $expire = validate_expire_days($expire_raw);
 if ($expire === false) api_result(0, '有效期仅支持 0、1、7、30 或 365 天', 10008, 422);
-if (!rate_limit(real_ip(), 20, 60)) {
-    if (!headers_sent()) header('Retry-After: 60');
-    api_result(0, '请求过于频繁，请稍后再试', 10005, 429);
-}
 
 $r = create_short_url($DB, $longurl, $custom, $expire, $domain_id, $password);
 if ($r['result'] == 1) {

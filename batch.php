@@ -29,7 +29,10 @@ if ($csrf === '' || !hash_equals($_SESSION['member_csrf'] ?? '', $csrf)) {
 
 $raw = isset($_POST['urls']) && is_string($_POST['urls']) ? $_POST['urls'] : '';
 $domain_id = isset($_POST['domain']) && is_string($_POST['domain']) ? trim($_POST['domain']) : '';
-$domain_id = $domain_id !== '' ? $domain_id : null;
+// A3：批量接口同样要求 domain 必须是纯数字 ID 且调用方已登录（本接口已强制 CSRF+登录）。
+if ($domain_id !== '' && (!ctype_digit($domain_id) || member_id() <= 0)) {
+    $domain_id = null;
+}
 $password = isset($_POST['password']) && is_string($_POST['password']) ? $_POST['password'] : '';
 if (strlen($password) > 72) batch_error('访问密码过长（最多 72 字节）', 10008, 422);
 if (strlen($raw) > 210000) batch_error('request too large', 10011, 413);
