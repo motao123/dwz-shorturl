@@ -249,6 +249,24 @@
     return [];
   }
 
+  // 与 PHP stats.php 的 redactUrl() 行为对齐：隐藏 userinfo、query、fragment，
+  // 避免把长链中的 access_token / 签名等敏感参数渲染到页面（会进入浏览器
+  // tooltip、截图与分享）。
+  function redactUrl(value) {
+    var raw = String(value || '').trim();
+    if (raw === '') return '';
+    var parsed;
+    try {
+      parsed = new URL(raw);
+    } catch (e) {
+      return raw.length > 8 ? raw.slice(0, 8) + '…' : raw;
+    }
+    var out = parsed.origin + (parsed.pathname || '/');
+    if (parsed.search) out += '?[已隐藏]';
+    if (parsed.hash) out += '#[已隐藏]';
+    return out;
+  }
+
   function createBatchItem(item) {
     var row = document.createElement('li');
     var source = document.createElement('div');
@@ -258,8 +276,8 @@
 
     row.className = 'result-item' + (success ? '' : ' is-error');
     source.className = 'result-source';
-    source.textContent = String(item.url || item.long_url || item.longUrl || '网址');
-    source.title = source.textContent;
+    // 只显示脱敏后的地址；不写 title，避免悬停时泄露完整长链。
+    source.textContent = redactUrl(item.url || item.long_url || item.longUrl) || '网址';
     output.className = 'result-output';
 
     if (success) {
