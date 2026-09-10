@@ -215,6 +215,12 @@ function short_url_result($uid, $msg, $state = 'existing', $domain_id = null) {
 //   'w:0'           -> 匿名 / 历史数据，保留改造前的全局去重语义
 //   'm:<member_id>' -> 会员短链，同一会员内去重，不同会员可各建一条
 // 这样既避免 MD5 碰撞导致「完全不同 URL 无法创建」，也让同一 URL 可按会员/有效期分别建链。
+//
+// ⚠️ 与 Go 侧 backend/internal/service/short_url.go 的 urlScopeKey() 必须保持
+//    完全一致：Go 的后台管理台创建（createdBy 非空）同样落在 'w:0'，而不是
+//    'w:<user_id>'。PHP 前台只持有 member_id，永远算不出 'w:<n>'；若 Go 用
+//    管理员维度隔离，同一条 URL 经后台创建后，PHP 前台就再也匹配不到同一
+//    url_hash，两条跳转路径会各自建链、互相不可见。
 function url_scope_key($member_id = null) {
     $mid = $member_id === null ? 0 : (int)$member_id;
     return $mid > 0 ? 'm:' . $mid : 'w:' . 0;
