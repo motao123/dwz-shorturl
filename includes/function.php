@@ -424,14 +424,20 @@ function record_click_analytics($uid) {
     }
 }
 
-// Dispatch an event to subscribed webhooks (admin DB).
-// Records every attempt in webhook_deliveries and retries up to 3 times with
-// backoff so a temporarily down receiver doesn't silently lose the event.
-// Does nothing when the admin DB is unavailable or there are no matching webhooks.
+// ---------------------------------------------------------------------------
+// Webhook 异步队列（P2）
+// ---------------------------------------------------------------------------
+// 背景：do.php 跳转热路径原先同步投递所有 webhook（最坏 3 次重试 ≈ 每秒级阻塞）。
+// 现在派发方只做一次 O(1) 的 INSERT 入队，实际投递由
+// migrations/webhook_worker.php 在后台完成（cron 或常驻循环），
+// 用户跳转不再依赖任何外发 HTTP 的成功与否。
+
+// 把事件写入 webhook_queue（按订阅者展开，入队时即完成订阅匹配与 SSRF 预检）。
+// 热路径唯一开销：1 次 SELECT + N 次 INSERT，无网络 IO。
 function dispatch_webhook_event($event, $payload) {
-    global $ADMIN_DB;
+    global $ADMIN_DB, $webhook_dispatch_inline;
     if (!$ADMIN_DB || empty($ADMIN_DB->link)) return;
-    $stmt = $ADMIN_DB->prepare('SELECT id, url, secret, events FROM webhooks WHERE status=1 AND deleted_at IS NULL');
+    $stmt = $ADMIN_DB->prepare('SELECT id, url, events FROM webhooks WHERE status=1 AND deleted_at IS NULL');
     if (!$stmt) return;
     mysqli_stmt_execute($stmt);
     $res = mysqli_stmt_get_result($stmt);
@@ -442,57 +448,119 @@ function dispatch_webhook_event($event, $payload) {
         'timestamp' => time(),
         'data' => $payload,
     ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $rows = array();
     while ($row = mysqli_fetch_assoc($res)) {
         $events = json_decode($row['events'], true);
         if (!is_array($events) || !in_array($event, $events, true)) continue;
-        // SSRF 防护：webhook 目标同样必须通过私网/保留地址校验（与创建时的
-        // 校验一致），避免通过历史数据或后台写入的地址访问云元数据端点。
-        $target_check = validate_long_url((string)$row['url'], false);
+        // SSRF 预检（热路径低成本版）：只做协议/语法与字面 IP 校验，不做 DNS。
+        // 完整 DNS/重绑定校验由 worker 投递前再用 validate_long_url(..., false)
+        // 执行，避免在跳转热路径引入 DNS 解析开销。
+        $target_check = validate_long_url((string)$row['url'], true);
         if (!$target_check[0]) {
             error_log('[dwz] webhook skipped (unsafe target): ' . (string)$row['url']);
             continue;
         }
-        $headers = array('Content-Type: application/json', 'User-Agent: dwz-shorturl-webhook/1.0');
-        if (!empty($row['secret'])) {
-            $headers[] = 'X-Webhook-Signature: sha256=' . hash_hmac('sha256', $body, $row['secret']);
-        }
-        $max_attempts = 3;
-        for ($attempt = 1; $attempt <= $max_attempts; $attempt++) {
-            $status = 0;
-            $success = 0;
-            $resp_body = '';
-            $ch = curl_init($row['url']);
-            curl_setopt_array($ch, array(
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => $body,
-                CURLOPT_HTTPHEADER => $headers,
-                CURLOPT_RETURNTRANSFER => true,
-                // 毫秒级上限：即使在非 FastCGI SAPI（无 fastcgi_finish_request）下，
-                // 单次投递也不会拖慢跳转热路径。
-                CURLOPT_TIMEOUT_MS => 800,
-                CURLOPT_CONNECTTIMEOUT_MS => 400,
-            ));
-            $resp = curl_exec($ch);
-            $http_code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            if ($resp !== false) {
-                $status = $http_code;
-                $resp_body = substr($resp, 0, 512);
-                if ($http_code >= 200 && $http_code < 300) $success = 1;
-            }
-            $ins = $ADMIN_DB->prepare('INSERT INTO webhook_deliveries (webhook_id, event, payload, response_status, response_body, attempt, success, created_at) VALUES (?,?,?,?,?,?,?,NOW())');
-            if ($ins) {
-                mysqli_stmt_bind_param($ins, 'issisii', $row['id'], $event, $body, $status, $resp_body, $attempt, $success);
-                mysqli_stmt_execute($ins);
-                mysqli_stmt_close($ins);
-            }
-            if ($success === 1) break;
-            // 退避总预算受限于调用方的剩余时间；缩短为 200ms/400ms，
-            // 避免最坏情况下累计阻塞（旧实现最坏约 11s）。
-            if ($attempt < $max_attempts) usleep($attempt * 200000);
-        }
+        $rows[] = $row;
     }
     mysqli_stmt_close($stmt);
+
+    $ins = $ADMIN_DB->prepare('INSERT INTO webhook_queue (webhook_id, event, payload, max_attempts, next_retry_at, status, created_at) VALUES (?,?,?,3,NOW(3),0,NOW(3))');
+    if (!$ins) return;
+    foreach ($rows as $row) {
+        mysqli_stmt_bind_param($ins, 'iss', $row['id'], $event, $body);
+        mysqli_stmt_execute($ins);
+    }
+    mysqli_stmt_close($ins);
+
+    // 兼容/兜底：队列表尚未迁移（webhook_queue 不存在）时，退化为同步投递，
+    // 保证功能不中断。可用 $webhook_dispatch_inline = false 显式关闭该兜底。
+    if (webhook_queue_missing()) {
+        if (!isset($webhook_dispatch_inline) || $webhook_dispatch_inline !== false) {
+            foreach ($rows as $row) {
+                webhook_deliver_now($row, $event, $body, 1);
+            }
+        }
+    }
+}
+
+// webhook_queue 表是否存在（结果进程内缓存，避免热路径反复查 information_schema）。
+function webhook_queue_missing() {
+    static $missing = null;
+    global $ADMIN_DB;
+    if ($missing !== null) return $missing;
+    if (!$ADMIN_DB || empty($ADMIN_DB->link)) return $missing = true;
+    $res = @mysqli_query($ADMIN_DB->link, "SHOW TABLES LIKE 'webhook_queue'");
+    $missing = !($res && mysqli_num_rows($res) > 0);
+    if ($res) mysqli_free_result($res);
+    if ($missing) error_log('[dwz] webhook_queue 表缺失，已退化为同步投递；请执行 migrations/add_webhook_queue.sql');
+    return $missing;
+}
+
+// 单次投递 + 落库 webhook_deliveries。返回 true 表示 2xx 成功。
+// 供 worker 与同步兜底共用；超时为毫秒级，即使同步兜底也不会长阻塞。
+function webhook_deliver_now($webhook, $event, $body, $attempt = 1) {
+    global $ADMIN_DB;
+    // curl 扩展缺失时不应致命中断（历史上直接 curl_init() 会 Fatal Error）。
+    if (!function_exists('curl_init')) {
+        return array(false, 'curl extension not available');
+    }
+    $headers = array('Content-Type: application/json', 'User-Agent: dwz-shorturl-webhook/1.0');
+    if (!empty($webhook['secret'])) {
+        $headers[] = 'X-Webhook-Signature: sha256=' . hash_hmac('sha256', $body, (string)$webhook['secret']);
+    }
+    $status = 0;
+    $resp_body = '';
+    $ch = curl_init((string)$webhook['url']);
+    curl_setopt_array($ch, array(
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $body,
+        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_TIMEOUT_MS => 800,
+        CURLOPT_CONNECTTIMEOUT_MS => 400,
+    ));
+    $resp = curl_exec($ch);
+    $http_code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $success = 0;
+    $err = null;
+    if ($resp !== false) {
+        $status = $http_code;
+        $resp_body = substr((string)$resp, 0, 512);
+        if ($http_code >= 200 && $http_code < 300) $success = 1;
+        else $err = 'HTTP ' . $http_code;
+    } else {
+        $err = 'curl error';
+    }
+    if ($ADMIN_DB && !empty($ADMIN_DB->link)) {
+        $ins = $ADMIN_DB->prepare('INSERT INTO webhook_deliveries (webhook_id, event, payload, response_status, response_body, attempt, success, created_at) VALUES (?,?,?,?,?,?,?,NOW())');
+        if ($ins) {
+            mysqli_stmt_bind_param($ins, 'issisii', $webhook['id'], $event, $body, $status, $resp_body, $attempt, $success);
+            mysqli_stmt_execute($ins);
+            mysqli_stmt_close($ins);
+        }
+    }
+    return array($success === 1, $err);
+}
+
+// 供 worker 使用：取一批到期的待投递任务（带行锁，避免多 worker 重复消费）。
+function webhook_queue_fetch($limit = 20) {
+    global $ADMIN_DB;
+    if (!$ADMIN_DB || empty($ADMIN_DB->link)) return array();
+    $limit = max(1, (int)$limit);
+    $ADMIN_DB->query('BEGIN');
+    $res = mysqli_query($ADMIN_DB->link, 'SELECT id, webhook_id, event, payload, attempts, max_attempts FROM webhook_queue '
+        . 'WHERE status=0 AND next_retry_at <= NOW(3) ORDER BY id ASC LIMIT ' . $limit . ' FOR UPDATE SKIP LOCKED');
+    if (!$res) { $ADMIN_DB->query('ROLLBACK'); return array(); }
+    $rows = array();
+    while ($r = mysqli_fetch_assoc($res)) $rows[] = $r;
+    mysqli_free_result($res);
+    foreach ($rows as $r) {
+        mysqli_query($ADMIN_DB->link, 'UPDATE webhook_queue SET locked_at=NOW(3) WHERE id=' . (int)$r['id']);
+    }
+    $ADMIN_DB->query('COMMIT');
+    return $rows;
 }
 
 // ---- 链接访问密码（与 Go 后端共用同一 HMAC cookie 算法） ----

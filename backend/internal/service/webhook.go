@@ -8,17 +8,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
 	"dwz-admin/internal/model"
 	"dwz-admin/internal/repository"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 var (
-	ErrWebhookNotFound        = errors.New("webhook not found")
+	ErrWebhookNotFound         = errors.New("webhook not found")
 	ErrWebhookDeliveryNotFound = errors.New("webhook delivery not found")
 )
 
@@ -32,15 +34,27 @@ type WebhookService interface {
 	ListDeliveries(page, perPage int, filters repository.WebhookDeliveryFilters) ([]model.WebhookDelivery, int64, error)
 }
 
+// maxConcurrentDeliveries caps the number of in-flight webhook HTTP requests.
+// Without this, creating links at high frequency with N subscribers spawned N
+// unbounded goroutines, each holding up to 3 HTTP attempts with sleeps.
+const maxConcurrentDeliveries = 16
+
 type webhookService struct {
-	repo    repository.WebhookRepo
-	client  *http.Client
+	repo   repository.WebhookRepo
+	client *http.Client
+	sem    chan struct{}
+	logger *zap.Logger
 }
 
-func NewWebhookService(repo repository.WebhookRepo) WebhookService {
+func NewWebhookService(repo repository.WebhookRepo, logger *zap.Logger) WebhookService {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &webhookService{
 		repo:   repo,
 		client: &http.Client{Timeout: 10 * time.Second},
+		sem:    make(chan struct{}, maxConcurrentDeliveries),
+		logger: logger,
 	}
 }
 
@@ -93,7 +107,19 @@ func (s *webhookService) Dispatch(event string, payload map[string]interface{}) 
 		if !subscribed(sub.Events, event) {
 			continue
 		}
-		go safeDeliver(s.deliver, sub, event, payload)
+		// Non-blocking acquire: when the worker pool is saturated we drop the
+		// event instead of piling up goroutines. A dropped dispatch is logged so
+		// operators can spot a chronically slow endpoint.
+		select {
+		case s.sem <- struct{}{}:
+			go func(sub model.WebhookSub) {
+				defer func() { <-s.sem }()
+				safeDeliver(s.deliver, sub, event, payload)
+			}(sub)
+		default:
+			s.logger.Warn("webhook dispatch dropped: concurrency limit reached",
+				zap.String("event", event), zap.Uint64("webhook_id", sub.ID))
+		}
 	}
 }
 
@@ -162,9 +188,11 @@ func (s *webhookService) deliverOnce(sub model.WebhookSub, event, body string, a
 	}
 	defer resp.Body.Close()
 	delivery.ResponseStatus = resp.StatusCode
-	buf := make([]byte, 512)
-	n, _ := resp.Body.Read(buf)
-	delivery.ResponseBody = string(buf[:n])
+	// Read at most 512 bytes but keep reading until the limit or EOF: a single
+	// Body.Read may return a short chunk, which previously truncated the stored
+	// response body.
+	limited, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	delivery.ResponseBody = string(limited)
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		delivery.Success = 1
 	}
