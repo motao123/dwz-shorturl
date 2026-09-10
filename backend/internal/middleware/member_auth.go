@@ -10,10 +10,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// MemberTokenCookie is the HttpOnly cookie name used to carry the member JWT.
+// Reading it as a fallback makes the console survive page reloads even when the
+// frontend cannot persist the token in the header (XSS-safer transport).
+const MemberTokenCookie = "dwz_member_token"
+
 // MemberAuth authenticates a public member via a member JWT (issued by the PHP
-// frontend on login). The token is read from the Authorization: Bearer header
-// or the X-Member-Token header. When getMember is provided the member's
-// token_version is verified so logged-out JWTs are rejected.
+// frontend on login). The token is read from the Authorization: Bearer header,
+// the X-Member-Token header, or the HttpOnly cookie. When getMember is provided
+// the member's token_version is verified so logged-out JWTs are rejected.
 func MemberAuth(getMember func(uint64) (*model.Member, error)) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenStr := c.GetHeader("X-Member-Token")
@@ -21,6 +26,11 @@ func MemberAuth(getMember func(uint64) (*model.Member, error)) gin.HandlerFunc {
 			auth := c.GetHeader("Authorization")
 			if strings.HasPrefix(auth, "Bearer ") {
 				tokenStr = strings.TrimPrefix(auth, "Bearer ")
+			}
+		}
+		if tokenStr == "" {
+			if cookie, err := c.Cookie(MemberTokenCookie); err == nil {
+				tokenStr = cookie
 			}
 		}
 		if tokenStr == "" {

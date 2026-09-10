@@ -100,6 +100,9 @@ if ($action === 'my_links') {
 $member = member_current($DB);
 $_SESSION['member_csrf'] = bin2hex(random_bytes(16));
 $token = $member ? member_issue_token($member['id'], $member['username'], (int)($member['token_version'] ?? 0)) : '';
+// 同时写入 HttpOnly cookie：Go 后端 MemberAuth 在请求头缺失时会回退读取它，
+// 这样即使前端 token 未持久化（或页面刷新后），会员接口依然可用。
+member_set_token_cookie($token);
 member_result(1, 'ok', 1, 200, array(
     'member' => $member,
     'csrf' => $_SESSION['member_csrf'],
@@ -114,4 +117,17 @@ function member_result($code, $msg, $result, $status = 200, $data = null) {
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if (isset($DB)) $DB->close();
     exit();
+}
+
+// 同站点 HttpOnly cookie 承载会员 JWT（与 Go 侧 MemberAuth 的 cookie 名保持一致）。
+function member_set_token_cookie($token) {
+    if (headers_sent()) return;
+    $name = 'dwz_member_token';
+    $secure = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+    if ($token === '' || $token === null) {
+        setcookie($name, '', time() - 3600, '/', '', $secure, true);
+        unset($_COOKIE[$name]);
+        return;
+    }
+    setcookie($name, (string)$token, 0, '/', '', $secure, true);
 }
