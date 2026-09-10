@@ -1,0 +1,47 @@
+/* DWZ 短链平台 · 统一设计令牌（Design Tokens）
+ * 单一数据源：全站（主站 index.html / API 文档 api.html / 统计页 stats.php）
+ * 统一引用本文件，避免各处 :root 变量命名与取值漂移。
+ * 仅包含变量与极少量基础重置，不含任何组件样式。
+ */
+:root {
+  color-scheme: light;
+
+  /* 文本 */
+  --ink: #111827;
+  --ink-strong: #09090b;
+  --strong: #09090b; /* 兼容别名，等价于 --ink-strong */
+  --muted: #6b7280;
+
+  /* 描边与表面 */
+  --line: #e8e8ec;
+  --line-strong: #d4d4d8;
+  --surface: #ffffff;
+  --surface-soft: #f8f8fa;
+  --soft: #f8f8fa; /* 兼容别名，等价于 --surface-soft */
+  --page: #fafafb;
+  --code-bg: #f4f4f5;
+
+  /* 语义色 */
+  --accent: #111827;
+  --accent-hover: #000000;
+  --success: #16a34a;
+  --success-soft: #f0fdf4;
+  --danger: #b91c1c;
+  --danger-soft: #fef2f2;
+  --focus: rgba(17, 24, 39, 0.14);
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.1);
+
+  /* 圆角 */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius: 10px; /* 兼容别名，等价于 --radius-md 的近似值 */
+
+  /* 字体 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "SF Mono", "SFMono-Regular", "Fira Code", "Cascadia Code", Consolas, monospace;
+}

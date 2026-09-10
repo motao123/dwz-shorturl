@@ -128,7 +128,7 @@ func main() {
 	violationSvc := service.NewViolationService(violationRepo)
 	monitorSvc := service.NewMonitorService(db, rdb, clickQueue, cronSvc, zapLogger)
 	webhookSvc := service.NewWebhookService(webhookRepo)
-	memberApiSvc := service.NewMemberApiService(shortUrlRepo, wjoyLogRepo, memberRepo, db, emailSvc)
+	memberApiSvc := service.NewMemberApiService(shortUrlRepo, wjoyLogRepo, memberRepo, db, emailSvc, shortUrlSvc)
 
 	// Dispatch link.clicked webhooks when clicks are recorded.
 	clickQueue.SetOnClick(func(uid string) {
