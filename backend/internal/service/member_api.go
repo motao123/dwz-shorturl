@@ -92,10 +92,11 @@ type memberApiService struct {
 	memberRepo   repository.MemberRepo
 	db           *gorm.DB
 	email        *EmailService
+	shortUrlSvc  ShortUrlService
 }
 
-func NewMemberApiService(shortUrlRepo repository.ShortUrlRepo, wjoyLog repository.WjoyLogRepo, memberRepo repository.MemberRepo, db *gorm.DB, email *EmailService) MemberApiService {
-	return &memberApiService{shortUrlRepo: shortUrlRepo, wjoyLog: wjoyLog, memberRepo: memberRepo, db: db, email: email}
+func NewMemberApiService(shortUrlRepo repository.ShortUrlRepo, wjoyLog repository.WjoyLogRepo, memberRepo repository.MemberRepo, db *gorm.DB, email *EmailService, shortUrlSvc ShortUrlService) MemberApiService {
+	return &memberApiService{shortUrlRepo: shortUrlRepo, wjoyLog: wjoyLog, memberRepo: memberRepo, db: db, email: email, shortUrlSvc: shortUrlSvc}
 }
 
 func (s *memberApiService) ListLinks(memberID uint64, page, perPage int, keyword, status string) ([]model.ShortUrl, int64, error) {
@@ -158,6 +159,10 @@ func (s *memberApiService) CreateLink(memberID uint64, url, title, custom string
 		if custom != "" && custom != existing.UID {
 			return nil, errors.New("url already has a short link, cannot use different custom code")
 		}
+		// Same renew semantics as the public API path.
+		if s.shortUrlSvc != nil {
+			s.shortUrlSvc.RenewIfExpired(existing, expireDays)
+		}
 		return existing, nil
 	}
 
@@ -207,6 +212,9 @@ func (s *memberApiService) CreateLink(memberID uint64, url, title, custom string
 			return nil, err
 		}
 		if existing, findErr := s.shortUrlRepo.FindByHash(hash); findErr == nil && existing != nil {
+			if s.shortUrlSvc != nil {
+				s.shortUrlSvc.RenewIfExpired(existing, expireDays)
+			}
 			return existing, nil
 		}
 		if custom != "" {

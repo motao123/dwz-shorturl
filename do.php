@@ -56,6 +56,8 @@ if (!$validation[0]) redirect_error(410, '短链目标无效');
 header('Cache-Control: no-store, private, max-age=0');
 header('Pragma: no-cache');
 header('Expires: 0');
+// 短链跳转不向目标站点泄露来源页 Referer
+header('Referrer-Policy: no-referrer');
 header('Location: ' . $t_url, true, 302);
 
 if (function_exists('fastcgi_finish_request')) {

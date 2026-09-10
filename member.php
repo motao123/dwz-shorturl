@@ -79,16 +79,22 @@ if ($action === 'my_links') {
             mysqli_stmt_fetch($stmt);
             mysqli_stmt_close($stmt);
         }
-        $stmt = $ADMIN_DB->prepare('SELECT uid, long_url, clicks, expire_at, created_at FROM short_urls WHERE member_id=? AND deleted_at IS NULL ORDER BY id DESC LIMIT ? OFFSET ?');
+        // LIMIT/OFFSET 占位符在部分旧驱动/mysqlnd 未启用时会静默失败，这里直接拼接已强转 int 的值（$per/$offset 均来自 (int) 转换，无注入风险）。
+        $perSql = max(1, (int)$per);
+        $offsetSql = max(0, (int)$offset);
+        $stmt = $ADMIN_DB->prepare('SELECT uid, long_url, clicks, expire_at, created_at FROM short_urls WHERE member_id=? AND deleted_at IS NULL ORDER BY id DESC LIMIT ' . $perSql . ' OFFSET ' . $offsetSql);
         if ($stmt) {
-            mysqli_stmt_bind_param($stmt, 'iii', $mid, $per, $offset);
-            mysqli_stmt_execute($stmt);
-            $res = mysqli_stmt_get_result($stmt);
-            if ($res) {
-                while ($row = mysqli_fetch_assoc($res)) {
-                    $row['short_url'] = public_short_url($row['uid']);
-                    $links[] = $row;
+            mysqli_stmt_bind_param($stmt, 'i', $mid);
+            if (mysqli_stmt_execute($stmt)) {
+                $res = mysqli_stmt_get_result($stmt);
+                if ($res) {
+                    while ($row = mysqli_fetch_assoc($res)) {
+                        $row['short_url'] = public_short_url($row['uid']);
+                        $links[] = $row;
+                    }
                 }
+            } else {
+                error_log('[dwz] my_links query failed: ' . mysqli_stmt_error($stmt));
             }
             mysqli_stmt_close($stmt);
         }
