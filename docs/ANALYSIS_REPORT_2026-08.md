@@ -228,6 +228,10 @@
 2. 收敛为单一写路径：以 `short_urls` 为 truth，PHP 改读 `wjoy_compat` 视图（migrate_wjoy_log.sql:38 已建但未使用），wjoy_log 降级为跳转最小表；新增定时对账任务补差。
 3. 统一点击事件源：所有跳转只写 `click_logs`（单一明细），`clicks` 由聚合任务重算。
 4. 软删除冲突：唯一索引改 `(url_hash, deleted_at)` 或删除时硬删/复活软删行。
+   > 已落地（后续批次）：保留单列唯一索引，改为在命中已软删行时 **原地复活**
+   > （`resurrectDeleted`）。同时 `url_hash` 由裸 `MD5(url)` 改为
+   > `MD5(url + 0x1F + owner scope)`，唯一性从「URL 全局唯一」收敛为
+   > 「同一 owner 内唯一」，见 `migrations/scope_url_hash.sql`。
 5. 建立 `schema_migrations` 版本表 + click_logs 月度分区维护任务 + seed 改 `ON DUPLICATE KEY UPDATE`。
 
 ### 5.2 跳转链路与统计（三套入口并存）

@@ -70,7 +70,7 @@ DWZ 短网址平台是一套 **PHP 前台 + Go 核心 + Vue3 管理台** 的三�
 | ⚡ 单条/批量生成 | 单条秒出，批量最多 100 条/次，实时计数 |
 | 🎨 自定义短码 | 6–8 位 `a-z0-5`，可续期、可回收 |
 | 📱 本地二维码 | 不依赖第三方服务，隐私无忧 |
-| 🔁 原子去重 | `url_hash` 唯一索引，同 URL 复用短码 |
+| 🔁 原子去重 | `url_hash` 唯一索引，**同一会员内**同 URL 复用短码（不同会员各建一条，互不影响） |
 | ⏰ 有效期管理 | 永久/1/7/30/365 天，过期返回 410 |
 | 📊 点击统计 | 独立 Token 统计页，总量/Top10/最近 20 |
 
@@ -154,6 +154,10 @@ cd backend
 go run ./cmd/migrate -status          # 查看待执行迁移
 go run ./cmd/migrate                  # 执行全部幂等迁移
 
+# 老库升级：把 url_hash 从「URL 全局唯一」改为「同一 owner 作用域内唯一」
+# （同时作用于 wjoy_log 与 short_urls，幂等可重复执行，执行前请备份）
+mysql -h127.0.0.1 -uroot -p < migrations/scope_url_hash.sql
+
 # 4. PHP 前台（需 PHP 8 + mysqli）
 php setup.php --host=127.0.0.1 --port=3306 \
   --user=dwz --pwd='密码' --db=dwz_admin \
@@ -184,6 +188,25 @@ php migrations/build_assets.php --check
 ```
 
 > 💡 `webhook_queue` 表由 `migrations/add_webhook_queue.sql` 创建；未建表时程序会自动退化为同步投递并在 `logs/php_error.log` 告警，功能不中断。
+
+---
+
+## 🔐 短链去重作用域（url_hash）
+
+`url_hash` 存的是 `MD5(long_url + 0x1F + scope_key)`，唯一索引语义为「**同一 owner 作用域内唯一**」，而非「URL 全局唯一」：
+
+| scope_key | 含义 | 去重行为 |
+|---|---|---|
+| `w:0` | 匿名请求 / 历史遗留数据 | 沿用旧的全局语义，同一 URL 只保留一条 |
+| `m:<member_id>` | 会员创建的短链 | 同一会员内同一 URL 复用一条；**不同会员各自独立**，可分别设置有效期与访问密码 |
+
+对比改造前（裸 `MD5(url)` 全局唯一）：
+
+- ✅ 同一 URL 可以按会员分别建链，会员各自管自己的有效期/密码；
+- ✅ 业务键带上作用域后，哈希空间被区分，不同 URL 不会再因 MD5 碰撞而互相阻塞；
+- ✅ 匿名路径行为不变，线上已有数据语义平滑。
+
+> ⚠️ PHP (`includes/function.php` 的 `url_scope_hash()`)、Go (`urlHash()`) 与 SQL (`MD5(CONCAT(url, 0x1F, scope))`) 三处实现必须保持一致，否则同一条短链在两条跳转路径上会落到不同行。迁移脚本 `migrations/scope_url_hash.sql` 负责把历史行重写为同一口径。
 
 ---
 

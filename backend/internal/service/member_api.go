@@ -153,7 +153,7 @@ func (s *memberApiService) CreateLink(memberID uint64, url, title, custom string
 	if custom != "" && !isValidCustomCode(custom) {
 		return nil, ErrCustomCodeFormat
 	}
-	hash := md5Hash(url)
+	hash := urlHash(url, urlScopeKey(&memberID, nil))
 
 	if existing, err := s.shortUrlRepo.FindByHash(hash); err == nil && existing != nil {
 		if custom != "" && custom != existing.UID {
@@ -186,10 +186,10 @@ func (s *memberApiService) CreateLink(memberID uint64, url, title, custom string
 		if custom != "" {
 			uid = custom
 		} else if attempt == 0 {
-			uid = pkg.ShortURL(url)
+			uid = pkg.ShortURL(url + urlScopeSeparator + urlScopeKey(&memberID, nil))
 		} else {
 			salt := pkg.GenerateRandomCode(8)
-			uid = pkg.ShortURL(url + "|" + salt)
+			uid = pkg.ShortURL(url + urlScopeSeparator + urlScopeKey(&memberID, nil) + "|" + salt)
 		}
 		record := model.ShortUrl{
 			UID:          uid,
@@ -337,7 +337,7 @@ func (s *memberApiService) UpdateLink(memberID, linkID uint64, longURL, title st
 			return nil, err
 		}
 		record.LongURL = longURL
-		record.URLHash = md5Hash(longURL)
+		record.URLHash = urlHash(longURL, urlScopeKey(record.MemberID, record.CreatedBy))
 	}
 	if title != "" {
 		record.Title = title
