@@ -32,6 +32,11 @@ func (s *EmailService) Send(to, subject, body string) error {
 	if !s.Enabled() {
 		return fmt.Errorf("smtp not configured")
 	}
+	// Header-injection guard: CR/LF in the recipient or subject would let an
+	// attacker forge additional SMTP headers.
+	if strings.ContainsAny(to, "\r\n") || strings.ContainsAny(subject, "\r\n") {
+		return fmt.Errorf("invalid email header value")
+	}
 	host := s.cfg.Host
 	port := s.cfg.Port
 	if port == 0 {

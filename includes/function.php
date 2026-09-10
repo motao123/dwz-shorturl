@@ -425,6 +425,13 @@ function dispatch_webhook_event($event, $payload) {
     while ($row = mysqli_fetch_assoc($res)) {
         $events = json_decode($row['events'], true);
         if (!is_array($events) || !in_array($event, $events, true)) continue;
+        // SSRF 防护：webhook 目标同样必须通过私网/保留地址校验（与创建时的
+        // 校验一致），避免通过历史数据或后台写入的地址访问云元数据端点。
+        $target_check = validate_long_url((string)$row['url'], false);
+        if (!$target_check[0]) {
+            error_log('[dwz] webhook skipped (unsafe target): ' . (string)$row['url']);
+            continue;
+        }
         $headers = array('Content-Type: application/json', 'User-Agent: dwz-shorturl-webhook/1.0');
         if (!empty($row['secret'])) {
             $headers[] = 'X-Webhook-Signature: sha256=' . hash_hmac('sha256', $body, $row['secret']);
@@ -440,8 +447,10 @@ function dispatch_webhook_event($event, $payload) {
                 CURLOPT_POSTFIELDS => $body,
                 CURLOPT_HTTPHEADER => $headers,
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 3,
-                CURLOPT_CONNECTTIMEOUT => 2,
+                // 毫秒级上限：即使在非 FastCGI SAPI（无 fastcgi_finish_request）下，
+                // 单次投递也不会拖慢跳转热路径。
+                CURLOPT_TIMEOUT_MS => 800,
+                CURLOPT_CONNECTTIMEOUT_MS => 400,
             ));
             $resp = curl_exec($ch);
             $http_code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -458,7 +467,9 @@ function dispatch_webhook_event($event, $payload) {
                 mysqli_stmt_close($ins);
             }
             if ($success === 1) break;
-            if ($attempt < $max_attempts) usleep($attempt * 1000000); // 1s, 2s backoff
+            // 退避总预算受限于调用方的剩余时间；缩短为 200ms/400ms，
+            // 避免最坏情况下累计阻塞（旧实现最坏约 11s）。
+            if ($attempt < $max_attempts) usleep($attempt * 200000);
         }
     }
     mysqli_stmt_close($stmt);
