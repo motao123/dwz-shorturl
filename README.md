@@ -107,6 +107,8 @@ DWZ 短网址平台是一套 **PHP 前台 + Go 核心 + Vue3 管理台** 的三�
 | ⚖️ **对账 Cron** | `short_urls` ↔ `wjoy_log` 双写对账、点击计数校准 |
 | 📦 **分区维护** | `click_logs` 按月自动分区，防单表膨胀 |
 | 💾 **定时备份** | `deploy/backup.sh` mysqldump + 保留策略 |
+| 📨 **Webhook 异步队列** | PHP 跳转入队（O(1)）+ `migrations/webhook_worker.php` 后台投递，指数退避重试 |
+| 🎨 **静态资源构建** | `php migrations/build_assets.php` 压缩 CSS/JS 并注入内容哈希版本号，零 npm 依赖 |
 | 📋 **迁移工具** | `-status` / `-dry-run` / `-migrations` / `-config` 全参数 |
 
 ---
@@ -165,6 +167,23 @@ DWZ_SERVER=your.host DWZ_USER=root DWZ_PASS='密码' ./deploy.sh
 ```
 
 一键完成：交叉编译 Go 二进制 → 构建 Vue → 上传 PHP/前端 dist → 重启服务。
+
+### 后台任务（cron）
+
+PHP 前台的 webhook 投递、静态资源构建均为可选增强，按需启用：
+
+```bash
+# 1) Webhook 异步投递队列（每分钟消费一批；也可 --loop 常驻）
+php migrations/webhook_worker.php
+
+# 2) 构建静态资源（压缩 + 内容哈希版本注入 index.html/api.html/stats.php）
+php migrations/build_assets.php
+
+# 3) CI/发布前校验产物是否最新（不写文件，过期则非零退出）
+php migrations/build_assets.php --check
+```
+
+> 💡 `webhook_queue` 表由 `migrations/add_webhook_queue.sql` 创建；未建表时程序会自动退化为同步投递并在 `logs/php_error.log` 告警，功能不中断。
 
 ---
 
