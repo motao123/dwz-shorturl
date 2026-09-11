@@ -10,11 +10,30 @@
 <meta property="og:type" content="website">
 <meta name="color-scheme" content="light">
 <!-- 字体：优先国内镜像（fonts.googleapis.cn，大陆可达），失败回退官方源；
-     display=swap 不阻塞渲染，两者都失败时回退系统字体 -->
+     display=swap 不阻塞渲染，两者都失败时回退系统字体。
+     脚本兜底：CSS onerror 只在样式表本身加载失败时触发，镜像返回 200 但内容
+     异常（CDN 劫持 / 半开连接）时不会触发，这里用「字体是否真的就绪」探测补一层。 -->
 <link rel="preconnect" href="https://fonts.googleapis.cn">
 <link rel="preconnect" href="https://fonts.gstatic.cn" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.cn/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
       onerror="this.onerror=null;this.href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap'">
+<script>
+  // 镜像被劫持/超时时静默换成官方源；字体最终仍不可用则回退系统字体（不阻塞渲染）。
+  (function () {
+    if (!document.fonts || !document.fonts.ready) return;
+    var switched = false;
+    setTimeout(function () {
+      document.fonts.ready.then(function () {
+        if (switched || document.fonts.check('16px Inter')) return;
+        switched = true;
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap';
+        document.head.appendChild(link);
+      });
+    }, 3000);
+  })();
+</script>
 <link rel="stylesheet" href="assets/site.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%235e6ad2'/><text x='50' y='66' font-size='44' font-weight='600' text-anchor='middle' fill='white' font-family='monospace'>/</text></svg>">
 </head>

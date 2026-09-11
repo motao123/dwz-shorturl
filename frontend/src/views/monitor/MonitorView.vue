@@ -57,7 +57,15 @@ onBeforeUnmount(() => {
         </h1>
         <p class="app-page__desc">数据库 · Redis · 点击队列 · 定时任务</p>
       </div>
-      <el-button type="primary" :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
+      <el-button
+        type="primary"
+        :icon="Refresh"
+        :loading="loading"
+        aria-label="刷新系统监控数据"
+        @click="load"
+      >
+        刷新
+      </el-button>
     </div>
 
     <div v-if="status" class="monitor-grid">
@@ -75,7 +83,12 @@ onBeforeUnmount(() => {
       <section class="app-card">
         <h3 class="card-title">
           <el-icon><DataBoard /></el-icon>数据库
-          <el-tag :type="status.db?.healthy ? 'success' : 'danger'" size="small" round>
+          <el-tag
+            :type="status.db?.healthy ? 'success' : 'danger'"
+            size="small"
+            round
+            :aria-label="`数据库状态：${status.db?.healthy ? '正常' : '异常'}`"
+          >
             {{ status.db?.healthy ? '正常' : '异常' }}
           </el-tag>
         </h3>
@@ -91,7 +104,12 @@ onBeforeUnmount(() => {
       <section class="app-card">
         <h3 class="card-title">
           <el-icon><Connection /></el-icon>Redis
-          <el-tag :type="status.redis?.healthy ? 'success' : 'danger'" size="small" round>
+          <el-tag
+            :type="status.redis?.healthy ? 'success' : 'danger'"
+            size="small"
+            round
+            :aria-label="`Redis 状态：${status.redis?.healthy ? '正常' : '异常'}`"
+          >
             {{ status.redis?.healthy ? '正常' : '异常' }}
           </el-tag>
         </h3>

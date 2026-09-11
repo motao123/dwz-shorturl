@@ -286,14 +286,23 @@ export async function getLinkStats(uid: string): Promise<LinkStat> {
 }
 
 /** 一键续期全部已过期/即将过期的链接 */
-export async function renewExpiring(expireDays: number): Promise<{ renewed: number }> {
+export async function renewExpiring(expireDays: number): Promise<{ renewed: number } & MemberSyncResult> {
   return go('/member/api/links/renew-expiring', {
     method: 'POST',
     body: JSON.stringify({ expire_days: expireDays })
   })
 }
 
-export async function updateLinkExpiry(id: number, expireDays: number): Promise<{ expire_at: string | null }> {
+export interface MemberSyncResult {
+  public_sync_failed?: boolean
+  sync_failed_uids?: string[]
+  warning?: string
+}
+
+export async function updateLinkExpiry(
+  id: number,
+  expireDays: number
+): Promise<{ expire_at: string | null } & MemberSyncResult> {
   return go(`/member/api/links/${id}/expiry`, {
     method: 'PUT',
     body: JSON.stringify({ expire_days: expireDays })
