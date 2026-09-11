@@ -192,17 +192,17 @@ onMounted(loadData)
             <template #default="{ row }">
               <div class="ops">
                 <el-tooltip :content="row.status === 1 ? '禁用' : '启用'" placement="top">
-                  <button class="mini-btn" @click="handleToggleStatus(row as Member)">
+                  <button class="mini-btn" :aria-label="row.status === 1 ? '禁用会员' : '启用会员'" @click="handleToggleStatus(row as Member)">
                     <el-icon :size="13"><component :is="row.status === 1 ? CircleClose : CircleCheck" /></el-icon>
                   </button>
                 </el-tooltip>
                 <el-tooltip content="重置密码" placement="top">
-                  <button class="mini-btn" @click="handleResetPassword(row as Member)">
+                  <button class="mini-btn" aria-label="重置会员密码" @click="handleResetPassword(row as Member)">
                     <el-icon :size="13"><RefreshLeft /></el-icon>
                   </button>
                 </el-tooltip>
                 <el-tooltip content="删除" placement="top">
-                  <button class="mini-btn mini-btn--danger" @click="handleRemove(row as Member)">
+                  <button class="mini-btn mini-btn--danger" aria-label="删除会员" @click="handleRemove(row as Member)">
                     <el-icon :size="13"><Delete /></el-icon>
                   </button>
                 </el-tooltip>

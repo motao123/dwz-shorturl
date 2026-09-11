@@ -144,7 +144,7 @@ export async function logout(): Promise<void> {
   setMemberToken('')
 }
 
-async function go(path: string, opts: RequestInit = {}): Promise<any> {
+async function go<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(opts.headers as Record<string, string>)
@@ -267,7 +267,7 @@ export interface MemberDeleteResult {
 }
 
 export async function deleteLink(id: number): Promise<MemberDeleteResult | null> {
-  return go(`/member/api/links/${id}`, { method: 'DELETE' })
+  return go<MemberDeleteResult>(`/member/api/links/${id}`, { method: 'DELETE' })
 }
 
 export interface LinkStat {

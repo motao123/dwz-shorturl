@@ -195,9 +195,12 @@ async function handleDelete(row: MemberLink) {
   }
   try {
     const res = await deleteLink(row.id)
+    // 本地已删除，但公共跳转库(wjoy_log)同步失败，需明确告知以免误判
     if (res?.public_sync_failed) {
-      // 本地已删除，但公共跳转库同步失败，需明确告知以免误判
-      ElMessage.warning('已删除，但公共跳转库同步失败，系统将自动重试')
+      ElMessage.warning({
+        message: `已从列表移除，但公共库(wjoy_log)同步失败，短码可能仍可访问，系统会在 30 分钟内自动补偿。`,
+        duration: 6000
+      })
     } else {
       ElMessage.success('已删除')
     }

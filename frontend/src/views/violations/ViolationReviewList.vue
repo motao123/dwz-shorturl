@@ -168,12 +168,12 @@ onMounted(loadData)
             <template #default="{ row }">
               <div class="ops">
                 <el-tooltip content="标记已审" placement="top">
-                  <button class="mini-btn" :disabled="row.reviewed === 1" @click="handleReview(row as ViolationReview)">
+                  <button class="mini-btn" aria-label="标记已处理" :disabled="row.reviewed === 1" @click="handleReview(row as ViolationReview)">
                     <el-icon :size="13"><CircleCheck /></el-icon>
                   </button>
                 </el-tooltip>
                 <el-tooltip content="删除" placement="top">
-                  <button class="mini-btn mini-btn--danger" @click="handleRemove(row as ViolationReview)">
+                  <button class="mini-btn mini-btn--danger" aria-label="删除违规记录" @click="handleRemove(row as ViolationReview)">
                     <el-icon :size="13"><Delete /></el-icon>
                   </button>
                 </el-tooltip>

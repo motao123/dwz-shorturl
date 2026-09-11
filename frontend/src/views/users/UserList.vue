@@ -391,7 +391,7 @@ onMounted(() => {
                   </button>
                 </el-tooltip>
                 <el-tooltip content="重置密码" placement="top">
-                  <button class="mini-btn" aria-label="重置密码" @click="handleResetPassword(row as AdminUser)">
+                  <button class="mini-btn" aria-label="重置用户密码" @click="handleResetPassword(row as AdminUser)">
                     <el-icon :size="13"><RefreshLeft /></el-icon>
                   </button>
                 </el-tooltip>

@@ -206,7 +206,7 @@ onMounted(loadData)
             <template #default="{ row }">
               <div class="ops">
                 <el-tooltip content="调用统计" placement="top">
-                  <button class="mini-btn" aria-label="查看调用统计" @click="openStats(row as ApiKey)">
+                  <button class="mini-btn" aria-label="查看用量统计" @click="openStats(row as ApiKey)">
                     <el-icon :size="13"><DataLine /></el-icon>
                   </button>
                 </el-tooltip>

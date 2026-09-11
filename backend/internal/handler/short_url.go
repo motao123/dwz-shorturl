@@ -446,7 +446,8 @@ func (h *ShortUrlHandler) Delete(c *gin.Context) {
 		// wjoy_log mirror did not. Report it as a partial success so the operator
 		// sees the affected UID and knows the periodic reconcile will retry,
 		// instead of an opaque 400 that hides the successful local delete.
-		if syncErr, ok := err.(*service.PublicSyncError); ok {
+		var syncErr *service.PublicSyncError
+		if errors.As(err, &syncErr) {
 			auditLog(c, h.auditSvc, "short_url", "short_url_delete", id, `{"public_sync_failed":true}`)
 			pkg.Success(c, gin.H{
 				"deleted":            true,
@@ -461,7 +462,7 @@ func (h *ShortUrlHandler) Delete(c *gin.Context) {
 	}
 
 	auditLog(c, h.auditSvc, "short_url", "short_url_delete", id, "")
-	pkg.Success(c, nil)
+	pkg.Success(c, gin.H{"deleted": true, "public_sync": true})
 }
 
 func (h *ShortUrlHandler) BatchDelete(c *gin.Context) {
@@ -472,7 +473,11 @@ func (h *ShortUrlHandler) BatchDelete(c *gin.Context) {
 	}
 
 	if err := h.svc.BatchDelete(req.IDs); err != nil {
-		if syncErr, ok := err.(*service.PublicSyncError); ok {
+		// Local rows are already deleted; only the public wjoy_log mirror failed.
+		// Return a partial success carrying the affected UIDs so the console can
+		// report "local delete done, public sync pending" instead of a 400.
+		var syncErr *service.PublicSyncError
+		if errors.As(err, &syncErr) {
 			auditLog(c, h.auditSvc, "short_url", "short_url_batch_delete", 0, `{"count":`+strconv.Itoa(len(req.IDs))+`,"public_sync_failed":true}`)
 			pkg.Success(c, gin.H{
 				"deleted":            true,
@@ -487,7 +492,7 @@ func (h *ShortUrlHandler) BatchDelete(c *gin.Context) {
 	}
 
 	auditLog(c, h.auditSvc, "short_url", "short_url_batch_delete", 0, `{"count":`+strconv.Itoa(len(req.IDs))+`}`)
-	pkg.Success(c, nil)
+	pkg.Success(c, gin.H{"deleted": true, "public_sync": true})
 }
 
 // Restore undeletes a soft-deleted short URL (回收站恢复).

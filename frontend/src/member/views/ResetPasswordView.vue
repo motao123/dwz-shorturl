@@ -68,7 +68,7 @@ async function submit() {
 
 <template>
   <div class="login-wrap member-login">
-    <button class="theme-toggle" :title="themeStore.dark ? '切换到浅色' : '切换到深色'" @click="themeStore.toggle()">
+    <button class="theme-toggle" :aria-label="themeStore.dark ? '切换到浅色主题' : '切换到深色主题'" :title="themeStore.dark ? '切换到浅色' : '切换到深色'" @click="themeStore.toggle()">
       <el-icon :size="17"><component :is="themeStore.dark ? Sunny : Moon" /></el-icon>
     </button>
     <div class="login-card">
