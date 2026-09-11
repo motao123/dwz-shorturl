@@ -6,10 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="短网址管理后台 — 短链创建、统计分析、用户权限与系统配置" />
     <title>短网址管理后台</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!--
+      字体走 fonts.googleapis.cn 镜像（大陆网络可达；googleapis.com 常被墙，
+      超时后才会回退系统字体，导致首屏 FOUT）。字体缺失时由 index.scss 的
+      --dwz-font-body / --dwz-font-mono 回退到系统字体，不阻塞渲染。
+      display=swap 保证回退字体立即可见。
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.cn" />
+    <link rel="preconnect" href="https://fonts.gstatic.cn" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.cn/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
   </head>

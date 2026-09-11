@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import type { TableInstance } from 'element-plus'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
@@ -39,6 +39,7 @@ import {
   categoryName
 } from '@/utils/constants'
 import { copyText } from '@/utils/clipboard'
+import { useResponsive } from '@/composables/useResponsive'
 import ShortUrlForm from './ShortUrlForm.vue'
 import LinkStatsDialog, { type NormalizedStat } from '@/components/LinkStatsDialog.vue'
 
@@ -47,6 +48,16 @@ const loading = ref(false)
 const rows = ref<ShortUrl[]>([])
 const total = ref(0)
 const selected = ref<ShortUrl[]>([])
+
+// 窄屏下收敛分页器布局：jumper/sizes 在 <=640px 会溢出容器
+const { isMobile, isTablet } = useResponsive()
+const pagerLayout = computed(() =>
+  isMobile.value
+    ? 'prev, pager, next'
+    : isTablet.value
+      ? 'total, prev, pager, next'
+      : 'total, sizes, prev, pager, next, jumper'
+)
 
 const query = reactive<ShortUrlQuery>({
   page: 1,
@@ -236,8 +247,13 @@ async function handleRemove(row: ShortUrl) {
     return
   }
   try {
-    await removeShortUrl(row.id)
-    ElMessage.success('删除成功')
+    const res = await removeShortUrl(row.id)
+    if (res?.public_sync_failed) {
+      // 本地已删除，但公共跳转库未同步成功：明确告知，避免「界面已删、链接仍可访问」
+      ElMessage.warning('本地已删除，但公共跳转库同步失败，系统将自动重试')
+    } else {
+      ElMessage.success('删除成功')
+    }
     loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '删除失败')
@@ -296,8 +312,13 @@ async function handleBatchRemove() {
     return
   }
   try {
-    await batchRemoveShortUrls(selected.value.map((r) => r.id))
-    ElMessage.success(`已删除 ${selected.value.length} 条短链`)
+    const res = await batchRemoveShortUrls(selected.value.map((r) => r.id))
+    if (res?.public_sync_failed) {
+      const n = res.sync_failed_uids?.length ?? 0
+      ElMessage.warning(`本地已删除，但 ${n} 条公共跳转库同步失败，系统将自动重试`)
+    } else {
+      ElMessage.success(`已删除 ${selected.value.length} 条短链`)
+    }
     loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '批量删除失败')
@@ -343,6 +364,17 @@ function openImport() {
   importResult.value = null
   importContent.value = ''
   importVisible.value = true
+}
+
+async function handleCopyImportErrors() {
+  const errors = importResult.value?.errors ?? []
+  if (!errors.length) return
+  try {
+    await copyText(errors.join('\n'))
+    ElMessage.success(`已复制 ${errors.length} 条错误`)
+  } catch {
+    ElMessage.error('复制失败，请手动选择文本复制')
+  }
 }
 
 async function handleImport() {
@@ -585,7 +617,7 @@ onMounted(loadData)
           v-model:page-size="query.per_page"
           :total="total"
           :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
+          :layout="pagerLayout"
           background
           @current-change="handlePageChange"
           @size-change="handleSizeChange"
@@ -613,9 +645,22 @@ onMounted(loadData)
           />
         </el-form-item>
         <div v-if="importResult" class="import-result">
-          <p>成功 {{ importResult.ok }} 条，失败 {{ importResult.fail }} 条</p>
-          <ul v-if="importResult.errors.length">
-            <li v-for="(e, i) in importResult.errors.slice(0, 20)" :key="i" class="mono">{{ e }}</li>
+          <div class="import-result__head">
+            <p>成功 {{ importResult.ok }} 条，失败 {{ importResult.fail }} 条</p>
+            <el-button
+              v-if="importResult.errors.length"
+              size="small"
+              :disabled="importResult.errors.length === 0"
+              @click="handleCopyImportErrors"
+            >
+              复制全部错误
+            </el-button>
+          </div>
+          <!-- 完整错误列表（可滚动），不再截断为前 20 条，便于定位失败行 -->
+          <ul v-if="importResult.errors.length" class="import-result__list">
+            <li v-for="(e, i) in importResult.errors" :key="i" class="mono">
+              <span class="import-result__idx">{{ i + 1 }}.</span> {{ e }}
+            </li>
           </ul>
         </div>
       </el-form>
@@ -659,6 +704,42 @@ onMounted(loadData)
 .head-actions {
   display: flex;
   gap: 10px;
+}
+
+/* 导入结果：完整错误列表（可滚动）替代原先的前 20 条硬截断 */
+.import-result {
+  margin-top: 4px;
+}
+
+.import-result__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.import-result__head p {
+  margin: 0;
+}
+
+.import-result__list {
+  max-height: 220px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow-y: auto;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--dwz-line);
+  border-radius: 8px;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.7;
+  word-break: break-all;
+}
+
+.import-result__idx {
+  color: var(--dwz-text-dim);
+  font-variant-numeric: tabular-nums;
 }
 
 .uid-cell {
