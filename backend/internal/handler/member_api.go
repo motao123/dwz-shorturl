@@ -20,11 +20,11 @@ func NewMemberApiHandler(svc service.MemberApiService) *MemberApiHandler {
 }
 
 type MemberCreateLinkRequest struct {
-	URL        string  `json:"url" binding:"required"`
-	Title      string  `json:"title"`
-	Custom     string  `json:"custom"`
-	ExpireDays int     `json:"expire_days"`
-	Password   string  `json:"password"`
+	URL        string `json:"url" binding:"required"`
+	Title      string `json:"title"`
+	Custom     string `json:"custom"`
+	ExpireDays int    `json:"expire_days"`
+	Password   string `json:"password"`
 }
 
 func (h *MemberApiHandler) Me(c *gin.Context) {
@@ -336,8 +336,15 @@ func (h *MemberApiHandler) DeleteLink(c *gin.Context) {
 			pkg.Fail(c, http.StatusNotFound, pkg.CodeNotFound, "link not found")
 			return
 		}
+		var syncErr *service.PublicSyncError
+		if errors.As(err, &syncErr) {
+			// Local row already deleted; tell the member the public path may
+			// still serve briefly until the compensation cron catches up.
+			pkg.Success(c, gin.H{"deleted": true, "public_sync": false, "sync_error": syncErr.Error()})
+			return
+		}
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
 	}
-	pkg.Success(c, nil)
+	pkg.Success(c, gin.H{"deleted": true, "public_sync": true})
 }

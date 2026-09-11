@@ -80,10 +80,10 @@ type MemberSummary struct {
 
 // MemberBatchResult is one row of a batch create result.
 type MemberBatchResult struct {
-	URL       string `json:"url"`
-	UID       string `json:"uid"`
-	ShortURL  string `json:"short_url"`
-	Error     string `json:"error,omitempty"`
+	URL      string `json:"url"`
+	UID      string `json:"uid"`
+	ShortURL string `json:"short_url"`
+	Error    string `json:"error,omitempty"`
 }
 
 // MemberImportResult is the outcome of a CSV import. MemberImportMaxRows bounds
@@ -391,9 +391,13 @@ func (s *memberApiService) UpdateLink(memberID, linkID uint64, longURL string, t
 		return nil, err
 	}
 	if s.wjoyLog != nil {
-		_ = s.wjoyLog.Update(record.UID, record.LongURL, record.URLHash, record.ExpireAt, nil)
+		if err := s.wjoyLog.Update(record.UID, record.LongURL, record.URLHash, record.ExpireAt, nil); err != nil {
+			return record, &PublicSyncError{Op: "member_update", UIDs: []string{record.UID}, Err: err}
+		}
 		if expireDays != nil && record.Status == 1 {
-			_ = s.wjoyLog.SetStatus(record.UID, 1)
+			if err := s.wjoyLog.SetStatus(record.UID, 1); err != nil {
+				return record, &PublicSyncError{Op: "member_update", UIDs: []string{record.UID}, Err: err}
+			}
 		}
 	}
 	return record, nil
@@ -633,8 +637,13 @@ func (s *memberApiService) DeleteLink(memberID, linkID uint64) error {
 		return err
 	}
 	// Disable the public wjoy_log row so the primary PHP path stops serving it.
+	// The local row is already gone, so a sync failure is reported (not rolled
+	// back) and surfaced to the member instead of silently leaving the PHP path
+	// serving a link the console shows as deleted.
 	if s.wjoyLog != nil {
-		_ = s.wjoyLog.SetStatus(record.UID, 0)
+		if err := s.wjoyLog.SetStatus(record.UID, 0); err != nil {
+			return &PublicSyncError{Op: "member_delete", UIDs: []string{record.UID}, Err: err}
+		}
 	}
 	return nil
 }
@@ -846,6 +855,7 @@ func classifyBrowser(ua string) string {
 func trimSpace(s string) string {
 	return strings.TrimSpace(s)
 }
+
 // emailBaseURL resolves the public base URL used in outbound emails. It follows
 // the public.base_url config (instead of a hardcoded domain) and trims trailing
 // slashes so link concatenation stays consistent.

@@ -189,8 +189,15 @@ async function handleDelete(row: MemberLink) {
     return
   }
   try {
-    await deleteLink(row.id)
-    ElMessage.success('已删除')
+    const r = await deleteLink(row.id)
+    if (r && r.public_sync === false) {
+      ElMessage.warning({
+        message: `已从列表移除，但公共库同步失败，短码可能仍可访问，系统会自动补偿。`,
+        duration: 6000
+      })
+    } else {
+      ElMessage.success('已删除')
+    }
     load()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '删除失败')

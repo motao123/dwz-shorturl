@@ -534,3 +534,71 @@ html.dark .mini-btn--danger:hover:not(:disabled) {
   color: var(--dwz-bad);
   border-color: var(--dwz-bad);
 }
+
+/* ---------- 分页器响应式（窄屏不再横向溢出/换行错乱） ---------- */
+
+.app-pager {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.app-pager .el-pagination {
+  flex-wrap: wrap;
+  row-gap: 8px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 992px) {
+  .app-pager {
+    justify-content: center;
+  }
+  .app-pager .el-pagination {
+    justify-content: center;
+  }
+}
+
+/* 640px 以下：隐藏跳页与每页条数，保留「总数 + 上一页/下一页 + 页码」，
+   并用横向滚动兜底，避免分页器把页面撑出横向滚动条。 */
+@media (max-width: 640px) {
+  .app-pager {
+    padding: 10px 8px 14px;
+    overflow-x: auto;
+  }
+  .app-pager .el-pagination__sizes,
+  .app-pager .el-pagination__jump {
+    display: none;
+  }
+  .app-pager .el-pagination__total {
+    margin-right: 8px;
+    font-size: 12px;
+  }
+  .app-pager .el-pagination button,
+  .app-pager .el-pager li {
+    min-width: 28px;
+  }
+  /* 页码过多时收窄可见范围由 Element 自动处理，这里只保证按钮不换行 */
+  .app-pager .el-pagination > * {
+    flex: none;
+  }
+}
+
+/* 触屏（无 hover）不依赖悬停态反馈 */
+@media (hover: none) {
+  .mini-btn:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
+/* ---------- 管理台动效降级（与前台 assets/app.css 口径一致） ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

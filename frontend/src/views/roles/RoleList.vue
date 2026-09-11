@@ -261,12 +261,12 @@ onMounted(() => {
             <template #default="{ row }">
               <div class="ops">
                 <el-tooltip content="分配权限" placement="top">
-                  <button class="mini-btn" @click="openPermDialog(row as Role)">
+                  <button class="mini-btn" aria-label="配置权限" @click="openPermDialog(row as Role)">
                     <el-icon :size="13"><Key /></el-icon>
                   </button>
                 </el-tooltip>
                 <el-tooltip content="编辑" placement="top">
-                  <button class="mini-btn" @click="openEdit(row as Role)">
+                  <button class="mini-btn" aria-label="编辑角色" @click="openEdit(row as Role)">
                     <el-icon :size="13"><EditPen /></el-icon>
                   </button>
                 </el-tooltip>
