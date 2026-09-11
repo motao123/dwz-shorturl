@@ -103,13 +103,13 @@ DWZ 短网址平台是一套 **PHP 前台 + Go 核心 + Vue3 管理台** 的三�
 
 | 能力 | 说明 |
 |------|------|
-| 🗃️ **schema_migrations** | `cmd/migrate` 工具 + `schema_migrations` 版本表，幂等迁移 |
+| 🗃️ **schema_migrations** | 单一迁移入口 `cmd/migrate` + 版本表，覆盖 PHP 侧与 Go 侧全部迁移，幂等可重跑 |
 | ⚖️ **对账 Cron** | `short_urls` ↔ `wjoy_log` 双写对账、点击计数校准 |
 | 📦 **分区维护** | `click_logs` 按月自动分区，防单表膨胀 |
 | 💾 **定时备份** | `deploy/backup.sh` mysqldump + 保留策略 |
 | 📨 **Webhook 异步队列** | PHP 跳转入队（O(1)）+ `migrations/webhook_worker.php` 后台投递，指数退避重试 |
 | 🎨 **静态资源构建** | `php migrations/build_assets.php` 压缩 CSS/JS 并注入内容哈希版本号，零 npm 依赖 |
-| 📋 **迁移工具** | `-status` / `-dry-run` / `-migrations` / `-config` 全参数 |
+| 📋 **迁移工具** | 目录扫描自动发现迁移，`-status` / `-dry-run` / `-all` / `-baseline` / `-config` 全参数 |
 
 ---
 
@@ -151,12 +151,12 @@ npm run dev        # http://localhost:5173
 
 # 3. 数据库迁移（统一入口：backend/cmd/migrate）
 cd backend
-go run ./cmd/migrate -status -migrations ../migrations   # 查看全部迁移及状态
-go run ./cmd/migrate -all -migrations ../migrations       # 执行管理库 + 公共库全部迁移
-go run ./cmd/migrate -all -migrations ../migrations -dry-run   # 只看会执行什么
+go run ./cmd/migrate -status -migrations ../backend/migrations   # 查看全部迁移及状态
+go run ./cmd/migrate -all -migrations ../backend/migrations      # 执行管理库 + 公共库全部迁移
+go run ./cmd/migrate -all -migrations ../backend/migrations -dry-run   # 只看会执行什么
 
 # 老库升级（推荐）：一条命令完成全部上线迁移
-#   备份 → SQL 迁移（统一入口，写入 schema_migrations）→ 静态资源构建
+#   备份 → 统一迁移工具 → 静态资源构建
 #   幂等，可重复执行；库名留空时会自动从 config.php / config.yaml 读取
 DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh --public-db=<公共库> --admin-db=<管理库>
 
@@ -164,7 +164,7 @@ DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh --public-db=<�
 DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh --public-db=<公共库> --admin-db=<管理库> --dry-run
 
 # 若目标库此前是手工升级的（schema 已到位但没有版本记录），先补录一次：
-cd backend && go run ./cmd/migrate -baseline -all -migrations ../migrations
+cd backend && go run ./cmd/migrate -baseline -migrations ../backend/migrations
 
 # 4. PHP 前台（需 PHP 8 + mysqli）
 php setup.php --host=127.0.0.1 --port=3306 \
@@ -185,21 +185,21 @@ DWZ_SERVER=your.host DWZ_USER=root DWZ_PASS='密码' ./deploy.sh
 
 ### 迁移体系（单一事实来源）
 
-全部 SQL 迁移集中在仓库根 `migrations/`，由 `backend/cmd/migrate` 执行并把版本写入
-`schema_migrations`。**清单由目录扫描 + 命名规范产出，不再有硬编码数组**：新增迁移
-文件无需改任何 `.go` 代码。
+全部迁移集中在 `backend/migrations/`，由 `backend/cmd/migrate` 执行并把版本写入
+`schema_migrations`。**清单由目录扫描产出，不再有硬编码数组**：新增迁移文件无需改任何
+`.go` 代码。
 
-命名规范：
+| 目录 | 版本号 | 目标库 |
+|---|---|---|
+| `backend/migrations/*.sql` | 文件名（如 `schema.sql`） | 管理库（`short_urls` / `users` / `roles` …） |
+| `backend/migrations/php/*` | `php/` 前缀（如 `php/scope_url_hash.sql`） | 公共库（`wjoy_log` / `members` / `webhook_queue` …） |
 
-| 文件名 | 目标库 |
-|---|---|
-| `schema.sql` | 管理库基线（固定最先执行） |
-| `public_schema.sql` | 公共库基线（固定最先执行） |
-| `<序号>_<名称>.sql` | 管理库（`short_urls` / `users` / `roles` …） |
-| `public__<序号>_<名称>.sql` | 公共库（`wjoy_log` / `members` / `webhook_queue` …） |
-| `<序号>_<名称>.public.sql` | 同上（等价写法） |
+**执行顺序由文件自己声明**，不依赖目录字典序：
 
-不按规范命名的 `.sql` 会**直接报错退出**，而不是被静默忽略。
+- `schema.sql` / `public_schema.sql` 等基线文件在 Go 里按固定序列排定；
+- 其余文件在 SQL 或 PHP 注释里写一行 `-- migrate: after <版本号>`，即插到该锚点之后；
+- 没有任何声明的文件仍会被发现、排在最后，并在 `-status` 与执行日志中标记 `unclassified`，
+  提醒补位置 —— 新迁移永远不会被静默忽略。
 
 库名不再写死在迁移脚本里：脚本内用 `{{PUBLIC_DB}}` / `{{ADMIN_DB}}` 占位符，
 执行时按当前配置注入，因此不再需要「先把 `USE` 的库名改对」这一步。
@@ -208,14 +208,22 @@ DWZ_SERVER=your.host DWZ_USER=root DWZ_PASS='密码' ./deploy.sh
 
 ```bash
 cd backend
-go run ./cmd/migrate -status -migrations ../migrations   # 全部迁移及已应用/待应用状态
-go run ./cmd/migrate -all     -migrations ../migrations  # 两库全部迁移 + 口径校验
-go run ./cmd/migrate -only public -migrations ../migrations   # 只处理公共库
-go run ./cmd/migrate -baseline -all -migrations ../migrations  # 手工升级过的库补录版本（不执行 DDL）
+go run ./cmd/migrate -status -migrations ../backend/migrations   # 全部迁移及已应用/待应用状态
+go run ./cmd/migrate -all     -migrations ../backend/migrations  # 两库全部迁移 + 口径校验
+go run ./cmd/migrate -only public -migrations ../backend/migrations   # 只处理公共库
+go run ./cmd/migrate -baseline -migrations ../backend/migrations  # 手工升级过的库补录版本（不执行 DDL）
 ```
 
 > `-baseline` 用于生产库「schema 已经手工改过、但没有 `schema_migrations` 记录」的场景：
 > 它只把文件标记为已应用，**不执行任何 DDL**，避免重跑时冲突。
+>
+> 💡 跨库迁移（同时读写公共库与管理库）通过 `{{ADMIN_DB}}` 占位符引用管理库，
+> 两个库的建库字符集不一致时脚本内已显式 `COLLATE`，不会出现
+> `ERROR 1267 Illegal mix of collations`。
+>
+> 💡 部分迁移是 PHP 脚本（如 `php/legacy_schema.php`，需先扫描数据再决定能否建唯一索引），
+> 迁移工具会调用 `php` 解释器执行它们并同样记入 `schema_migrations`；
+> 可用 `DWZ_PHP_BIN` 指定解释器路径。
 
 ### 一条命令完成上线迁移
 
@@ -224,17 +232,17 @@ go run ./cmd/migrate -baseline -all -migrations ../migrations  # 手工升级过
 | 步骤 | 动作 |
 |---|---|
 | 0 | 检查两库连通性、确认库名存在 |
-| 1 | 备份 `wjoy_log` 与 `short_urls` 到 `backups/migrate-<时间戳>/` |
-| 2 | SQL 迁移：调用统一入口 `backend/cmd/migrate`（写入 `schema_migrations`） |
-| 3 | 校验两库 `url_hash` 口径一致（残留未迁移行直接报错退出） |
-| 4 | 构建静态资源并注入内容哈希版本号 |
+| 1 | 备份 `wjoy_log` 与 `short_urls` 到 `backups/migrate-<时间戳>/`（表不存在时跳过，适配首次安装） |
+| 2 | 调用统一迁移工具 `backend/cmd/migrate` 执行全部待应用迁移（`url_hash` 作用域化、`webhook_queue`、`members`、`violation_reviews`、老库 `url_hash` 补列与清洗……） |
+| 3 | 构建静态资源并注入内容哈希版本号 |
 
-额外开关：`--baseline`（补录版本，不执行 DDL）、`--skip-sql`（只做备份与资源构建）。
+额外开关：`--baseline`（把目录内全部迁移标记为已应用，不执行 DDL）、`--skip-backup`、`--skip-assets`。
 
 特点：
 
 - **幂等**：中途失败可直接重跑；已完成的迁移记录在 `schema_migrations`，不会重复执行；
-- **零手工替换**：库名从 `config.php` / `backend/configs/config.yaml` 自动读取，也可 `--public-db=` / `--admin-db=` 显式指定，写入迁移脚本的占位符；
+- **单一迁移入口**：迁移清单、顺序与版本记录全部由 `backend/cmd/migrate` 决定，脚本不再自己拼 `mysql < xxx.sql`；
+- **零手工替换**：库名从 `config.php` / `backend/configs/config.yaml` 自动读取，也可 `--public-db=` / `--admin-db=` 显式指定；库名经 `{{PUBLIC_DB}}` / `{{ADMIN_DB}}` 占位符注入；
 - **密码不落命令行**：通过 `MYSQL_PWD` 环境变量传给 mysql/mysqldump，`ps` 与 shell history 不可见；
 - **有 `--dry-run`**：先看清要执行什么，再决定是否落库。
 
@@ -266,7 +274,7 @@ php migrations/build_assets.php
 php migrations/build_assets.php --check
 ```
 
-> 💡 `webhook_queue` 表由 `migrations/public__030_add_webhook_queue.sql` 创建；未建表时程序会自动退化为同步投递并在 `logs/php_error.log` 告警，功能不中断。
+> 💡 `webhook_queue` 表由 `backend/migrations/php/add_webhook_queue.sql` 创建；未建表时程序会自动退化为同步投递并在 `logs/php_error.log` 告警，功能不中断。
 
 ---
 
@@ -285,7 +293,7 @@ php migrations/build_assets.php --check
 - ✅ 业务键带上作用域后，哈希空间被区分，不同 URL 不会再因 MD5 碰撞而互相阻塞；
 - ✅ 匿名路径行为不变，线上已有数据语义平滑。
 
-> ⚠️ PHP (`includes/function.php` 的 `url_scope_hash()`)、Go (`urlHash()`) 与 SQL (`MD5(CONCAT(url, 0x1F, scope))`) 三处实现必须保持一致，否则同一条短链在两条跳转路径上会落到不同行。迁移脚本 `migrations/040_scope_url_hash.sql` 负责把历史行重写为同一口径。
+> ⚠️ PHP (`includes/function.php` 的 `url_scope_hash()`)、Go (`urlHash()`) 与 SQL (`MD5(CONCAT(url, 0x1F, scope))`) 三处实现必须保持一致，否则同一条短链在两条跳转路径上会落到不同行。迁移脚本 `backend/migrations/php/scope_url_hash.sql` 负责把历史行重写为同一口径。
 
 ---
 

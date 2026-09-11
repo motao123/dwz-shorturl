@@ -1,3 +1,6 @@
+-- migrate: after php/add_members.sql
+--
+-- 由统一迁移入口执行（连接默认库 = 公共库），不再包含 `USE <库名>`。
 -- Violation review log: records blocked URL submissions for manual review.
 -- Non-destructive: created only if not already present.
 CREATE TABLE IF NOT EXISTS `violation_reviews` (

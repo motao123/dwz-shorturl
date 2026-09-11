@@ -1,13 +1,27 @@
-// Command migrate applies pending SQL migrations to the admin database and
-// records them in a schema_migrations version table. All bundled migrations are
-// idempotent, so re-applying an already-applied migration is a no-op.
+// Command migrate applies pending SQL migrations and records them in a
+// schema_migrations version table. All bundled migrations are idempotent, so
+// re-applying an already-applied migration is a no-op.
 //
-// Usage (run from the backend build dir):
+// The migration set is discovered from disk (see internal/migration), so adding
+// a migration file never requires touching Go code. Its apply position is
+// declared in the file itself with a `-- migrate: after <version>` directive
+// (also accepted inside a PHP docblock); files with no such directive are still
+// discovered, applied last, and flagged so the omission is visible.
 //
-//	./migrate -status                  # list applied / pending migrations
-//	./migrate -dry-run                 # print what would be applied
-//	./migrate -all                     # admin migrations + public-DB parity checks
-//	./migrate -migrations ../migrations  # apply pending (default dir)
+// Usage (run from the backend dir):
+//
+//	./migrate -status                     # list every migration file + state
+//	./migrate -dry-run                    # print what would be applied
+//	./migrate -all                        # apply both DBs + url_hash parity check
+//	./migrate -baseline php/add_members.sql   # mark an out-of-band migration done
+//	./migrate -migrations ../backend/migrations
+//
+// PHP migrations (php/*.php) are executed through the php CLI and recorded in
+// the same version table; DWZ_PHP_BIN selects the interpreter.
+//
+// Cross-database statements reference the management schema through the
+// {{ADMIN_DB}} / {{PUBLIC_DB}} placeholders, substituted from the active config
+// before a file runs, so no migration hard-codes a database name.
 //
 // The admin DB credentials come from configs/config.yaml (same as the server).
 // The public frontend DB (public_db.*) is optional; when it is unset the tool
@@ -19,20 +33,42 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"dwz-admin/internal/config"
+	"dwz-admin/internal/migration"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
-type migrationRow struct {
-	Version   string
-	AppliedAt time.Time
+// scanDirs are the directories scanned for migrations, relative to the
+// -migrations root. Keeping the PHP-side files in a sub-directory namespaces
+// their version keys ("php/...") so they can never collide with an admin file
+// of the same name.
+var scanDirs = [][2]string{
+	{"", ""},
+	{"php", "php/"},
+}
+
+// base must always be applied first, in this order: schema.sql is the admin
+// baseline, public_schema.sql creates the public-side wjoy_log table, and the
+// add_* files are idempotent column/index backfills. Everything else declares
+// its own position with a `-- migrate: after <version>` directive.
+var base = []string{
+	"schema.sql",
+	// add_missing_columns backfills the columns (category_id, member_id, ...)
+	// that the other backfills anchor on or index, so it must come first.
+	"add_missing_columns.sql",
+	"add_password_hash.sql",
+	"add_domains.sql",
+	"add_webhooks.sql",
+	"add_totp.sql",
+	"optimize_domain_indexes.sql",
+	"public_schema.sql",
 }
 
 // applyEnvOverrides lets ops/one_click_migrate.sh pass connection details on
@@ -127,73 +163,63 @@ func readApplied(db *gorm.DB) (map[string]bool, []string, error) {
 	return set, applied, nil
 }
 
-// pendingFor returns the migrations that are not yet recorded.
-func pendingFor(db *gorm.DB, list []migration) ([]migration, error) {
+// recorded reports whether a version has been applied, tolerating the version
+// key that older tooling wrote for the same file (a bare file name). The
+// backend files used to carry a numeric prefix, so a database migrated before
+// this tool was unified still records "040_scope_url_hash.sql" while the file
+// is now "php/scope_url_hash.sql".
+func recorded(applied map[string]bool, f migration.File) bool {
+	if applied[f.Key] {
+		return true
+	}
+	for _, alias := range migration.LegacyKeys(f.Key) {
+		if applied[alias] {
+			return true
+		}
+	}
+	return false
+}
+
+// split returns the subsets of migrations belonging to each database, keeping
+// the global apply order inside each list.
+func split(files []migration.File) (adminFiles, publicFiles []migration.File) {
+	for _, f := range files {
+		if f.Target == migration.TargetPublic {
+			publicFiles = append(publicFiles, f)
+		} else {
+			adminFiles = append(adminFiles, f)
+		}
+	}
+	return adminFiles, publicFiles
+}
+
+// printGroup lists migrations recorded against one database, plus which of them
+// are still pending.
+func printGroup(db *gorm.DB, title string, files []migration.File) (int, error) {
 	appliedSet, _, err := readApplied(db)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	var pending []migration
-	for _, m := range list {
-		if appliedSet[m.File] {
-			continue
+	pending := 0
+	fmt.Printf("== %s\n", title)
+	for _, f := range files {
+		mark := "[x]"
+		if !recorded(appliedSet, f) {
+			mark = "[ ]"
+			pending++
 		}
-		if _, err := os.Stat(m.Path); err != nil {
-			return nil, fmt.Errorf("migration file missing: %s", m.Path)
+		suffix := ""
+		if f.Unclassified {
+			suffix = "   (unclassified: not in any declared order, applied last — pin it with '-- migrate: after <version>')"
 		}
-		pending = append(pending, m)
+		fmt.Printf("  %s %-40s%s\n", mark, f.Key, suffix)
 	}
 	return pending, nil
 }
 
-func printStatus(db *gorm.DB, list []migration) error {
-	appliedSet, applied, err := readApplied(db)
-	if err != nil {
-		return err
-	}
-	fmt.Println("applied:", len(applied))
-	pendingCount := 0
-	for _, m := range list {
-		mark := "  [x]"
-		if !appliedSet[m.File] {
-			mark = "  [ ]"
-			pendingCount++
-		}
-		fmt.Printf("%s %s\n", mark, m.File)
-	}
-	if pendingCount == 0 {
-		fmt.Println("  (all migrations applied)")
-	}
-	return nil
-}
-
-func applyAll(db *gorm.DB, pending []migration, vars map[string]string) error {
-	for _, m := range pending {
-		sqlBytes, err := os.ReadFile(m.Path)
-		if err != nil {
-			return fmt.Errorf("read migration %s failed: %w", m.File, err)
-		}
-		// Substitute the {{PUBLIC_DB}} / {{ADMIN_DB}} placeholders so no
-		// migration carries a hard-coded database name any more.
-		stmt := substituteVars(string(sqlBytes), vars)
-
-		// Apply + record in one transaction so a failed script is not marked done.
-		if err := db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Exec(stmt).Error; err != nil {
-				return err
-			}
-			return tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", m.File).Error
-		}); err != nil {
-			return fmt.Errorf("apply failed: %s -> %w", m.File, err)
-		}
-		fmt.Println("applied", m.File)
-	}
-	return nil
-}
-
-// substituteVars replaces {{KEY}} placeholders with their configured values.
-// Values are back-quoted identifiers, so any stray quote in a name would break
-// the statement; the DB names come from config and are validated first.
+// substituteVars replaces {{KEY}} placeholders with their configured values, so
+// no migration carries a hard-coded database name. Values are injected as bare
+// identifiers and the names come from config, which is validated first.
 func substituteVars(sql string, vars map[string]string) string {
 	for k, v := range vars {
 		sql = strings.ReplaceAll(sql, "{{"+k+"}}", v)
@@ -201,8 +227,8 @@ func substituteVars(sql string, vars map[string]string) string {
 	return sql
 }
 
-// validateDBName rejects names that cannot be safely interpolated as a quoted
-// identifier in a migration script.
+// validateDBName rejects names that cannot be safely interpolated into a
+// migration script.
 func validateDBName(name string) error {
 	if name == "" {
 		return fmt.Errorf("empty database name")
@@ -217,6 +243,102 @@ func validateDBName(name string) error {
 	return nil
 }
 
+// pendingFor returns the migrations that are not yet recorded.
+func pendingFor(db *gorm.DB, list []migration.File) ([]migration.File, error) {
+	appliedSet, _, err := readApplied(db)
+	if err != nil {
+		return nil, err
+	}
+	var pending []migration.File
+	for _, m := range list {
+		if recorded(appliedSet, m) {
+			continue
+		}
+		if _, err := os.Stat(m.Path); err != nil {
+			return nil, fmt.Errorf("migration file missing: %s", m.Path)
+		}
+		pending = append(pending, m)
+	}
+	return pending, nil
+}
+
+// applyOne executes a single migration and records its version. PHP scripts are
+// dispatched to the php CLI.
+func applyOne(db *gorm.DB, m migration.File, cfg *config.Config, vars map[string]string, dryRun bool) error {
+	if !m.IsSQL() {
+		return applyPHP(db, m, cfg, dryRun)
+	}
+
+	sqlBytes, err := os.ReadFile(m.Path)
+	if err != nil {
+		return fmt.Errorf("read migration %s failed: %w", m.Key, err)
+	}
+
+	if dryRun {
+		fmt.Printf("  would apply %s  (%d bytes)\n", m.Key, len(sqlBytes))
+		return nil
+	}
+
+	// Substitute the {{PUBLIC_DB}} / {{ADMIN_DB}} placeholders so no migration
+	// carries a hard-coded database name any more.
+	stmt := substituteVars(string(sqlBytes), vars)
+
+	// Apply + record in one transaction so a failed script is not marked done.
+	// DDL is not transactional in MySQL, so this does not roll the schema back;
+	// it only guarantees the version row is written after the script succeeds.
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(stmt).Error; err != nil {
+			return err
+		}
+		return tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", m.Key).Error
+	}); err != nil {
+		return fmt.Errorf("apply failed: %s -> %w", m.Key, err)
+	}
+	fmt.Println("applied", m.Key)
+	return nil
+}
+
+// applyPHP runs a PHP migration script through the php CLI. These exist because
+// a few migrations have to read data before deciding which DDL is safe
+// (legacy_schema.php only adds the unique indexes when there are no duplicate
+// uids/hashes); running them from Go would mean reimplementing that logic.
+//
+// The script is given the resolved connection details explicitly instead of
+// relying on it finding config.php, so a deployment that only configures
+// config.yaml still migrates.
+func applyPHP(db *gorm.DB, m migration.File, cfg *config.Config, dryRun bool) error {
+	if dryRun {
+		fmt.Printf("  would run %s  (php script)\n", m.Key)
+		return nil
+	}
+
+	phpBin := os.Getenv("DWZ_PHP_BIN")
+	if phpBin == "" {
+		phpBin = "php"
+	}
+
+	// PHP-side migrations operate on the public database; pass the admin name too
+	// so nothing has to hard-code it.
+	publicCfg := cfg.PublicDB
+	if publicCfg.DBName == "" {
+		publicCfg = cfg.Database
+	}
+
+	args := []string{
+		m.Path,
+		"--host=" + publicCfg.Host,
+		fmt.Sprintf("--port=%d", publicCfg.Port),
+		"--user=" + publicCfg.User,
+		"--pwd=" + publicCfg.Password,
+		"--db=" + publicCfg.DBName,
+		"--admin-db=" + cfg.Database.DBName,
+	}
+	if err := runPHP(phpBin, args); err != nil {
+		return fmt.Errorf("php script failed: %w", err)
+	}
+	return db.Exec("INSERT INTO schema_migrations (version) VALUES (?)", m.Key).Error
+}
+
 // parityCheck verifies that the two databases agree on the scoped url_hash
 // layout, so the PHP and Go jump paths resolve the same row. It reports
 // mismatches instead of changing data.
@@ -228,7 +350,7 @@ func parityCheck(admin, public *gorm.DB) error {
 		// Column may not exist on very old schemas; treat as non-fatal.
 		fmt.Println("parity: skip short_urls check ->", err)
 	} else if legacyAdmin > 0 {
-		return fmt.Errorf("short_urls still has %d rows on the legacy MD5(long_url) hash; run migrations/040_scope_url_hash.sql", legacyAdmin)
+		return fmt.Errorf("short_urls still has %d rows on the legacy MD5(long_url) hash; run php/scope_url_hash.sql", legacyAdmin)
 	}
 
 	var legacyPublic int64
@@ -237,7 +359,7 @@ func parityCheck(admin, public *gorm.DB) error {
 		Count(&legacyPublic).Error; err != nil {
 		fmt.Println("parity: skip wjoy_log check ->", err)
 	} else if legacyPublic > 0 {
-		return fmt.Errorf("wjoy_log still has %d rows on the legacy MD5(longurl) hash; run migrations/040_scope_url_hash.sql", legacyPublic)
+		return fmt.Errorf("wjoy_log still has %d rows on the legacy MD5(longurl) hash; run php/scope_url_hash.sql", legacyPublic)
 	}
 
 	fmt.Println("parity: both databases are on the scoped url_hash layout")
@@ -245,7 +367,7 @@ func parityCheck(admin, public *gorm.DB) error {
 }
 
 func main() {
-	status := flag.Bool("status", false, "list applied/pending migrations")
+	status := flag.Bool("status", false, "list every migration file with applied/pending state")
 	dryRun := flag.Bool("dry-run", false, "print pending migrations without applying")
 	all := flag.Bool("all", false, "apply admin + public migrations and run parity checks")
 	baseline := flag.Bool("baseline", false, "mark every migration in the dir as applied WITHOUT executing it (for databases upgraded by hand)")
@@ -273,11 +395,12 @@ func main() {
 
 	// Discover migrations from the directory instead of a hard-coded list, so a
 	// new file is picked up without touching Go code.
-	adminMigs, publicMigs, err := discoverMigrations(*dir)
+	migs, err := discovery(*dir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	adminMigs, publicMigs := split(migs)
 
 	vars := map[string]string{
 		"ADMIN_DB":  cfg.Database.DBName,
@@ -309,7 +432,7 @@ func main() {
 		if !*dryRun {
 			if wantAdmin {
 				for _, m := range adminMigs {
-					if err := markApplied(admin, m.File); err != nil {
+					if err := markApplied(admin, m.Key); err != nil {
 						fmt.Fprintln(os.Stderr, err)
 						os.Exit(1)
 					}
@@ -321,7 +444,7 @@ func main() {
 					os.Exit(1)
 				}
 				for _, m := range publicMigs {
-					if err := markApplied(public, m.File); err != nil {
+					if err := markApplied(public, m.Key); err != nil {
 						fmt.Fprintln(os.Stderr, err)
 						os.Exit(1)
 					}
@@ -336,7 +459,7 @@ func main() {
 	if *status || *dryRun {
 		if wantAdmin {
 			fmt.Println("== admin db:", cfg.Database.DBName)
-			if err := printStatus(admin, adminMigs); err != nil {
+			if _, err := printGroup(admin, "admin migrations", adminMigs); err != nil {
 				fmt.Fprintln(os.Stderr, "read migrations failed:", err)
 				os.Exit(1)
 			}
@@ -347,7 +470,7 @@ func main() {
 				os.Exit(1)
 			}
 			fmt.Println("== public db:", cfg.PublicDB.DBName)
-			if err := printStatus(public, publicMigs); err != nil {
+			if _, err := printGroup(public, "public migrations", publicMigs); err != nil {
 				fmt.Fprintln(os.Stderr, "read public migrations failed:", err)
 				os.Exit(1)
 			}
@@ -364,45 +487,68 @@ func main() {
 	}
 
 	// ---- apply -------------------------------------------------------------
-	appliedAny := false
-
-	// Order matters: some admin migrations are cross-DB and read the public
-	// tables (040_scope_url_hash.sql joins wjoy_log, 140_migrate_wjoy_log.sql
-	// reads it as the source of truth). The public schema must therefore exist
-	// before those run, otherwise a fresh install fails with "table wjoy_log
-	// doesn't exist". Apply the public baseline first.
+	//
+	// The two groups are NOT independent, so apply them in one global order
+	// instead of running one group to completion and then the other. The
+	// cross-database migrations read short_urls (created by the admin baseline
+	// schema.sql) while writing wjoy_log (created by public_schema.sql), so a
+	// fresh install that applies either group alone fails with "table ...
+	// doesn't exist":
+	//
+	//	schema.sql                -> creates short_urls      (admin)
+	//	public_schema.sql         -> creates wjoy_log        (public)
+	//	php/*.sql                 -> rewrite both sides      (public)
+	//
+	// Walking the single discovered order and dispatching each file to its own
+	// database keeps the two baselines ahead of the cross-DB files, which is
+	// exactly the order the files declare.
+	adminApplied, _, err := readApplied(admin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	publicApplied := map[string]bool{}
 	if wantPublic {
 		if err := ensureVersionTable(public); err != nil {
 			fmt.Fprintln(os.Stderr, "ensure public schema_migrations failed:", err)
 			os.Exit(1)
 		}
-		// Public baseline (public_schema.sql) must precede any admin migration
-		// that reads across databases.
-		if pendingPublic, err := pendingFor(public, publicMigs); err != nil {
+		if publicApplied, _, err = readApplied(public); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
-		} else if len(pendingPublic) > 0 {
-			if err := applyAll(public, pendingPublic, vars); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			appliedAny = true
 		}
 	}
 
-	if wantAdmin {
-		pending, err := pendingFor(admin, adminMigs)
-		if err != nil {
+	appliedAny := false
+	for _, m := range migs {
+		var (
+			db      *gorm.DB
+			applied map[string]bool
+		)
+		switch {
+		case m.Target == migration.TargetPublic:
+			if !wantPublic {
+				continue
+			}
+			db, applied = public, publicApplied
+		default:
+			if !wantAdmin {
+				continue
+			}
+			db, applied = admin, adminApplied
+		}
+		if recorded(applied, m) {
+			continue
+		}
+		if m.Unclassified {
+			fmt.Println("warning: applying unclassified migration", m.Key)
+		}
+		if err := applyOne(db, m, cfg, vars, false); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		if len(pending) > 0 {
-			if err := applyAll(admin, pending, vars); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			appliedAny = true
-		}
+		applied[m.Key] = true
+		appliedAny = true
 	}
 
 	if *all {
@@ -422,6 +568,12 @@ func main() {
 	fmt.Println("done")
 }
 
+// discovery scans the migrations root using the directory/key-prefix pairs in
+// scanDirs and returns the full migration set in apply order.
+func discovery(root string) ([]migration.File, error) {
+	return migration.Discover(root, scanDirs, base, nil)
+}
+
 // markApplied records a migration as done without running its SQL. Used by
 // -baseline to adopt databases that were migrated by hand before
 // schema_migrations existed, so a later `migrate` run does not re-execute DDL.
@@ -429,4 +581,13 @@ func markApplied(db *gorm.DB, version string) error {
 	return db.Exec(
 		"INSERT INTO schema_migrations (version) VALUES (?) "+
 			"ON DUPLICATE KEY UPDATE version = version", version).Error
+}
+
+// runPHP executes a PHP migration script. Kept as a named function so tests can
+// wrap it without spawning a real interpreter.
+func runPHP(bin string, args []string) error {
+	cmd := exec.Command(bin, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }

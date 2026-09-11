@@ -1,3 +1,9 @@
+-- migrate: after php/migrate_wjoy_log.sql
+--
+-- 本文件不再包含 `USE <库名>`：统一的迁移入口 (backend/cmd/migrate) 会把
+-- 连接默认库切到「公共库」后整文件执行；跨库引用管理库时通过 {{ADMIN_DB}}
+-- 占位符表达（执行时按当前配置注入实际库名）。
+--
 -- Migration: scope the short-URL dedup hash per owner (C 类改造)
 --
 -- 背景
@@ -40,7 +46,10 @@
 -- ===========================================================================
 SET NAMES utf8mb4;
 
-USE `{{PUBLIC_DB}}`;
+-- 库名在下方一律通过 @admin_schema 引用：CONCAT 只能拼接字符串字面量，
+-- 因此先把注入的库名（迁移工具已把 {{ADMIN_DB}} 替换成配置里的库名）
+-- 存进一个用户变量。
+SET @admin_schema = '{{ADMIN_DB}}';
 
 -- 1.1 历史/匿名行保持原全局语义：w:0
 UPDATE `wjoy_log`
@@ -53,13 +62,16 @@ WHERE `url_hash` = MD5(`longurl`);
 --     short_urls=utf8mb4_unicode_ci），跨库 JOIN 的 uid 比较会触发
 --     ERROR 1267 Illegal mix of collations。这里对两侧显式做 COLLATE 统一，
 --     保证脚本在任意建库字符集组合下都能执行。
-UPDATE `wjoy_log` w
-JOIN `{{ADMIN_DB}}`.`short_urls` s
-  ON s.uid COLLATE utf8mb4_unicode_ci = w.uid COLLATE utf8mb4_unicode_ci
-SET w.`url_hash` = MD5(CONCAT(w.`longurl`, 0x1F, CONCAT('m:', s.`member_id`)))
-WHERE s.`member_id` IS NOT NULL
-  AND s.`member_id` > 0
-  AND w.`url_hash` = MD5(CONCAT(w.`longurl`, 0x1F, 'w:0'));
+-- 跨库引用管理库统一走上面的 @admin_schema，无需人工替换库名。
+SET @scope_sql = CONCAT(
+  'UPDATE `wjoy_log` w JOIN `', @admin_schema, '`.`short_urls` s ',
+  'ON s.uid COLLATE utf8mb4_unicode_ci = w.uid COLLATE utf8mb4_unicode_ci ',
+  'SET w.`url_hash` = MD5(CONCAT(w.`longurl`, 0x1F, CONCAT(''m:'', s.`member_id`))) ',
+  'WHERE s.`member_id` IS NOT NULL AND s.`member_id` > 0 ',
+  'AND w.`url_hash` = MD5(CONCAT(w.`longurl`, 0x1F, ''w:0''))');
+PREPARE scope_stmt FROM @scope_sql;
+EXECUTE scope_stmt;
+DEALLOCATE PREPARE scope_stmt;
 
 -- 1.3 重建唯一索引（同名，语义改为作用域内唯一）
 -- 幂等：只有索引存在时才 DROP（MySQL 8 不支持 DROP INDEX IF EXISTS，
@@ -82,40 +94,40 @@ ALTER TABLE `wjoy_log`
 -- ===========================================================================
 -- 2. 管理库：short_urls
 -- ===========================================================================
-USE `{{ADMIN_DB}}`;
+-- 本段作用于管理库，但连接的默认库是公共库（见文件头说明），
+-- 因此所有语句都通过 @admin_schema 限定库名，不再使用 `USE`。
 
 -- 2.1 会员行按会员作用域重写
-UPDATE `short_urls`
-SET `url_hash` = MD5(CONCAT(`long_url`, 0x1F, CONCAT('m:', `member_id`)))
-WHERE `member_id` IS NOT NULL
-  AND `member_id` > 0
-  AND `url_hash` = MD5(`long_url`);
+SET @sql = CONCAT('UPDATE `', @admin_schema, '`.`short_urls` ',
+  'SET `url_hash` = MD5(CONCAT(`long_url`, 0x1F, CONCAT(''m:'', `member_id`))) ',
+  'WHERE `member_id` IS NOT NULL AND `member_id` > 0 AND `url_hash` = MD5(`long_url`)');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 2.2 管理员/API Key 创建的行按创建者作用域重写
-UPDATE `short_urls`
-SET `url_hash` = MD5(CONCAT(`long_url`, 0x1F, 'w:0'))
-WHERE `member_id` IS NULL
-  AND `url_hash` = MD5(`long_url`);
-
-SET @idx_exists = (SELECT COUNT(*) FROM information_schema.STATISTICS
-  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_urls' AND INDEX_NAME = 'uk_url_hash');
-SET @sql = IF(@idx_exists > 0, 'ALTER TABLE `short_urls` DROP INDEX `uk_url_hash`', 'SELECT 1');
+SET @sql = CONCAT('UPDATE `', @admin_schema, '`.`short_urls` ',
+  'SET `url_hash` = MD5(CONCAT(`long_url`, 0x1F, ''w:0'')) ',
+  'WHERE `member_id` IS NULL AND `url_hash` = MD5(`long_url`)');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @idx_exists = (SELECT COUNT(*) FROM information_schema.STATISTICS
-  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'short_urls' AND INDEX_NAME = 'uk_url_hash');
-SET @sql = IF(@idx_exists = 0, 'ALTER TABLE `short_urls` ADD UNIQUE KEY `uk_url_hash` (`url_hash`)', 'SELECT 1');
+  WHERE TABLE_SCHEMA = @admin_schema AND TABLE_NAME = 'short_urls' AND INDEX_NAME = 'uk_url_hash');
+SET @sql = IF(@idx_exists > 0, CONCAT('ALTER TABLE `', @admin_schema, '`.`short_urls` DROP INDEX `uk_url_hash`'), 'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
-ALTER TABLE `short_urls`
-  MODIFY COLUMN `url_hash` CHAR(32) NOT NULL
-  COMMENT 'MD5(url + 0x1F + owner scope) dedup';
+SET @idx_exists = (SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = @admin_schema AND TABLE_NAME = 'short_urls' AND INDEX_NAME = 'uk_url_hash');
+SET @sql = IF(@idx_exists = 0, CONCAT('ALTER TABLE `', @admin_schema, '`.`short_urls` ADD UNIQUE KEY `uk_url_hash` (`url_hash`)'), 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = CONCAT('ALTER TABLE `', @admin_schema, '`.`short_urls` ',
+  'MODIFY COLUMN `url_hash` CHAR(32) NOT NULL COMMENT ''MD5(url + 0x1F + owner scope) dedup''');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- ===========================================================================
 -- 3. 校验（人工执行）
 -- ===========================================================================
 -- 应返回 0：不存在仍未作用域化的行
--- SELECT COUNT(*) FROM `{{PUBLIC_DB}}`.`wjoy_log` WHERE `url_hash` = MD5(`longurl`);
--- SELECT COUNT(*) FROM `{{ADMIN_DB}}`.`short_urls` WHERE `url_hash` = MD5(`long_url`);
+-- SELECT COUNT(*) FROM `wjoy_log` WHERE `url_hash` NOT LIKE CONCAT('_%\_%') ESCAPE '\\';
+-- SELECT COUNT(*) FROM `short_urls` WHERE `url_hash` = MD5(`long_url`);
 -- 索引应只保留一个 uk_url_hash / uniq_hash，且列注释已更新
--- SHOW INDEX FROM `{{ADMIN_DB}}`.`short_urls` WHERE Key_name = 'uk_url_hash';
+-- SHOW INDEX FROM `short_urls` WHERE Key_name = 'uk_url_hash';
