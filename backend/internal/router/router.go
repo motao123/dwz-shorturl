@@ -141,6 +141,7 @@ func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, err
 			// System monitoring
 			auth.GET("/monitor", middleware.RequirePermission("stats", "read"), h.Monitor.Status)
 			auth.POST("/monitor/run-task", middleware.RequirePermission("stats", "update"), h.Monitor.RunTask)
+			auth.POST("/monitor/ensure-partitions", middleware.RequirePermission("stats", "update"), h.Monitor.EnsurePartitions)
 
 			// Users
 			users := auth.Group("/users")

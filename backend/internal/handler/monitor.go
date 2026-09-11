@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"dwz-admin/internal/pkg"
 	"dwz-admin/internal/service"
@@ -43,4 +44,24 @@ func (h *MonitorHandler) RunTask(c *gin.Context) {
 		return
 	}
 	pkg.Success(c, gin.H{"task": req.Name, "ran": ok})
+}
+
+// EnsurePartitions creates any missing click_logs monthly partitions up to the
+// requested horizon (defaults to the cron job's own 2-month target).
+func (h *MonitorHandler) EnsurePartitions(c *gin.Context) {
+	months := 0
+	if raw := c.Query("months"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 0 || v > 24 {
+			pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "months must be an integer between 0 and 24")
+			return
+		}
+		months = v
+	}
+	created, err := h.svc.EnsurePartitions(months)
+	if err != nil {
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+		return
+	}
+	pkg.Success(c, gin.H{"created": created})
 }
