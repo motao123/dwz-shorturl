@@ -1,13 +1,27 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { Search } from '@element-plus/icons-vue'
+import TableSkeleton from '@/components/TableSkeleton.vue'
 import dayjs from 'dayjs'
 import { listAuditLogs, type AuditLog, type AuditLogQuery } from '@/api/audit'
 
+/** 首屏加载：仅此时展示骨架屏 */
 const loading = ref(false)
+/** 静默刷新：筛选/翻页时不遮罩，仅顶部细进度条 */
+const refreshing = ref(false)
+/** 首次加载是否完成，作为骨架屏与内容的切换开关 */
+const initialized = ref(false)
 const rows = ref<AuditLog[]>([])
 const total = ref(0)
+
+/** 骨架行数取当前分页 page-size，保证数据到达后无高度跳动 */
+const skeletonRows = computed(() => Math.min(query.per_page || 20, 20))
+/** 骨架列宽与真实列（展开 / 时间 / 操作人 / 操作 / 资源 / IP / 来源）对齐 */
+const skeletonWidths = ['36px', '150px', '110px', '130px', 'minmax(160px, 1fr)', '120px', '120px']
+
+const showSkeleton = computed(() => loading.value && !initialized.value)
+const isBusy = computed(() => loading.value || refreshing.value)
 
 const query = reactive<AuditLogQuery>({
   page: 1,
@@ -60,8 +74,16 @@ function actionTone(action: string): 'success' | 'warning' | 'danger' | 'info' |
   return 'primary'
 }
 
-async function loadData() {
-  loading.value = true
+/**
+ * 加载审计日志。
+ * @param silent 静默模式：已有数据时不再遮罩整表
+ */
+async function loadData(silent = initialized.value) {
+  if (silent) {
+    refreshing.value = true
+  } else {
+    loading.value = true
+  }
   try {
     const params: AuditLogQuery = { ...query }
     if (dateRange.value) {
@@ -85,12 +107,16 @@ async function loadData() {
         actionOptions.value.push(r.action)
       }
     }
+    initialized.value = true
   } catch (err) {
-    rows.value = []
-    total.value = 0
+    if (!silent) {
+      rows.value = []
+      total.value = 0
+    }
     ElMessage.error(err instanceof Error ? err.message : '加载审计日志失败')
   } finally {
     loading.value = false
+    refreshing.value = false
   }
 }
 
@@ -111,7 +137,7 @@ function formatDetail(detail: Record<string, unknown> | null): string {
   return JSON.stringify(detail, null, 2)
 }
 
-onMounted(loadData)
+onMounted(() => loadData(false))
 </script>
 
 <template>
@@ -168,8 +194,12 @@ onMounted(loadData)
         <el-button aria-label="重置筛选条件" @click="handleReset">重置</el-button>
       </div>
 
-      <div class="app-table-wrap">
-        <el-table v-loading="loading" :data="rows" row-key="id" stripe>
+      <div class="app-table-wrap dwz-silent" :class="{ 'is-loading': showSkeleton }">
+        <!-- 首屏骨架：行数取 page-size，尺寸与真实表格一致，避免 CLS -->
+        <TableSkeleton v-if="showSkeleton" :rows="skeletonRows" :widths="skeletonWidths" />
+        <!-- 自动/手动刷新改为局部静默指示，不再整表遮罩闪烁 -->
+        <span v-if="refreshing" class="dwz-silent__bar" aria-hidden="true" />
+        <el-table v-show="!showSkeleton" :data="rows" row-key="id" stripe>
           <el-table-column type="expand">
             <template #default="{ row }">
               <div class="detail">
@@ -223,8 +253,9 @@ onMounted(loadData)
           :total="total"
           :page-sizes="[20, 50, 100]"
           layout="total, sizes, prev, pager, next"
+          :disabled="isBusy"
           background
-          @current-change="loadData"
+          @current-change="() => loadData()"
           @size-change="() => { query.page = 1; loadData() }"
         />
       </div>

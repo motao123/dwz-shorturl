@@ -41,13 +41,29 @@ import {
 import { copyText } from '@/utils/clipboard'
 import { useResponsive } from '@/composables/useResponsive'
 import ShortUrlForm from './ShortUrlForm.vue'
+import TableSkeleton from '@/components/TableSkeleton.vue'
 import LinkStatsDialog, { type NormalizedStat } from '@/components/LinkStatsDialog.vue'
 
 const tableRef = ref<TableInstance>()
+/** 首屏加载：仅此时展示骨架屏 */
 const loading = ref(false)
+/** 静默刷新：翻页/搜索等二次加载时不遮罩，仅顶部细进度条 */
+const refreshing = ref(false)
+/** 首次加载是否完成，作为骨架屏与内容的切换开关 */
+const initialized = ref(false)
 const rows = ref<ShortUrl[]>([])
 const total = ref(0)
 const selected = ref<ShortUrl[]>([])
+
+/** 首屏骨架行数：取当前分页 page-size，保证数据到达后无高度跳动 */
+const skeletonRows = computed(() => Math.min(query.per_page || 20, 20))
+/** 骨架列宽与真实列（短码 / 目标 URL / 点击数 / 状态 / 分组 / 操作）对齐 */
+const skeletonWidths = ['44px', 'minmax(140px, 1fr)', 'minmax(240px, 2fr)', '90px', '76px', '88px', '150px']
+
+/** 表格是否处于首屏骨架态 */
+const showSkeleton = computed(() => loading.value && !initialized.value)
+/** 任意加载态（用于禁用分页交互） */
+const isBusy = computed(() => loading.value || refreshing.value)
 
 // 窄屏下收敛分页器布局：jumper/sizes 在 <=640px 会溢出容器
 const { isMobile, isTablet } = useResponsive()
@@ -119,8 +135,16 @@ async function handleRestore(row: ShortUrl) {
   }
 }
 
-async function loadData() {
-  loading.value = true
+/**
+ * 加载短链列表。
+ * @param silent 静默模式：已有数据时不再显示骨架/遮罩，仅局部指示（翻页、筛选、刷新）
+ */
+async function loadData(silent = initialized.value) {
+  if (silent) {
+    refreshing.value = true
+  } else {
+    loading.value = true
+  }
   try {
     const res = await listShortUrls(buildParams())
     // 兼容后端返回数组或分页包裹
@@ -131,12 +155,16 @@ async function loadData() {
       rows.value = res?.list ?? []
       total.value = res?.total ?? 0
     }
+    initialized.value = true
   } catch (err) {
-    rows.value = []
-    total.value = 0
+    if (!silent) {
+      rows.value = []
+      total.value = 0
+    }
     ElMessage.error(err instanceof Error ? err.message : '加载短链列表失败')
   } finally {
     loading.value = false
+    refreshing.value = false
   }
 }
 
@@ -409,7 +437,7 @@ function formatExpire(row: ShortUrl): string {
   return dayjs(row.expire_at).format('YYYY-MM-DD')
 }
 
-onMounted(loadData)
+onMounted(() => loadData(false))
 </script>
 
 <template>
@@ -501,10 +529,18 @@ onMounted(loadData)
       </div>
 
       <!-- 表格 -->
-      <div class="app-table-wrap">
+      <div class="app-table-wrap dwz-silent" :class="{ 'is-loading': showSkeleton }">
+        <!-- 首屏骨架：尺寸与真实表格行/列一致，数据到达后无布局跳动 -->
+        <TableSkeleton
+          v-if="showSkeleton"
+          :rows="skeletonRows"
+          :widths="skeletonWidths"
+        />
+        <!-- 静默刷新指示：翻页/筛选时不再整表遮罩，仅顶部进度条 -->
+        <span v-if="refreshing" class="dwz-silent__bar" aria-hidden="true" />
         <el-table
+          v-show="!showSkeleton"
           ref="tableRef"
-          v-loading="loading"
           :data="rows"
           row-key="id"
           stripe
@@ -626,6 +662,7 @@ onMounted(loadData)
           :total="total"
           :page-sizes="[10, 20, 50, 100]"
           :layout="pagerLayout"
+          :disabled="isBusy"
           background
           @current-change="handlePageChange"
           @size-change="handleSizeChange"

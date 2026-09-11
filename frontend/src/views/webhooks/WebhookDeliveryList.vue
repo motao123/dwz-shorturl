@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { Search, Refresh, RefreshLeft } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
@@ -9,12 +9,22 @@ import {
   WEBHOOK_EVENTS,
   type WebhookDelivery
 } from '@/api/webhooks'
+import TableSkeleton from '@/components/TableSkeleton.vue'
 
 const retrying = ref(false)
 
 const loading = ref(false)
+const refreshing = ref(false)
+const initialized = ref(false)
 const rows = ref<WebhookDelivery[]>([])
 const total = ref(0)
+
+/** 骨架行数取 page-size，尺寸与真实表格一致，避免 CLS */
+const skeletonRows = computed(() => Math.min(query.per_page || 20, 20))
+/** 骨架列宽与真实列（展开 / 时间 / 事件 / Webhook / 结果）对齐 */
+const skeletonWidths = ['36px', '150px', '150px', '90px', '90px']
+const showSkeleton = computed(() => loading.value && !initialized.value)
+const isBusy = computed(() => loading.value || refreshing.value)
 
 const query = reactive({
   page: 1,
@@ -28,8 +38,16 @@ function eventLabel(v: string): string {
   return WEBHOOK_EVENTS.find((e) => e.value === v)?.label ?? v
 }
 
-async function loadData() {
-  loading.value = true
+/**
+ * 加载投递记录。
+ * @param silent 静默模式：已有数据时不再遮罩整表
+ */
+async function loadData(silent = initialized.value) {
+  if (silent) {
+    refreshing.value = true
+  } else {
+    loading.value = true
+  }
   try {
     const res = await listWebhookDeliveries({
       page: query.page,
@@ -40,12 +58,16 @@ async function loadData() {
     })
     rows.value = res?.list ?? []
     total.value = res?.total ?? 0
+    initialized.value = true
   } catch (err) {
-    rows.value = []
-    total.value = 0
+    if (!silent) {
+      rows.value = []
+      total.value = 0
+    }
     ElMessage.error(err instanceof Error ? err.message : '加载投递记录失败')
   } finally {
     loading.value = false
+    refreshing.value = false
   }
 }
 
@@ -86,7 +108,7 @@ function prettyPayload(p: string): string {
   }
 }
 
-onMounted(loadData)
+onMounted(() => loadData(false))
 </script>
 
 <template>
@@ -112,8 +134,12 @@ onMounted(loadData)
       <el-button :icon="Refresh" @click="handleReset">重置</el-button>
     </div>
 
-    <div class="app-table-wrap">
-      <el-table v-loading="loading" :data="rows" row-key="id" stripe>
+    <div class="app-table-wrap dwz-silent" :class="{ 'is-loading': showSkeleton }">
+      <!-- 首屏骨架：行数取 page-size，尺寸与真实表格一致，避免 CLS -->
+      <TableSkeleton v-if="showSkeleton" :rows="skeletonRows" :widths="skeletonWidths" />
+      <!-- 静默刷新指示：翻页/筛选不再整表遮罩 -->
+      <span v-if="refreshing" class="dwz-silent__bar" aria-hidden="true" />
+      <el-table v-show="!showSkeleton" :data="rows" row-key="id" stripe>
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="detail">
@@ -184,8 +210,9 @@ onMounted(loadData)
         :total="total"
         :page-sizes="[20, 50, 100]"
         layout="total, sizes, prev, pager, next"
+        :disabled="isBusy"
         background
-        @current-change="loadData"
+        @current-change="() => loadData()"
         @size-change="() => { query.page = 1; loadData() }"
       />
     </div>
