@@ -11,13 +11,16 @@ export default defineConfig({
   plugins: [
     vue(),
     AutoImport({
-      // importStyle: false —— 全量 element-plus CSS 已在 main.ts 引入，避免重复
-      resolvers: [ElementPlusResolver({ importStyle: false })],
+      // 样式按需：ElementPlusResolver 默认 importStyle: 'css'，会为自动导入的组件
+      // 注入 `element-plus/es/components/xx/style/css`，无需再引入全量 CSS。
+      // 注意：命令式组件（ElMessage / ElMessageBox）与 v-loading 指令不经过模板扫描，
+      // 其样式在 src/styles/element-services.scss 中显式补齐。
+      resolvers: [ElementPlusResolver()],
       imports: ['vue', 'vue-router', 'pinia'],
       dts: 'src/auto-imports.d.ts'
     }),
     Components({
-      resolvers: [ElementPlusResolver({ importStyle: false })],
+      resolvers: [ElementPlusResolver()],
       dts: 'src/components.d.ts'
     })
   ],

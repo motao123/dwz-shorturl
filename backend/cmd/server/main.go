@@ -138,6 +138,36 @@ func main() {
 		})
 	})
 
+	// click_logs partition maintenance alerts. The cron task used to only write
+	// a log line, so a failing ALTER (DDL lock, full disk, revoked privilege)
+	// could exhaust the month partitions unnoticed and silently degrade
+	// click_logs into one huge p_future table. Alerts now reach the same webhook
+	// channel as other operational events, and the state is exposed on
+	// /admin/api/monitor/partitions.
+	cronSvc.SetPartitionAlertHook(func(res *service.PartitionReconcileResult, st *service.PartitionStatus) {
+		payload := map[string]interface{}{
+			"table":                st.Table,
+			"level":                st.AlertLevel,
+			"alerts":               st.Alerts,
+			"coverage_until":       st.LatestMonth,
+			"target_month":         st.RequiredMonth,
+			"months_behind":        st.BehindMonths,
+			"pending_months":       st.PendingMonths,
+			"future_rows":          st.FutureRows,
+			"future_ratio":         st.FutureRatio,
+			"consecutive_failures": st.ConsecutiveFailures,
+		}
+		if res != nil {
+			payload["created"] = res.Created
+			payload["failed_month"] = res.FailedMonth
+		}
+		event := "system.partition_alert"
+		if st.AlertLevel == "ok" {
+			event = "system.partition_ok"
+		}
+		webhookSvc.Dispatch(event, payload)
+	})
+
 	// Rate limiter (Redis-backed, shared across handlers)
 	rateLimiter := pkg.NewRateLimiter(rdb)
 
@@ -319,8 +349,9 @@ func initDB(cfg *config.Config, zapLogger *zap.Logger) *gorm.DB {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	// NOTE: AutoMigrate is disabled. Use the SQL migration files in
-	// backend/migrations/ instead (schema.sql, migrate_wjoy_log.sql).
+	// NOTE: AutoMigrate is disabled. Use the SQL migration files in the
+	// repository-root migrations/ directory via `go run ./cmd/migrate`
+	// (schema.sql baseline + numbered add_* files).
 	// This prevents GORM from altering columns/indexes that were carefully
 	// defined in the hand-written DDL.
 

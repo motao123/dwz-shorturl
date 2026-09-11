@@ -40,7 +40,7 @@
 -- ===========================================================================
 SET NAMES utf8mb4;
 
-USE `1_xk7_cn`;
+USE `{{PUBLIC_DB}}`;
 
 -- 1.1 历史/匿名行保持原全局语义：w:0
 UPDATE `wjoy_log`
@@ -54,7 +54,7 @@ WHERE `url_hash` = MD5(`longurl`);
 --     ERROR 1267 Illegal mix of collations。这里对两侧显式做 COLLATE 统一，
 --     保证脚本在任意建库字符集组合下都能执行。
 UPDATE `wjoy_log` w
-JOIN `dwz_admin`.`short_urls` s
+JOIN `{{ADMIN_DB}}`.`short_urls` s
   ON s.uid COLLATE utf8mb4_unicode_ci = w.uid COLLATE utf8mb4_unicode_ci
 SET w.`url_hash` = MD5(CONCAT(w.`longurl`, 0x1F, CONCAT('m:', s.`member_id`)))
 WHERE s.`member_id` IS NOT NULL
@@ -82,7 +82,7 @@ ALTER TABLE `wjoy_log`
 -- ===========================================================================
 -- 2. 管理库：short_urls
 -- ===========================================================================
-USE `dwz_admin`;
+USE `{{ADMIN_DB}}`;
 
 -- 2.1 会员行按会员作用域重写
 UPDATE `short_urls`
@@ -115,7 +115,7 @@ ALTER TABLE `short_urls`
 -- 3. 校验（人工执行）
 -- ===========================================================================
 -- 应返回 0：不存在仍未作用域化的行
--- SELECT COUNT(*) FROM `1_xk7_cn`.`wjoy_log` WHERE `url_hash` NOT LIKE '%';
--- SELECT COUNT(*) FROM `dwz_admin`.`short_urls` WHERE `url_hash` = MD5(`long_url`);
+-- SELECT COUNT(*) FROM `{{PUBLIC_DB}}`.`wjoy_log` WHERE `url_hash` = MD5(`longurl`);
+-- SELECT COUNT(*) FROM `{{ADMIN_DB}}`.`short_urls` WHERE `url_hash` = MD5(`long_url`);
 -- 索引应只保留一个 uk_url_hash / uniq_hash，且列注释已更新
--- SHOW INDEX FROM `dwz_admin`.`short_urls` WHERE Key_name = 'uk_url_hash';
+-- SHOW INDEX FROM `{{ADMIN_DB}}`.`short_urls` WHERE Key_name = 'uk_url_hash';
