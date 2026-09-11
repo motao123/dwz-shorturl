@@ -536,7 +536,7 @@ onMounted(loadData)
               <span class="mono row-sub">{{ dayjs(row.created_at).format('YYYY-MM-DD HH:mm') }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right" align="center">
+          <el-table-column label="操作" width="220" fixed="right" align="center">
             <template #default="{ row }">
               <div class="ops">
                 <el-tooltip content="访问短链" placement="top">
@@ -722,7 +722,7 @@ onMounted(loadData)
   height: 26px;
   border: 1px solid var(--dwz-line);
   border-radius: 7px;
-  background: #fff;
+  background: var(--el-bg-color);
   color: var(--dwz-text-dim);
   cursor: pointer;
   text-decoration: none;

@@ -18,10 +18,10 @@ import (
 )
 
 type ShortUrlHandler struct {
-	svc       service.ShortUrlService
-	rl        *pkg.RateLimiter
-	rlCfg     config.RateLimitConfig
-	auditSvc  service.AuditService
+	svc        service.ShortUrlService
+	rl         *pkg.RateLimiter
+	rlCfg      config.RateLimitConfig
+	auditSvc   service.AuditService
 	webhookSvc service.WebhookService
 }
 
@@ -168,6 +168,14 @@ func (h *ShortUrlHandler) CreatePublic(c *gin.Context) {
 	})
 }
 
+// batchResultRow pairs a created short URL with its position in the request
+// input. The embedded ShortUrl keeps the previous response shape (record fields
+// are inlined) while Index lets callers locate the row unambiguously.
+type batchResultRow struct {
+	Index int `json:"index"`
+	*model.ShortUrl
+}
+
 // BatchCreatePublic batch-creates short URLs through the API-key-authenticated
 // public endpoint. Returns per-row results and errors.
 func (h *ShortUrlHandler) BatchCreatePublic(c *gin.Context) {
@@ -177,26 +185,36 @@ func (h *ShortUrlHandler) BatchCreatePublic(c *gin.Context) {
 		return
 	}
 
-	results, errs := h.svc.BatchCreatePublicAPI(req.URLs, req.DomainID, c.ClientIP())
-	errList := make([]string, 0, len(errs))
-	for i, e := range errs {
-		if e != nil {
-			errList = append(errList, strconv.Itoa(i)+": "+e.Error())
-		}
-	}
+	outcomes := h.svc.BatchCreatePublicAPI(req.URLs, req.DomainID, c.ClientIP())
 
-	out := make([]gin.H, 0, len(results))
-	for _, r := range results {
+	out := make([]gin.H, 0, len(outcomes))
+	errItems := make([]gin.H, 0)
+	errList := make([]string, 0)
+	for _, o := range outcomes {
+		if o.Err != nil {
+			// 同时返回结构化 error_items（携带输入下标）与兼容的字符串列表，
+			// 便于调用方按行定位失败原因。
+			errItems = append(errItems, gin.H{"index": o.Index, "message": o.Err.Error()})
+			errList = append(errList, strconv.Itoa(o.Index)+": "+o.Err.Error())
+			continue
+		}
+		if o.Record == nil {
+			continue
+		}
 		out = append(out, gin.H{
-			"uid":       r.UID,
-			"short_url": service.PublicShortURL(r.UID),
-			"long_url":  r.LongURL,
+			"index":     o.Index,
+			"uid":       o.Record.UID,
+			"short_url": service.PublicShortURL(o.Record.UID),
+			"long_url":  o.Record.LongURL,
 		})
+		h.dispatchCreated(o.Record)
 	}
-	for i := range results {
-		h.dispatchCreated(&results[i])
-	}
-	pkg.Success(c, gin.H{"results": out, "errors": errList, "total": len(results)})
+	pkg.Success(c, gin.H{
+		"results":     out,
+		"errors":      errList,
+		"error_items": errItems,
+		"total":       len(out),
+	})
 }
 
 func (h *ShortUrlHandler) BatchCreate(c *gin.Context) {
@@ -222,31 +240,40 @@ func (h *ShortUrlHandler) BatchCreate(c *gin.Context) {
 		}
 	}
 
-	results, errs := h.svc.BatchCreate(req.URLs, req.DomainID, &userID, c.ClientIP())
+	outcomes := h.svc.BatchCreate(req.URLs, req.DomainID, &userID, c.ClientIP())
 
-	// Build error list
+	// results 仅包含成功行，但每项带 index 明确对应输入下标；
+	// error_items 同样带 index，调用方无需依赖两个数组的下标对齐。
+	// 记录体保持原有完整字段（仅额外增加 index），不破坏既有调用方。
+	results := make([]batchResultRow, 0, len(outcomes))
 	errList := make([]string, 0)
-	for i, e := range errs {
-		if e != nil {
-			errList = append(errList, strconv.Itoa(i)+": "+e.Error())
+	errItems := make([]gin.H, 0)
+	for _, o := range outcomes {
+		if o.Err != nil {
+			errItems = append(errItems, gin.H{"index": o.Index, "message": o.Err.Error()})
+			errList = append(errList, strconv.Itoa(o.Index)+": "+o.Err.Error())
+			continue
 		}
+		if o.Record == nil {
+			continue
+		}
+		results = append(results, batchResultRow{Index: o.Index, ShortUrl: o.Record})
+		h.dispatchCreated(o.Record)
 	}
 
 	pkg.Success(c, gin.H{
-		"results": results,
-		"errors":  errList,
-		"total":   len(results),
+		"results":     results,
+		"errors":      errList,
+		"error_items": errItems,
+		"total":       len(results),
 	})
 	auditLog(c, h.auditSvc, "short_url", "short_url_batch_create", 0, `{"count":`+strconv.Itoa(len(results))+`}`)
-	for i := range results {
-		h.dispatchCreated(&results[i])
-	}
 }
 
 type ImportRequest struct {
-	Format   string               `json:"format" binding:"required,oneof=csv json"`
-	Content  string               `json:"content" binding:"required"`
-	DomainID *uint64              `json:"domain_id"`
+	Format   string  `json:"format" binding:"required,oneof=csv json"`
+	Content  string  `json:"content" binding:"required"`
+	DomainID *uint64 `json:"domain_id"`
 }
 
 // Import parses CSV or JSON content and batch-creates short URLs.
@@ -285,22 +312,29 @@ func (h *ShortUrlHandler) Import(c *gin.Context) {
 		}
 	}
 
-	results, errs := h.svc.BatchImport(items, req.DomainID, &userID, c.ClientIP())
-	errList := make([]string, 0, len(errs))
-	for i, e := range errs {
-		if e != nil {
-			errList = append(errList, strconv.Itoa(i)+": "+e.Error())
+	outcomes := h.svc.BatchImport(items, req.DomainID, &userID, c.ClientIP())
+	results := make([]batchResultRow, 0, len(outcomes))
+	errList := make([]string, 0)
+	errItems := make([]gin.H, 0)
+	for _, o := range outcomes {
+		if o.Err != nil {
+			errItems = append(errItems, gin.H{"index": o.Index, "message": o.Err.Error()})
+			errList = append(errList, strconv.Itoa(o.Index)+": "+o.Err.Error())
+			continue
 		}
+		if o.Record == nil {
+			continue
+		}
+		results = append(results, batchResultRow{Index: o.Index, ShortUrl: o.Record})
+		h.dispatchCreated(o.Record)
 	}
 	pkg.Success(c, gin.H{
-		"results": results,
-		"errors":  errList,
-		"total":   len(results),
+		"results":     results,
+		"errors":      errList,
+		"error_items": errItems,
+		"total":       len(results),
 	})
 	auditLog(c, h.auditSvc, "short_url", "short_url_import", 0, `{"count":`+strconv.Itoa(len(results))+`}`)
-	for i := range results {
-		h.dispatchCreated(&results[i])
-	}
 }
 
 // parseImportRows converts CSV/JSON content into import items.

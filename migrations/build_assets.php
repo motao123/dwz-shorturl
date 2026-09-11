@@ -166,10 +166,12 @@ foreach ($htmlFiles as $htmlFile) {
     if (!is_file($htmlPath)) continue;
     $html = file_get_contents($htmlPath);
     $original = $html;
-    // tokens.css / app.css -> 压缩版，并带上各自的哈希版本
-    $html = preg_replace('~\./assets/tokens\.css(?:\?v=[^"\']*)?~', './assets/tokens.min.css?v=' . $options['tokens.css'], $html);
-    $html = preg_replace('~\./assets/app\.css(?:\?v=[^"\']*)?~', './assets/app.min.css?v=' . $options['app.css'], $html);
-    $html = preg_replace('~\./assets/app\.js(?:\?v=[^"\']*)?~', './assets/app.min.js?v=' . $options['app.js'], $html);
+    // tokens.css / app.css / app.js -> 对应的压缩版，并带上各自的哈希版本。
+    // 注意：HTML 里引用的是 .min.css/.min.js，因此匹配必须同时覆盖
+    // 源文件名与产物名，否则版本号会永远停留在旧值，导致浏览器命中旧缓存。
+    $html = preg_replace('~\./assets/tokens(?:\.min)?\.css(?:\?v=[^"\']*)?~', './assets/tokens.min.css?v=' . $options['tokens.css'], $html);
+    $html = preg_replace('~\./assets/app\.min\.css(?:\?v=[^"\']*)?|\./assets/app\.css(?:\?v=[^"\']*)?~', './assets/app.min.css?v=' . $options['app.css'], $html);
+    $html = preg_replace('~\./assets/app\.min\.js(?:\?v=[^"\']*)?|\./assets/app\.js(?:\?v=[^"\']*)?~', './assets/app.min.js?v=' . $options['app.js'], $html);
     if ($html !== $original) {
         file_put_contents($htmlPath, $html);
         fwrite(STDOUT, "versioned: {$htmlFile}\n");
