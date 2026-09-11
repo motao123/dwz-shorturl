@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -787,12 +788,17 @@ func (s *CronService) ensureClickLogsPartitionsAhead(ahead int) ([]string, error
 	var created []string
 	for _, name := range pending {
 		pname := "p" + name
+		// MySQL forbids placeholders for identifiers, so the partition name has
+		// to be interpolated. Validate it against the pYYYYMM whitelist right
+		// before the interpolation instead of relying on the caller, so the DDL
+		// below can never receive anything but "p" + six digits even if the
+		// generator changes or a name is fed in from elsewhere.
+		if err := validatePartitionName(pname); err != nil {
+			return created, err
+		}
 		month := parseMonthValue(name)
 		// Boundary for partition pYYYYMM is the first day of the FOLLOWING month.
 		boundary := month.AddDate(0, 1, 0).Format("2006-01-01")
-		// Partition names come from pendingPartitionMonths (p + 6 digits) and
-		// the boundary is a bound parameter, so this is not injectable even
-		// though MySQL forbids placeholders in identifiers.
 		if err := s.db.Exec(
 			`ALTER TABLE click_logs REORGANIZE PARTITION p_future INTO (
 				PARTITION `+pname+` VALUES LESS THAN (TO_DAYS(?)),
@@ -920,6 +926,22 @@ func monthsBetween(a, b time.Time) int {
 		return 0
 	}
 	return diff
+}
+
+// partitionNameRe is the only shape a month partition name may take. The DDL in
+// ensureClickLogsPartitionsAhead interpolates the name (MySQL does not accept a
+// placeholder for an identifier), so this whitelist is the guard that keeps the
+// statement non-injectable.
+var partitionNameRe = regexp.MustCompile(`^p[0-9]{6}$`)
+
+// validatePartitionName rejects anything that is not a pYYYYMM month partition
+// name. It is deliberately the last check before the identifier is spliced into
+// the ALTER TABLE statement.
+func validatePartitionName(name string) error {
+	if !partitionNameRe.MatchString(name) {
+		return fmt.Errorf("refusing to use %q as a partition name: expected pYYYYMM", name)
+	}
+	return nil
 }
 
 // pendingPartitionMonths returns the pYYYYMM names that must be created so

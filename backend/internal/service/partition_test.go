@@ -899,3 +899,69 @@ func deref(s *string) string {
 	}
 	return *s
 }
+
+// ---------------------------------------------------------------------------
+// Partition name whitelist
+//
+// The ALTER TABLE in ensureClickLogsPartitionsAhead interpolates the partition
+// name, because MySQL does not accept a placeholder for an identifier. That
+// makes the validator the only thing standing between the DDL and a caller
+// supplied string, so it gets its own coverage.
+// ---------------------------------------------------------------------------
+
+func TestValidatePartitionNameAcceptsMonthPartitions(t *testing.T) {
+	for _, name := range []string{"p202601", "p202609", "p209912", "p000001"} {
+		if err := validatePartitionName(name); err != nil {
+			t.Fatalf("validatePartitionName(%q) = %v, want nil", name, err)
+		}
+	}
+}
+
+func TestValidatePartitionNameRejectsInjectionAndJunk(t *testing.T) {
+	bad := []string{
+		"",
+		"p",
+		"p2026",
+		"p2026011",
+		"p20260a",
+		"p202601 `",
+		"p202601 VALUES LESS THAN MAXVALUE",
+		"p202601; DROP TABLE click_logs",
+		"click_logs",
+		"p_future",
+		"p-20260",
+	}
+	for _, name := range bad {
+		if err := validatePartitionName(name); err == nil {
+			t.Fatalf("validatePartitionName(%q) = nil, want error", name)
+		}
+	}
+}
+
+// TestEnsureValidatesEveryInterpolatedPartitionName runs the real DDL path and
+// asserts each executed statement still only contains a whitelisted name.
+func TestEnsureValidatesEveryInterpolatedPartitionName(t *testing.T) {
+	now := time.Now()
+	db, scripted := newPartitionTestDB(t, []partitionRow{
+		monthRow(pname(now), 10),
+		futureRow(0),
+	})
+	scripted.execFunc = func(query string, args []driver.Value) error { return nil }
+
+	created, err := newCronWithDB(db).ensureClickLogsPartitionsAhead(2)
+	if err != nil {
+		t.Fatalf("ensureClickLogsPartitionsAhead: %v", err)
+	}
+	if _, err := time.Parse("200601", strings.TrimPrefix(created[0], "p")); err != nil {
+		t.Fatalf("created name %q is not a month", created[0])
+	}
+	for _, q := range scripted.execs {
+		for _, f := range strings.Fields(q) {
+			if strings.HasPrefix(f, "p") && f != "p_future" && f != "PARTITION" {
+				if err := validatePartitionName(strings.TrimRight(f, ",")); err != nil {
+					t.Fatalf("statement contains a non-whitelisted identifier: %q", f)
+				}
+			}
+		}
+	}
+}
