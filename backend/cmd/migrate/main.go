@@ -19,7 +19,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,28 +30,36 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// order lists the admin-DB migrations in apply order. schema.sql is the
-// baseline; the add_* files are idempotent column/index backfills.
-var order = []string{
-	"schema.sql",
-	"add_domains.sql",
-	"add_webhooks.sql",
-	"add_missing_columns.sql",
-	"add_password_hash.sql",
-	"add_totp.sql",
-	"optimize_domain_indexes.sql",
-}
-
-// publicOrder lists migrations that must run against the *public* frontend DB
-// (the one holding wjoy_log). Keeping them separate lets -all cover both
-// databases in a single invocation.
-var publicOrder = []string{
-	"public_schema.sql",
-}
-
 type migrationRow struct {
 	Version   string
 	AppliedAt time.Time
+}
+
+// applyEnvOverrides lets ops/one_click_migrate.sh pass connection details on
+// the command line without writing a config file twice. Env wins over yaml so
+// the script remains the single source of truth for a given run.
+func applyEnvOverrides(cfg *config.Config) {
+	envStr := func(key string, dst *string) {
+		if v := os.Getenv(key); v != "" {
+			*dst = v
+		}
+	}
+	envInt := func(key string, dst *int) {
+		v := os.Getenv(key)
+		if v == "" {
+			return
+		}
+		if n, err := strconv.Atoi(v); err == nil {
+			*dst = n
+		}
+	}
+
+	envStr("DWZ_DB_HOST", &cfg.Database.Host)
+	envInt("DWZ_DB_PORT", &cfg.Database.Port)
+	envStr("DWZ_DB_USER_OVERRIDE", &cfg.Database.User)
+	envStr("DWZ_DB_PASS_OVERRIDE", &cfg.Database.Password)
+	envStr("DWZ_ADMIN_DB_OVERRIDE", &cfg.Database.DBName)
+	envStr("DWZ_PUBLIC_DB_OVERRIDE", &cfg.PublicDB.DBName)
 }
 
 // resolvePublicDB fills in public_db from the admin credentials when the
@@ -119,59 +127,92 @@ func readApplied(db *gorm.DB) (map[string]bool, []string, error) {
 	return set, applied, nil
 }
 
-// pendingFor returns the migration files that are not yet recorded.
-func pendingFor(db *gorm.DB, dir string, list []string) ([]string, error) {
+// pendingFor returns the migrations that are not yet recorded.
+func pendingFor(db *gorm.DB, list []migration) ([]migration, error) {
 	appliedSet, _, err := readApplied(db)
 	if err != nil {
 		return nil, err
 	}
-	var pending []string
-	for _, name := range list {
-		if appliedSet[name] {
+	var pending []migration
+	for _, m := range list {
+		if appliedSet[m.File] {
 			continue
 		}
-		path := filepath.Join(dir, name)
-		if _, err := os.Stat(path); err != nil {
-			return nil, fmt.Errorf("migration file missing: %s", path)
+		if _, err := os.Stat(m.Path); err != nil {
+			return nil, fmt.Errorf("migration file missing: %s", m.Path)
 		}
-		pending = append(pending, name)
+		pending = append(pending, m)
 	}
 	return pending, nil
 }
 
-func printStatus(db *gorm.DB, list []string) error {
+func printStatus(db *gorm.DB, list []migration) error {
 	appliedSet, applied, err := readApplied(db)
 	if err != nil {
 		return err
 	}
 	fmt.Println("applied:", len(applied))
-	for _, v := range list {
+	pendingCount := 0
+	for _, m := range list {
 		mark := "  [x]"
-		if !appliedSet[v] {
+		if !appliedSet[m.File] {
 			mark = "  [ ]"
+			pendingCount++
 		}
-		fmt.Printf("%s %s\n", mark, v)
+		fmt.Printf("%s %s\n", mark, m.File)
+	}
+	if pendingCount == 0 {
+		fmt.Println("  (all migrations applied)")
 	}
 	return nil
 }
 
-func applyAll(db *gorm.DB, dir string, pending []string) error {
-	for _, name := range pending {
-		path := filepath.Join(dir, name)
-		sqlBytes, err := os.ReadFile(path)
+func applyAll(db *gorm.DB, pending []migration, vars map[string]string) error {
+	for _, m := range pending {
+		sqlBytes, err := os.ReadFile(m.Path)
 		if err != nil {
-			return fmt.Errorf("read migration %s failed: %w", name, err)
+			return fmt.Errorf("read migration %s failed: %w", m.File, err)
 		}
+		// Substitute the {{PUBLIC_DB}} / {{ADMIN_DB}} placeholders so no
+		// migration carries a hard-coded database name any more.
+		stmt := substituteVars(string(sqlBytes), vars)
+
 		// Apply + record in one transaction so a failed script is not marked done.
 		if err := db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Exec(string(sqlBytes)).Error; err != nil {
+			if err := tx.Exec(stmt).Error; err != nil {
 				return err
 			}
-			return tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", name).Error
+			return tx.Exec("INSERT INTO schema_migrations (version) VALUES (?)", m.File).Error
 		}); err != nil {
-			return fmt.Errorf("apply failed: %s -> %w", name, err)
+			return fmt.Errorf("apply failed: %s -> %w", m.File, err)
 		}
-		fmt.Println("applied", name)
+		fmt.Println("applied", m.File)
+	}
+	return nil
+}
+
+// substituteVars replaces {{KEY}} placeholders with their configured values.
+// Values are back-quoted identifiers, so any stray quote in a name would break
+// the statement; the DB names come from config and are validated first.
+func substituteVars(sql string, vars map[string]string) string {
+	for k, v := range vars {
+		sql = strings.ReplaceAll(sql, "{{"+k+"}}", v)
+	}
+	return sql
+}
+
+// validateDBName rejects names that cannot be safely interpolated as a quoted
+// identifier in a migration script.
+func validateDBName(name string) error {
+	if name == "" {
+		return fmt.Errorf("empty database name")
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '$', r == '-':
+		default:
+			return fmt.Errorf("database name %q contains unsupported character %q", name, r)
+		}
 	}
 	return nil
 }
@@ -187,7 +228,7 @@ func parityCheck(admin, public *gorm.DB) error {
 		// Column may not exist on very old schemas; treat as non-fatal.
 		fmt.Println("parity: skip short_urls check ->", err)
 	} else if legacyAdmin > 0 {
-		return fmt.Errorf("short_urls still has %d rows on the legacy MD5(long_url) hash; run migrations/scope_url_hash.sql", legacyAdmin)
+		return fmt.Errorf("short_urls still has %d rows on the legacy MD5(long_url) hash; run migrations/040_scope_url_hash.sql", legacyAdmin)
 	}
 
 	var legacyPublic int64
@@ -196,7 +237,7 @@ func parityCheck(admin, public *gorm.DB) error {
 		Count(&legacyPublic).Error; err != nil {
 		fmt.Println("parity: skip wjoy_log check ->", err)
 	} else if legacyPublic > 0 {
-		return fmt.Errorf("wjoy_log still has %d rows on the legacy MD5(longurl) hash; run migrations/scope_url_hash.sql", legacyPublic)
+		return fmt.Errorf("wjoy_log still has %d rows on the legacy MD5(longurl) hash; run migrations/040_scope_url_hash.sql", legacyPublic)
 	}
 
 	fmt.Println("parity: both databases are on the scoped url_hash layout")
@@ -207,6 +248,8 @@ func main() {
 	status := flag.Bool("status", false, "list applied/pending migrations")
 	dryRun := flag.Bool("dry-run", false, "print pending migrations without applying")
 	all := flag.Bool("all", false, "apply admin + public migrations and run parity checks")
+	baseline := flag.Bool("baseline", false, "mark every migration in the dir as applied WITHOUT executing it (for databases upgraded by hand)")
+	only := flag.String("only", "", "limit to one database: admin | public")
 	dir := flag.String("migrations", "migrations", "directory containing the SQL migration files")
 	configPath := flag.String("config", "configs/config.yaml", "path to the config yaml")
 	flag.Parse()
@@ -216,7 +259,30 @@ func main() {
 		os.Exit(1)
 	}
 	cfg := config.Get()
+	applyEnvOverrides(cfg)
 	resolvePublicDB(cfg)
+
+	if err := validateDBName(cfg.Database.DBName); err != nil {
+		fmt.Fprintln(os.Stderr, "invalid admin db name:", err)
+		os.Exit(1)
+	}
+	if err := validateDBName(cfg.PublicDB.DBName); err != nil {
+		fmt.Fprintln(os.Stderr, "invalid public db name:", err)
+		os.Exit(1)
+	}
+
+	// Discover migrations from the directory instead of a hard-coded list, so a
+	// new file is picked up without touching Go code.
+	adminMigs, publicMigs, err := discoverMigrations(*dir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	vars := map[string]string{
+		"ADMIN_DB":  cfg.Database.DBName,
+		"PUBLIC_DB": cfg.PublicDB.DBName,
+	}
 
 	admin, err := openDB(cfg, "admin")
 	if err != nil {
@@ -233,63 +299,105 @@ func main() {
 		fmt.Fprintln(os.Stderr, "public db unavailable:", pubErr)
 	}
 
-	if *status || *dryRun {
-		fmt.Println("== admin db:", cfg.Database.DBName)
-		if err := printStatus(admin, order); err != nil {
-			fmt.Fprintln(os.Stderr, "read migrations failed:", err)
-			os.Exit(1)
+	wantAdmin := *only == "" || *only == "admin"
+	wantPublic := (*only == "" || *only == "public") && public != nil
+
+	// ---- baseline: record files as applied without executing them ----------
+	// Needed for production databases whose schema was advanced by hand (mysql <
+	// file, or ops/one_click_migrate.sh) before schema_migrations existed.
+	if *baseline {
+		if !*dryRun {
+			if wantAdmin {
+				for _, m := range adminMigs {
+					if err := markApplied(admin, m.File); err != nil {
+						fmt.Fprintln(os.Stderr, err)
+						os.Exit(1)
+					}
+				}
+			}
+			if wantPublic {
+				if err := ensureVersionTable(public); err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(1)
+				}
+				for _, m := range publicMigs {
+					if err := markApplied(public, m.File); err != nil {
+						fmt.Fprintln(os.Stderr, err)
+						os.Exit(1)
+					}
+				}
+			}
 		}
-		if public != nil {
+		fmt.Println("baseline recorded (no DDL executed)")
+		return
+	}
+
+	// ---- status / dry-run --------------------------------------------------
+	if *status || *dryRun {
+		if wantAdmin {
+			fmt.Println("== admin db:", cfg.Database.DBName)
+			if err := printStatus(admin, adminMigs); err != nil {
+				fmt.Fprintln(os.Stderr, "read migrations failed:", err)
+				os.Exit(1)
+			}
+		}
+		if wantPublic {
 			if err := ensureVersionTable(public); err != nil {
 				fmt.Fprintln(os.Stderr, "ensure public schema_migrations failed:", err)
 				os.Exit(1)
 			}
 			fmt.Println("== public db:", cfg.PublicDB.DBName)
-			if err := printStatus(public, publicOrder); err != nil {
+			if err := printStatus(public, publicMigs); err != nil {
 				fmt.Fprintln(os.Stderr, "read public migrations failed:", err)
 				os.Exit(1)
 			}
 		}
 		if *dryRun {
-			pending, err := pendingFor(admin, *dir, order)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
+			pa, _ := pendingFor(admin, adminMigs)
+			fmt.Printf("would apply %d pending (admin)\n", len(pa))
+			if wantPublic {
+				pp, _ := pendingFor(public, publicMigs)
+				fmt.Printf("would apply %d pending (public)\n", len(pp))
 			}
-			fmt.Printf("would apply %d pending (admin)\n", len(pending))
 		}
 		return
 	}
 
+	// ---- apply -------------------------------------------------------------
 	appliedAny := false
 
-	pending, err := pendingFor(admin, *dir, order)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	if len(pending) > 0 {
-		if err := applyAll(admin, *dir, pending); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		appliedAny = true
-	}
-
-	if public != nil {
+	// Order matters: some admin migrations are cross-DB and read the public
+	// tables (040_scope_url_hash.sql joins wjoy_log, 140_migrate_wjoy_log.sql
+	// reads it as the source of truth). The public schema must therefore exist
+	// before those run, otherwise a fresh install fails with "table wjoy_log
+	// doesn't exist". Apply the public baseline first.
+	if wantPublic {
 		if err := ensureVersionTable(public); err != nil {
 			fmt.Fprintln(os.Stderr, "ensure public schema_migrations failed:", err)
 			os.Exit(1)
 		}
-		pendingPublic, err := pendingFor(public, *dir, publicOrder)
-		if err != nil {
-			// public_schema.sql is optional decoration; keep going.
-			if !strings.Contains(err.Error(), "missing") {
+		// Public baseline (public_schema.sql) must precede any admin migration
+		// that reads across databases.
+		if pendingPublic, err := pendingFor(public, publicMigs); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		} else if len(pendingPublic) > 0 {
+			if err := applyAll(public, pendingPublic, vars); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
-		} else if len(pendingPublic) > 0 {
-			if err := applyAll(public, *dir, pendingPublic); err != nil {
+			appliedAny = true
+		}
+	}
+
+	if wantAdmin {
+		pending, err := pendingFor(admin, adminMigs)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		if len(pending) > 0 {
+			if err := applyAll(admin, pending, vars); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -312,4 +420,13 @@ func main() {
 		fmt.Println("no pending migrations")
 	}
 	fmt.Println("done")
+}
+
+// markApplied records a migration as done without running its SQL. Used by
+// -baseline to adopt databases that were migrated by hand before
+// schema_migrations existed, so a later `migrate` run does not re-execute DDL.
+func markApplied(db *gorm.DB, version string) error {
+	return db.Exec(
+		"INSERT INTO schema_migrations (version) VALUES (?) "+
+			"ON DUPLICATE KEY UPDATE version = version", version).Error
 }

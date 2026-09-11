@@ -271,7 +271,7 @@
 | P4 | RBAC 每次请求三表 JOIN 查权限无缓存；API Key 每请求写 last_used_at | 低 | rbac.go:56-80 / apikey.go:64 |
 | P5 | PHP 跳转在 fastcgi_finish_request 后仍串行 2 条 admin 写 + webhook 查询 + 最多 3 次 curl（每次退避 1s/2s），高并发拖垮 worker 池 | 中 | do.php:42-58 / function.php:380-461 |
 | P6 | 固定窗口限流边界 2 倍突发；Redis 故障 fail-open | 低 | pkg/ratelimit.go:56-73 |
-| P7 | Element Plus 全量引入（1.07MB chunk + 367KB CSS）+ echarts 521KB；`app.use(ElementPlus)` 使按需配置失效 | 中 | main.ts:3,20 / vite.config.ts:36 |
+| P7 | ~~Element Plus 全量引入（1.07MB chunk + 367KB CSS）~~ **JS 已按需、CSS 全量兜底**（element-plus chunk 944KB / JS + 221KB / CSS）；echarts 521KB | 低 | vite.config.ts / main.ts:3 |
 | P8 | 无请求取消（AbortController），快速切页/筛选有竞态 | 低 | api/request.ts |
 
 ### 5.5 部署与运维
@@ -348,7 +348,7 @@
 | 27 | Referer 来源归类 | click_logs 无 referer 字段 | redirect 记录 referer + 归类可视化 | 渠道归因能力 |
 | 28 | 链接密码保护 / 中间确认页 | short_urls 无密码字段 | 表加 password_hash/show_interstitial + gateway 中间件 | 企业级差异化 |
 | 29 | 过期预警通知 | cron.go / email.go | 到期前 24h/7d 邮件提醒（email.go 已有基础） | 减少链接失效损失 |
-| 30 | Element Plus 全量引入 | main.ts:3,20 | 删 `app.use(ElementPlus)` 改按需；图标按需注册 | 首屏体积下降 50%+ |
+| 30 | Element Plus 引入方式 | vite.config.ts / main.ts:3 | JS 深路径按需 + CSS 由 resolver 按需注入（Issue #16：首屏 CSS -31% raw / -31% gzip；JS chunk 未变，见 §15.2） | 首屏 CSS 下降 31% |
 | 31 | 系统配置敏感项泄露 | handler/config.go:31-39 | 按 is_public 过滤 + 敏感值脱敏 | 防敏感配置外泄 |
 | 32 | 无 schema 版本管理 | 迁移体系 | 建 schema_migrations 表统一迁移注册 | 部署可审计、可回滚 |
 
@@ -476,7 +476,7 @@
 | 项 | 修复内容 | 验证结果 |
 |---|---|---|
 | 点击数对账 cron | `reconcile_clicks`（每日 04:00）：以 short_urls.clicks 为准同步 wjoy_log.clicks，PHP 统计页不再漏计 Go 路径点击 | 手动触发 ran ✓，任务列表 8 项 ✓ |
-| click_logs 分区维护 cron | `ensure_partitions`（每日 03:15）：按月 REORGANIZE p_future 保证分区超前 2 个月，防止数据落进 p_future 大表 | 手动触发幂等验证 ✓（当前已超前至 2026-12，无需创建） |
+| click_logs 分区维护 cron | `ensure_partitions`（每日 03:15）：按月 REORGANIZE p_future 保证分区超前 2 个月，防止数据落进 p_future 大表 | 覆盖状态已可观测（`/monitor/partitions`）、失败可告警、支持幂等手动补齐，详见 [分区维护](partition-maintenance.md) |
 | goroutine 防护（上一批延续） | cron 全任务 safe() 恢复 + webhook safeDeliver | 单测通过 ✓ |
 
 **清理与加固**
@@ -649,7 +649,31 @@
 - 回归：首页/后台/会员端 200 · /health ok · 短码 302 · 违规拦截 · config.php 403
 - 清理：移除历次批次遗留的 6 条测试短链（geoip-test/pw-php/password-test/ref-check 等）
 
-### 15.4 剩余待办（下一批）
+### 15.4 后续收口：组件 CSS 按需（Issue #16）
+
+15.1/15.2 只解决了 **JS** 侧按需，CSS 侧当时仍是 `import 'element-plus/dist/index.css'` 全量引入
+（`ElementPlusResolver({ importStyle: false })` 明确关掉了样式注入）。现已收口：
+
+- `ElementPlusResolver` 恢复默认 `importStyle: 'css'`，组件样式由 `unplugin-vue-components`
+  按需注入（`admin` 与 `member` 双入口共用同一套 resolver 配置）。
+- 新增 `src/styles/element/index.scss`：只保留样式底座 `theme-chalk/src/base.scss`
+  （语义 token / `:root` 变量）与 `dark/css-vars.scss`（暗色变量，体积很小且必须全量）。
+- 新增 `src/styles/element-services.scss`：**模板扫描不到的样式显式补齐**，即命令式组件
+  `ElMessage` / `ElMessageBox` 与 `v-loading` 指令（共 21 处 `v-loading`）。这是本次最大的坑，
+  漏引会直接出现「toast / 二次确认弹窗裸奔、加载遮罩错位」。
+- 收益（`npm run build` 实测，双入口）：
+
+  | 指标 | 改前 | 改后 | 变化 |
+  | --- | --- | --- | --- |
+  | element-plus CSS chunk（raw / gzip） | 360469 / 48163 | 221804 / 28179 | **-38.5% / -41.5%** |
+  | 后台首屏关键 CSS（raw / gzip） | 370975 / 51292 | 254391 / 35376 | **-31.4% / -31.0%** |
+  | 会员端首屏关键 CSS（raw / gzip） | 369967 / 50967 | 253383 / 35051 | **-31.5% / -31.2%** |
+
+- 回归：`vite build && vue-tsc --noEmit` 通过；Playwright 对 15 个后台页 + 4 个会员端页
+  × 亮/暗两套主题（38 张全页截图）逐像素比对，最大通道差 ≤7/255（字体反锯齿，无非噪声差异）；
+  `ElMessage` / `ElMessageBox` / `v-loading` 三条命令式链路用真实 DOM 计算样式与改前**完全一致**。
+
+### 15.5 剩余待办（下一批）
 
 - P2：schema_migrations 版本表、批量创建事务化（CreateInBatches）、统计弹窗重构去重（member/admin 两处复制）
 - 说明：前端经 browser-use 实测，后续 UI 变更可用同样方式回归，替代盲改盲发

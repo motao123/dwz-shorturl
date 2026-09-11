@@ -8,7 +8,7 @@ import { Link, Refresh, Delete, CopyDocument, Sunny, Moon, ArrowDown } from '@el
 import dayjs from 'dayjs'
 import { useThemeStore } from '@/stores/theme'
 import { copyText } from '@/utils/clipboard'
-import { useResponsive } from '@/composables/useResponsive'
+import { useListPage } from '@/composables/useListPage'
 import {
   fetchSession,
   getMyLinks,
@@ -36,17 +36,36 @@ const themeStore = useThemeStore()
 
 const router = useRouter()
 const member = ref<any>(null)
-const loading = ref(false)
-const rows = ref<MemberLink[]>([])
-const total = ref(0)
-const page = ref(1)
-
-// 窄屏下分页器收敛，避免溢出；宽屏仍保持简洁布局
-const { isTablet } = useResponsive()
-const pagerLayout = computed(() => (isTablet.value ? 'prev, pager, next' : 'total, prev, pager, next'))
-const keyword = ref('')
-const statusFilter = ref('')
 const summary = ref<MemberSummary>({ total_links: 0, total_clicks: 0, month_new: 0 })
+
+/**
+ * 列表骨架：分页 / 筛选 / 加载 / 竞态防护统一由 useListPage 提供，
+ * 与管理台列表页保持同一套约定（关键字与状态进 URL，刷新后不丢）。
+ * 会员端固定每页 20 条、不提供每页条数切换（与迁移前一致）。
+ */
+const list = useListPage<MemberLink>({
+  immediate: false,
+  perPage: 20,
+  filters: { keyword: '', status: '' },
+  fetcher: (params) =>
+    getMyLinks(
+      Number(params.page),
+      Number(params.per_page),
+      String(params.keyword ?? '').trim(),
+      String(params.status ?? '')
+    ).then((res) => {
+      // 会员接口返回 { list, total }，这里补齐短链地址后再交给列表状态
+      return { list: res.list.map((l) => ({ ...l, short_url: buildShortUrl(l.uid) })), total: res.total }
+    }),
+  errorMessage: '加载失败',
+  pagerLayout: ({ isTablet }) => (isTablet ? 'prev, pager, next' : 'total, prev, pager, next')
+})
+
+const { rows, total, loading, pagerLayout } = list
+const keyword = list.filterRef<string>('keyword')
+const statusFilter = list.filterRef<string>('status')
+const handleSearch = list.search
+const handlePageChange = list.handlePageChange
 
 const createForm = reactive({ url: '', title: '', custom: '', expire_days: 0 })
 const creating = ref(false)
@@ -59,22 +78,9 @@ const expireOptions = [
   { label: '1 年', value: 365 }
 ]
 
-async function load() {
-  loading.value = true
-  try {
-    const res = await getMyLinks(page.value, 20, keyword.value.trim(), statusFilter.value)
-    rows.value = res.list.map((l) => ({ ...l, short_url: buildShortUrl(l.uid) }))
-    total.value = res.total
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '加载失败')
-  } finally {
-    loading.value = false
-  }
-}
-
-function handleSearch() {
-  page.value = 1
-  load()
+/** 列表刷新（重命名以免与 loadSummary 混淆） */
+function load() {
+  void list.load()
 }
 
 async function handleCreate() {
@@ -472,11 +478,15 @@ async function handleRenewExpiring() {
   }
 }
 
+// 会员端登录态是在挂载后异步确认的：登录态就绪前不发列表请求，
+// 否则首次请求会因缺少 token 直接 401（useListPage 的自动加载已关闭）。
 onMounted(async () => {
   const s = await fetchSession()
   member.value = s.member
-  load()
-  loadSummary()
+  // 登录态就绪后再从地址栏还原筛选并加载列表
+  list.hydrateFromUrl()
+  void list.load()
+  void loadSummary()
 })
 </script>
 
@@ -622,12 +632,12 @@ onMounted(async () => {
         </el-table>
         <div class="pager">
           <el-pagination
-            v-model:current-page="page"
+            :current-page="list.page.value"
             :total="total"
-            :page-size="20"
+            :page-size="list.perPage.value"
             :layout="pagerLayout"
             background
-            @current-change="load"
+            @current-change="handlePageChange"
           />
         </div>
       </section>

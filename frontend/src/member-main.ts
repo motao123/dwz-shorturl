@@ -1,8 +1,9 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 
-import 'element-plus/dist/index.css'
-import 'element-plus/theme-chalk/dark/css-vars.css'
+// Element Plus 样式：与 admin 入口保持同一策略（底座 + 暗色变量 + 按需组件样式）。
+import '@/styles/element/index.scss'
+import '@/styles/element-services.scss'
 import '@/styles/index.scss'
 
 import App from './member/App.vue'

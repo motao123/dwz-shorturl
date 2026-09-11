@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { Plus, Delete, Refresh, Promotion } from '@element-plus/icons-vue'
@@ -13,13 +13,22 @@ import {
   WEBHOOK_EVENTS,
   type WebhookSub
 } from '@/api/webhooks'
+import TableSkeleton from '@/components/TableSkeleton.vue'
 
 const pinging = ref(false)
 
 const activeTab = ref('subs')
 
 const loading = ref(false)
+const refreshing = ref(false)
+const initialized = ref(false)
 const rows = ref<WebhookSub[]>([])
+
+/** 骨架列宽与真实列（名称 / 回调 URL / 事件 / 创建时间 / 操作）对齐 */
+const skeletonWidths = ['minmax(120px, 1fr)', 'minmax(220px, 2fr)', '150px', '140px', '120px']
+const skeletonRows = 5
+const showSkeleton = computed(() => loading.value && !initialized.value)
+const isBusy = computed(() => loading.value || refreshing.value)
 
 const dialogVisible = ref(false)
 const creating = ref(false)
@@ -40,16 +49,28 @@ const rules = {
   events: [{ required: true, message: '请选择事件', trigger: 'change' }]
 }
 
-async function loadData() {
-  loading.value = true
+/**
+ * 加载 Webhook 订阅列表。
+ * @param silent 静默模式：已有数据时不再遮罩整表（手动刷新 / 增删后刷新）
+ */
+async function loadData(silent = initialized.value) {
+  if (silent) {
+    refreshing.value = true
+  } else {
+    loading.value = true
+  }
   try {
     const res = await listWebhooks()
     rows.value = Array.isArray(res) ? res : []
+    initialized.value = true
   } catch (err) {
-    rows.value = []
+    if (!silent) {
+      rows.value = []
+    }
     ElMessage.error(err instanceof Error ? err.message : '加载 Webhook 失败')
   } finally {
     loading.value = false
+    refreshing.value = false
   }
 }
 
@@ -122,7 +143,7 @@ function eventLabel(v: string): string {
   return WEBHOOK_EVENTS.find((e) => e.value === v)?.label ?? v
 }
 
-onMounted(loadData)
+onMounted(() => loadData(false))
 </script>
 
 <template>
@@ -136,7 +157,7 @@ onMounted(loadData)
         <p class="app-page__desc">短链创建 / 点击时向回调地址推送事件，支持签名与投递重试</p>
       </div>
       <div class="head-actions">
-        <el-button :icon="Refresh" @click="loadData">刷新</el-button>
+        <el-button :icon="Refresh" :loading="isBusy" @click="loadData()">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openCreate">新建 Webhook</el-button>
       </div>
     </div>
@@ -144,8 +165,10 @@ onMounted(loadData)
     <el-tabs v-model="activeTab" class="app-tabs">
       <el-tab-pane label="订阅列表" name="subs">
         <section class="app-card">
-          <div class="app-table-wrap">
-            <el-table v-loading="loading" :data="rows" row-key="id" stripe>
+          <div class="app-table-wrap dwz-silent" :class="{ 'is-loading': showSkeleton }">
+            <TableSkeleton v-if="showSkeleton" :rows="skeletonRows" :widths="skeletonWidths" />
+            <span v-if="refreshing" class="dwz-silent__bar" aria-hidden="true" />
+            <el-table v-show="!showSkeleton" :data="rows" row-key="id" stripe>
           <el-table-column prop="name" label="名称" min-width="140" />
           <el-table-column prop="url" label="回调 URL" min-width="260">
             <template #default="{ row }">

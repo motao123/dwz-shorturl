@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { Search, Delete, CircleCheck } from '@element-plus/icons-vue'
@@ -11,15 +11,37 @@ import {
   type ViolationReview,
   type Reviewed
 } from '@/api/violations'
+import TableSkeleton from '@/components/TableSkeleton.vue'
 
+/** 首屏加载：仅此时展示骨架屏 */
 const loading = ref(false)
+/** 静默刷新：翻页/筛选时不遮罩，仅顶部细进度条 */
+const refreshing = ref(false)
+/** 首次加载是否完成，作为骨架屏与内容的切换开关 */
+const initialized = ref(false)
 const rows = ref<ViolationReview[]>([])
 const total = ref(0)
 
+/** 骨架行数取 page-size，尺寸与真实表格一致，避免 CLS */
+const skeletonRows = computed(() => Math.min(query.per_page || 20, 20))
+/** 骨架列宽与真实列（目标地址 / 命中原因 / 来源 / IP / 状态 / 备注 / 时间 / 操作）对齐 */
+const skeletonWidths = ['minmax(260px, 1fr)', 'minmax(130px, 1fr)', '70px', '110px', '70px', '100px', '140px', '110px']
+
+const showSkeleton = computed(() => loading.value && !initialized.value)
+const isBusy = computed(() => loading.value || refreshing.value)
+
 const query = reactive({ page: 1, per_page: 20, keyword: '', reviewed: '' as Reviewed | '' })
 
-async function loadData() {
-  loading.value = true
+/**
+ * 加载违规记录。
+ * @param silent 静默模式：已有数据时不再遮罩整表
+ */
+async function loadData(silent = initialized.value) {
+  if (silent) {
+    refreshing.value = true
+  } else {
+    loading.value = true
+  }
   try {
     const res = await listViolations({ ...query })
     if (Array.isArray(res)) {
@@ -29,12 +51,16 @@ async function loadData() {
       rows.value = res?.list ?? []
       total.value = res?.total ?? 0
     }
+    initialized.value = true
   } catch (err) {
-    rows.value = []
-    total.value = 0
+    if (!silent) {
+      rows.value = []
+      total.value = 0
+    }
     ElMessage.error(err instanceof Error ? err.message : '加载违规记录失败')
   } finally {
     loading.value = false
+    refreshing.value = false
   }
 }
 
@@ -79,7 +105,7 @@ async function handleRemove(row: ViolationReview) {
   }
 }
 
-onMounted(loadData)
+onMounted(() => loadData(false))
 </script>
 
 <template>
@@ -118,8 +144,12 @@ onMounted(loadData)
         <el-button type="primary" :icon="Search" @click="query.page = 1; loadData()">查询</el-button>
       </div>
 
-      <div class="app-table-wrap">
-        <el-table v-loading="loading" :data="rows" row-key="id" stripe>
+      <div class="app-table-wrap dwz-silent" :class="{ 'is-loading': showSkeleton }">
+        <!-- 首屏骨架：行数取 page-size，尺寸与真实表格一致，避免 CLS -->
+        <TableSkeleton v-if="showSkeleton" :rows="skeletonRows" :widths="skeletonWidths" />
+        <!-- 静默刷新指示：翻页/筛选不再整表遮罩 -->
+        <span v-if="refreshing" class="dwz-silent__bar" aria-hidden="true" />
+        <el-table v-show="!showSkeleton" :data="rows" row-key="id" stripe>
           <el-table-column label="目标地址" min-width="320">
             <template #default="{ row }">
               <span class="v-url">{{ row.url }}</span>
@@ -193,8 +223,9 @@ onMounted(loadData)
           :total="total"
           :page-sizes="[10, 20, 50]"
           layout="total, sizes, prev, pager, next"
+          :disabled="isBusy"
           background
-          @current-change="loadData"
+          @current-change="() => loadData()"
           @size-change="() => { query.page = 1; loadData() }"
         />
       </div>
