@@ -1,0 +1,15 @@
+/* ============================================================
+   Element Plus 按需样式入口（admin + member 共用）
+
+   只引入样式底座，组件 CSS 由 ElementPlusResolver 按需注入（见 vite.config.ts）：
+     base           语义 token（--el-color-primary 等）、:root 变量、动画过渡类
+     dark/css-vars  暗色模式变量（html.dark 时生效，体积很小，保留全量）
+
+   注意：命令式组件与指令样式不会被模板扫描到，需在
+   src/styles/element-services.scss 中显式补齐（ElMessage / ElMessageBox / v-loading）。
+
+   这里用 SCSS 源码入口（theme-chalk/src）而非编译产物，便于后续按需覆写
+   Element Plus 的 SCSS 变量，无需额外注入 preprocessorOptions.additionalData。
+   ============================================================ */
+@use 'element-plus/theme-chalk/src/base.scss' as *;
+@use 'element-plus/theme-chalk/src/dark/css-vars.scss' as *;
