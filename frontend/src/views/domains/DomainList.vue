@@ -344,17 +344,17 @@ onMounted(loadData)
             <template #default="{ row }">
               <div class="ops">
                 <el-tooltip content="编辑" placement="top">
-                  <button class="mini-btn" @click="openEdit(row as Domain)">
+                  <button class="mini-btn" aria-label="编辑域名" @click="openEdit(row as Domain)">
                     <el-icon :size="13"><EditPen /></el-icon>
                   </button>
                 </el-tooltip>
                 <el-tooltip content="检测" placement="top">
-                  <button class="mini-btn" @click="handleCheck(row as Domain)">
+                  <button class="mini-btn" aria-label="检测域名" @click="handleCheck(row as Domain)">
                     <el-icon :size="13"><Refresh /></el-icon>
                   </button>
                 </el-tooltip>
                 <el-tooltip content="删除" placement="top">
-                  <button class="mini-btn mini-btn--danger" @click="handleRemove(row as Domain)">
+                  <button class="mini-btn mini-btn--danger" aria-label="删除域名" @click="handleRemove(row as Domain)">
                     <el-icon :size="13"><Delete /></el-icon>
                   </button>
                 </el-tooltip>

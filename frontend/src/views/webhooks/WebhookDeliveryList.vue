@@ -161,6 +161,7 @@ onMounted(loadData)
             <button
               v-if="row.success !== 1"
               class="mini-btn"
+              aria-label="重新投递"
               :disabled="retrying"
               title="重新投递"
               @click="handleRetry(row as WebhookDelivery)"

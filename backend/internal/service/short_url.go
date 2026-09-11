@@ -35,6 +35,23 @@ var (
 	ErrCodeCollision    = errors.New("short code collision, please retry")
 )
 
+// PublicSyncError reports that an administrative change was applied to the
+// admin database but could not be mirrored to the public wjoy_log table (the
+// row read by the PHP redirect path). The caller should surface this to the
+// operator and leave the periodic reconcile job to retry, instead of silently
+// pretending the two stores agree.
+type PublicSyncError struct {
+	Op   string
+	UIDs []string
+	Err  error
+}
+
+func (e *PublicSyncError) Error() string {
+	return "public path sync failed during " + e.Op + ", the change will be retried automatically"
+}
+
+func (e *PublicSyncError) Unwrap() error { return e.Err }
+
 type ShortUrlService interface {
 	Create(longURL, custom string, expireDays int, domainID *uint64, createdBy *uint64, source, ip, password string) (*model.ShortUrl, error)
 	CreatePublicAPI(longURL, custom string, expireDays int, domainID *uint64, ip, password string) (*model.ShortUrl, error)
@@ -623,9 +640,15 @@ func (s *shortUrlService) Delete(id uint64) error {
 	if err := s.repo.SoftDeleteWithDomainCount(record); err != nil {
 		return err
 	}
-	// Disable the public wjoy_log row so the primary PHP path also stops serving it.
+	// Disable the public wjoy_log row so the primary PHP path also stops serving
+	// it. A failure here is NOT ignorable: the row was already soft-deleted in
+	// the admin DB, so returning nil would leave the admin UI saying "deleted"
+	// while the PHP path keeps 302-ing to the link. Surface it so the operator
+	// knows, and let reconcile_dual_write retry.
 	if s.wjoyLog != nil {
-		_ = s.wjoyLog.SetStatus(record.UID, 0)
+		if err := s.wjoyLog.SetStatus(record.UID, 0); err != nil {
+			return &PublicSyncError{Op: "delete", UIDs: []string{record.UID}, Err: err}
+		}
 	}
 	return nil
 }
@@ -663,10 +686,19 @@ func (s *shortUrlService) BatchDelete(ids []uint64) error {
 	if err := s.repo.BatchDeleteWithDomainCount(records); err != nil {
 		return err
 	}
-	// Disable the public wjoy_log rows so the primary PHP path stops serving them.
+	// Disable the public wjoy_log rows so the primary PHP path stops serving
+	// them. Collect per-row failures (rather than aborting on the first) so the
+	// operator gets the complete list of links still reachable via PHP.
 	if s.wjoyLog != nil {
+		var failed []string
 		for _, r := range records {
-			_ = s.wjoyLog.SetStatus(r.UID, 0)
+			if err := s.wjoyLog.SetStatus(r.UID, 0); err != nil {
+				log.Printf("sync wjoy_log status on batch delete failed: uid=%s err=%v", r.UID, err)
+				failed = append(failed, r.UID)
+			}
+		}
+		if len(failed) > 0 {
+			return &PublicSyncError{Op: "batch_delete", UIDs: failed, Err: errors.New("wjoy_log status sync failed")}
 		}
 	}
 	return nil

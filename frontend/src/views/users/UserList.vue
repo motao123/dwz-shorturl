@@ -386,12 +386,12 @@ onMounted(() => {
             <template #default="{ row }">
               <div class="ops">
                 <el-tooltip content="编辑" placement="top">
-                  <button class="mini-btn" @click="openEdit(row as AdminUser)">
+                  <button class="mini-btn" aria-label="编辑用户" @click="openEdit(row as AdminUser)">
                     <el-icon :size="13"><EditPen /></el-icon>
                   </button>
                 </el-tooltip>
                 <el-tooltip content="重置密码" placement="top">
-                  <button class="mini-btn" @click="handleResetPassword(row as AdminUser)">
+                  <button class="mini-btn" aria-label="重置密码" @click="handleResetPassword(row as AdminUser)">
                     <el-icon :size="13"><RefreshLeft /></el-icon>
                   </button>
                 </el-tooltip>
@@ -401,7 +401,7 @@ onMounted(() => {
                   </button>
                 </el-tooltip>
                 <el-tooltip content="删除" placement="top">
-                  <button class="mini-btn mini-btn--danger" @click="handleRemove(row as AdminUser)">
+                  <button class="mini-btn mini-btn--danger" aria-label="删除用户" @click="handleRemove(row as AdminUser)">
                     <el-icon :size="13"><Delete /></el-icon>
                   </button>
                 </el-tooltip>

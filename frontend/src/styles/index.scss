@@ -474,6 +474,19 @@ html.dark .member-shell .home-link {
   outline-offset: 2px;
 }
 
+/* 分页器窄屏保护：即使布局已由 JS 收敛，仍兜底允许横向滚动，
+   避免极端窄屏（<360px）下 el-pagination 溢出容器被裁切 */
+.app-pager {
+  overflow-x: auto;
+}
+
+@media (max-width: 640px) {
+  .app-pager {
+    justify-content: center;
+    padding: 10px 8px 14px;
+  }
+}
+
 /* 窄屏表格横向滚动保护：宽表格在小屏上不再压缩列导致 fixed 列重叠 */
 @media (max-width: 992px) {
   .el-table {
@@ -533,4 +546,18 @@ html.dark .mini-btn:hover:not(:disabled) {
 html.dark .mini-btn--danger:hover:not(:disabled) {
   color: var(--dwz-bad);
   border-color: var(--dwz-bad);
+}
+
+/* 动画降级：尊重系统的「减少动态效果」偏好。
+   前台 assets/app.css 已实现同类规则，管理台此前缺失，
+   导致在该偏好下登录页淡入、卡片升起、按钮位移仍然播放。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

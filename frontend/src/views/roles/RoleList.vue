@@ -277,6 +277,7 @@ onMounted(() => {
                   <span>
                     <button
                       class="mini-btn mini-btn--danger"
+                      aria-label="删除角色"
                       :disabled="row.is_system === 1"
                       @click="handleRemove(row as Role)"
                     >

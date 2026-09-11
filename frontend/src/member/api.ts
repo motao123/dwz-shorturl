@@ -260,7 +260,13 @@ export async function batchCreateLinks(urls: string[]): Promise<MemberBatchResul
   })
 }
 
-export async function deleteLink(id: number): Promise<void> {
+export interface MemberDeleteResult {
+  deleted?: boolean
+  public_sync_failed?: boolean
+  warning?: string
+}
+
+export async function deleteLink(id: number): Promise<MemberDeleteResult | null> {
   return go(`/member/api/links/${id}`, { method: 'DELETE' })
 }
 
