@@ -78,6 +78,8 @@ func (h *ShortUrlHandler) CheckLink(c *gin.Context) {
 		pkg.Success(c, gin.H{"id": id, "url": record.LongURL, "ok": false, "status": 0, "error": "url not allowed for health check"})
 		return
 	}
+	// Redirects are capped at 3 hops: an unbounded 302 chain would otherwise
+	// pin a connection slot until the 5s timeout expires.
 	client := pkg.NewSafeHTTPClient(5 * time.Second)
 	req, err := http.NewRequest(http.MethodHead, record.LongURL, nil)
 	if err != nil {
@@ -440,6 +442,20 @@ func (h *ShortUrlHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.svc.Delete(id); err != nil {
+		// A PublicSyncError means the admin-side delete succeeded but the public
+		// wjoy_log mirror did not. Report it as a partial success so the operator
+		// sees the affected UID and knows the periodic reconcile will retry,
+		// instead of an opaque 400 that hides the successful local delete.
+		if syncErr, ok := err.(*service.PublicSyncError); ok {
+			auditLog(c, h.auditSvc, "short_url", "short_url_delete", id, `{"public_sync_failed":true}`)
+			pkg.Success(c, gin.H{
+				"deleted":            true,
+				"public_sync_failed": true,
+				"sync_failed_uids":   syncErr.UIDs,
+				"warning":            syncErr.Error(),
+			})
+			return
+		}
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
 	}
@@ -456,6 +472,16 @@ func (h *ShortUrlHandler) BatchDelete(c *gin.Context) {
 	}
 
 	if err := h.svc.BatchDelete(req.IDs); err != nil {
+		if syncErr, ok := err.(*service.PublicSyncError); ok {
+			auditLog(c, h.auditSvc, "short_url", "short_url_batch_delete", 0, `{"count":`+strconv.Itoa(len(req.IDs))+`,"public_sync_failed":true}`)
+			pkg.Success(c, gin.H{
+				"deleted":            true,
+				"public_sync_failed": true,
+				"sync_failed_uids":   syncErr.UIDs,
+				"warning":            syncErr.Error(),
+			})
+			return
+		}
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
 	}
