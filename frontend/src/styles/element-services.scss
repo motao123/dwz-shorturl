@@ -1,0 +1,13 @@
+/* ============================================================
+   命令式组件 / 指令样式（unplugin-vue-components 无法自动扫描）
+
+   - ElMessage / ElMessageBox：各页面以 `element-plus/es/components/...`
+     深路径导入后直接调用，模板里不出现 <el-message> / <el-message-box>；
+   - v-loading（vLoading 指令）：运行时动态挂载遮罩，同样没有模板标签。
+
+   这三行必须保持「样式整包」形式（编译后的 css，而非 /src 下的 scss），
+   以便在按需引入模式下补齐运行时样式，避免「弹窗无样式 / 加载遮罩错位」。
+   ============================================================ */
+@import 'element-plus/theme-chalk/el-message.css';
+@import 'element-plus/theme-chalk/el-message-box.css';
+@import 'element-plus/theme-chalk/el-loading.css';
