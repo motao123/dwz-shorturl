@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
 import { Search, Plus, EditPen, Delete, RefreshLeft, Lock } from '@element-plus/icons-vue'
@@ -21,10 +21,24 @@ import {
 } from '@/api/users'
 import { listRoles, type Role } from '@/api/roles'
 import { USER_STATUS } from '@/utils/constants'
+import TableSkeleton from '@/components/TableSkeleton.vue'
 
+/** 首屏加载：仅此时展示骨架屏 */
 const loading = ref(false)
+/** 静默刷新：翻页/筛选时不遮罩，仅顶部细进度条 */
+const refreshing = ref(false)
+/** 首次加载是否完成，作为骨架屏与内容的切换开关 */
+const initialized = ref(false)
 const rows = ref<AdminUser[]>([])
 const total = ref(0)
+
+/** 骨架行数取 page-size，尺寸与真实表格一致，避免 CLS */
+const skeletonRows = computed(() => Math.min(query.per_page || 20, 20))
+/** 骨架列宽与真实列（用户 / 邮箱 / 角色 / 状态 / 最近登录 / 操作）对齐 */
+const skeletonWidths = ['minmax(170px, 1fr)', 'minmax(180px, 1fr)', '150px', '70px', '140px', '170px']
+
+const showSkeleton = computed(() => loading.value && !initialized.value)
+const isBusy = computed(() => loading.value || refreshing.value)
 const allRoles = ref<Role[]>([])
 
 const query = reactive({ page: 1, per_page: 20, keyword: '' })
@@ -149,8 +163,16 @@ async function loadRoles() {
   }
 }
 
-async function loadData() {
-  loading.value = true
+/**
+ * 加载用户列表。
+ * @param silent 静默模式：已有数据时不再遮罩整表
+ */
+async function loadData(silent = initialized.value) {
+  if (silent) {
+    refreshing.value = true
+  } else {
+    loading.value = true
+  }
   try {
     const res = await listUsers({ ...query })
     if (Array.isArray(res)) {
@@ -160,12 +182,16 @@ async function loadData() {
       rows.value = res?.list ?? []
       total.value = res?.total ?? 0
     }
+    initialized.value = true
   } catch (err) {
-    rows.value = []
-    total.value = 0
+    if (!silent) {
+      rows.value = []
+      total.value = 0
+    }
     ElMessage.error(err instanceof Error ? err.message : '加载用户列表失败')
   } finally {
     loading.value = false
+    refreshing.value = false
   }
 }
 
@@ -300,7 +326,7 @@ function roleDisplayName(name: string): string {
 
 onMounted(() => {
   loadRoles()
-  loadData()
+  loadData(false)
 })
 </script>
 
@@ -331,8 +357,12 @@ onMounted(() => {
         <el-button type="primary" :icon="Search" @click="query.page = 1; loadData()">查询</el-button>
       </div>
 
-      <div class="app-table-wrap">
-        <el-table v-loading="loading" :data="rows" row-key="id" stripe>
+      <div class="app-table-wrap dwz-silent" :class="{ 'is-loading': showSkeleton }">
+        <!-- 首屏骨架：行数取 page-size，尺寸与真实表格一致，避免 CLS -->
+        <TableSkeleton v-if="showSkeleton" :rows="skeletonRows" :widths="skeletonWidths" />
+        <!-- 静默刷新指示：翻页/筛选不再整表遮罩 -->
+        <span v-if="refreshing" class="dwz-silent__bar" aria-hidden="true" />
+        <el-table v-show="!showSkeleton" :data="rows" row-key="id" stripe>
           <el-table-column label="用户" min-width="190">
             <template #default="{ row }">
               <div class="user-cell">
@@ -421,8 +451,9 @@ onMounted(() => {
           :total="total"
           :page-sizes="[10, 20, 50]"
           layout="total, sizes, prev, pager, next"
+          :disabled="isBusy"
           background
-          @current-change="loadData"
+          @current-change="() => loadData()"
           @size-change="() => { query.page = 1; loadData() }"
         />
       </div>
