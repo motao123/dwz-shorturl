@@ -227,11 +227,17 @@ INSERT INTO `role_permissions` (`role_id`, `permission_id`)
 SELECT 1, `id` FROM `permissions`
 ON DUPLICATE KEY UPDATE `role_id` = `role_id`;
 
--- Seed default admin user (password: admin123)
-INSERT INTO `users` (`username`, `email`, `password_hash`, `display_name`, `status`) VALUES
-('admin', 'admin@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'System Admin', 1)
-ON DUPLICATE KEY UPDATE `username` = `username`;
-
--- Assign super_admin role to admin user
-INSERT INTO `user_roles` (`user_id`, `role_id`) VALUES (1, 1)
-ON DUPLICATE KEY UPDATE `user_id` = `user_id`;
+-- ⚠️ 安全：这里【不再】预置任何管理员账号。
+--
+-- 历史版本在此插入了一个固定 bcrypt 哈希的 admin 账号（注释写着
+-- password: admin123）。这等于给每一个全新部署都留了一把人人可用的
+-- 默认口令：部署者若忘记改密，管理台即为公开可登录状态，而且该哈希
+-- 长期存在于公开仓库中，可离线爆破。
+--
+-- 正确的做法是让管理员账号由安装流程按操作者提供的密码创建：
+--   * 命令行安装：php setup.php … 之后由 backend/cmd/migrate + 运维流程建号
+--   * 一键部署：deploy/docker/init.php 读取 ADMIN_PASSWORD 建号（bcrypt 哈希）
+--   * 手工部署：cd backend && go run ./cmd/createadmin -username=… -password=…
+--
+-- 仍然需要 super_admin 角色及其全量权限，否则首个管理员无法被授予权限。
+-- （角色与权限的种子数据在上面，不需要 users 行存在。）
