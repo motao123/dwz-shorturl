@@ -1,38 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus/es/components/message/index'
+import { computed, ref } from 'vue'
 import { Search } from '@element-plus/icons-vue'
-import TableSkeleton from '@/components/TableSkeleton.vue'
 import dayjs from 'dayjs'
 import { listAuditLogs, type AuditLog, type AuditLogQuery } from '@/api/audit'
-
-/** 首屏加载：仅此时展示骨架屏 */
-const loading = ref(false)
-/** 静默刷新：筛选/翻页时不遮罩，仅顶部细进度条 */
-const refreshing = ref(false)
-/** 首次加载是否完成，作为骨架屏与内容的切换开关 */
-const initialized = ref(false)
-const rows = ref<AuditLog[]>([])
-const total = ref(0)
-
-/** 骨架行数取当前分页 page-size，保证数据到达后无高度跳动 */
-const skeletonRows = computed(() => Math.min(query.per_page || 20, 20))
-/** 骨架列宽与真实列（展开 / 时间 / 操作人 / 操作 / 资源 / IP / 来源）对齐 */
-const skeletonWidths = ['36px', '150px', '110px', '130px', 'minmax(160px, 1fr)', '120px', '120px']
-
-const showSkeleton = computed(() => loading.value && !initialized.value)
-const isBusy = computed(() => loading.value || refreshing.value)
-
-const query = reactive<AuditLogQuery>({
-  page: 1,
-  per_page: 20,
-  user_id: '',
-  action: '',
-  date_from: '',
-  date_to: ''
-})
-
-const dateRange = ref<[string, string] | null>(null)
+import { useListPage } from '@/composables/useListPage'
+import TableSkeleton from '@/components/TableSkeleton.vue'
 
 /** 动作选项（可从数据中动态补充） */
 const actionOptions = ref<string[]>([
@@ -75,61 +47,67 @@ function actionTone(action: string): 'success' | 'warning' | 'danger' | 'info' |
 }
 
 /**
- * 加载审计日志。
- * @param silent 静默模式：已有数据时不再遮罩整表
+ * 日期范围在状态上拆成 date_start / date_end 两个筛选字段（便于统一进 URL），
+ * 组件里用 computed 双向代理给 el-date-picker 的 [start, end] 数组，
+ * 请求参数转换则集中在 buildRequestParams 一处，迁移前后请求形态不变。
  */
-async function loadData(silent = initialized.value) {
-  if (silent) {
-    refreshing.value = true
-  } else {
-    loading.value = true
-  }
-  try {
-    const params: AuditLogQuery = { ...query }
-    if (dateRange.value) {
-      params.date_from = dayjs(dateRange.value[0]).format('YYYY-MM-DD')
-      params.date_to = dayjs(dateRange.value[1]).format('YYYY-MM-DD')
-    } else {
-      params.date_from = ''
-      params.date_to = ''
-    }
-    const res = await listAuditLogs(params)
-    if (Array.isArray(res)) {
-      rows.value = res
-      total.value = res.length
-    } else {
-      rows.value = res?.list ?? []
-      total.value = res?.total ?? 0
-    }
-    // 补充动作选项
-    for (const r of rows.value) {
+const page = useListPage<AuditLog>({
+  perPage: 20,
+  perPageOptions: [20, 50, 100],
+  filters: {
+    user_id: '' as number | '',
+    action: '',
+    date_start: '',
+    date_end: ''
+  },
+  fetcher: (params) => listAuditLogs(buildRequestParams(params)),
+  errorMessage: '加载审计日志失败',
+  onLoaded: (list) => {
+    // 补充动作选项：历史数据里可能有未预置的 action
+    for (const r of list) {
       if (r.action && !actionOptions.value.includes(r.action)) {
         actionOptions.value.push(r.action)
       }
     }
-    initialized.value = true
-  } catch (err) {
-    if (!silent) {
-      rows.value = []
-      total.value = 0
-    }
-    ElMessage.error(err instanceof Error ? err.message : '加载审计日志失败')
-  } finally {
-    loading.value = false
-    refreshing.value = false
   }
+})
+
+/**
+ * 请求参数组装：页面独有的派生逻辑集中在这里，
+ * useListQuery 只管分页与「原样筛选字段」的透传。
+ * URL 里存的是 date_start/date_end，请求侧仍按既有契约发 date_from/date_to。
+ */
+function buildRequestParams(params: Record<string, unknown>): AuditLogQuery {
+  const next = { ...params } as AuditLogQuery & { date_start?: string; date_end?: string }
+  delete next.date_start
+  delete next.date_end
+  next.date_from = dateStart.value ? dayjs(String(dateStart.value)).format('YYYY-MM-DD') : ''
+  next.date_to = dateEnd.value ? dayjs(String(dateEnd.value)).format('YYYY-MM-DD') : ''
+  return next
 }
 
-function handleSearch() {
-  query.page = 1
-  loadData()
+/** 日期范围：date_start/date_end ↔ el-date-picker 的 [start, end] */
+const dateRange = computed({
+  get: (): [string, string] | null =>
+    dateStart.value && dateEnd.value
+      ? ([String(dateStart.value), String(dateEnd.value)] as [string, string])
+      : null,
+  set: (value: [string, string] | null) => {
+    page.setFilters({ date_start: value?.[0] ?? '', date_end: value?.[1] ?? '' })
+  }
+})
+
+/** 日期变化：回到第 1 页重新查询（computed setter 已把范围写入筛选状态） */
+function handleDateChange() {
+  page.setFilters({})
+  void page.load()
 }
 
+/** 重置：清空日期范围与全部筛选，回到第 1 页重新查询 */
 function handleReset() {
-  query.user_id = ''
-  query.action = ''
-  dateRange.value = null
-  handleSearch()
+  page.setFilters({})
+  page.resetFilters()
+  void page.search()
 }
 
 function formatDetail(detail: Record<string, unknown> | null): string {
@@ -137,8 +115,40 @@ function formatDetail(detail: Record<string, unknown> | null): string {
   return JSON.stringify(detail, null, 2)
 }
 
-onMounted(() => loadData(false))
+const {
+  page: currentPage,
+  perPage,
+  rows,
+  total,
+  loading,
+  hasLoaded,
+  refreshing,
+  pagerLayout,
+  search,
+  handlePageChange,
+  handleSizeChange
+} = page
+
+/** 首屏骨架：仅首次加载时展示，后续翻页/筛选保留旧内容（仅顶部细进度条） */
+const showSkeleton = computed(() => loading.value && !hasLoaded.value)
+/** 骨架行数取 page-size，尺寸与真实表格一致，避免 CLS */
+const skeletonRows = computed(() => Math.min(perPage.value || 20, 20))
+/** 骨架列宽与真实列（展开 / 时间 / 操作人 / 操作 / 资源 / IP）对齐 */
+const skeletonWidths = ['36px', '150px', '110px', '130px', 'minmax(160px, 1fr)', '120px']
+
+// 模板里用的 v-model 代理：变更后自动回到第 1 页并同步 URL，回车/清空再触发查询
+const userIdFilter = page.filterRef<number | ''>('user_id')
+const actionFilter = page.filterRef<string>('action')
+const dateStart = page.filterRef<string>('date_start')
+const dateEnd = page.filterRef<string>('date_end')
+
+/**
+ * 从地址栏还原筛选与日期范围。
+ * 必须在 useListPage 的 onMounted 加载之前执行，否则首次请求会丢掉 URL 里的条件。
+ */
+page.hydrateFromUrl()
 </script>
+
 
 <template>
   <div class="app-page">
@@ -155,21 +165,21 @@ onMounted(() => loadData(false))
     <section class="app-card">
       <div class="app-toolbar">
         <el-input
-          v-model.number="query.user_id"
+          v-model="userIdFilter"
           placeholder="按用户 ID 筛选"
           clearable
           style="width: 160px"
           class="mono"
-          @keyup.enter="handleSearch"
-          @clear="handleSearch"
+          @keyup.enter="search"
+          @clear="search"
         />
         <el-select
-          v-model="query.action"
+          v-model="actionFilter"
           placeholder="操作类型"
           clearable
           filterable
           style="width: 180px"
-          @change="handleSearch"
+          @change="search"
         >
           <el-option
             v-for="a in actionOptions"
@@ -186,19 +196,17 @@ onMounted(() => loadData(false))
           end-placeholder="结束日期"
           value-format="YYYY-MM-DD"
           style="width: 250px"
-          @change="handleSearch"
+          @change="handleDateChange"
         />
-        <el-button type="primary" :icon="Search" aria-label="按筛选条件查询审计日志" @click="handleSearch">
+        <el-button type="primary" :icon="Search" aria-label="按筛选条件查询审计日志" @click="search">
           查询
         </el-button>
         <el-button aria-label="重置筛选条件" @click="handleReset">重置</el-button>
       </div>
 
       <div class="app-table-wrap dwz-silent" :class="{ 'is-loading': showSkeleton }">
-        <!-- 首屏骨架：行数取 page-size，尺寸与真实表格一致，避免 CLS -->
-        <TableSkeleton v-if="showSkeleton" :rows="skeletonRows" :widths="skeletonWidths" />
-        <!-- 自动/手动刷新改为局部静默指示，不再整表遮罩闪烁 -->
         <span v-if="refreshing" class="dwz-silent__bar" aria-hidden="true" />
+        <TableSkeleton v-if="showSkeleton" :rows="skeletonRows" :widths="skeletonWidths" />
         <el-table v-show="!showSkeleton" :data="rows" row-key="id" stripe>
           <el-table-column type="expand">
             <template #default="{ row }">
@@ -248,15 +256,14 @@ onMounted(() => loadData(false))
 
       <div class="app-pager">
         <el-pagination
-          v-model:current-page="query.page"
-          v-model:page-size="query.per_page"
+          :current-page="currentPage"
+          :page-size="perPage"
           :total="total"
-          :page-sizes="[20, 50, 100]"
-          layout="total, sizes, prev, pager, next"
-          :disabled="isBusy"
+          :page-sizes="page.perPageOptions"
+          :layout="pagerLayout"
           background
-          @current-change="() => loadData()"
-          @size-change="() => { query.page = 1; loadData() }"
+          @current-change="handlePageChange"
+          @size-change="handleSizeChange"
         />
       </div>
     </section>

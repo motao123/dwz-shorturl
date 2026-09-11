@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import type { TableInstance } from 'element-plus'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
@@ -30,6 +30,7 @@ import {
   restoreShortUrl,
   type ShortUrl,
   type ShortUrlQuery,
+  type ShortUrlStatus,
   type LinkStat
 } from '@/api/short-urls'
 import {
@@ -39,81 +40,94 @@ import {
   categoryName
 } from '@/utils/constants'
 import { copyText } from '@/utils/clipboard'
-import { useResponsive } from '@/composables/useResponsive'
+import { useListPage } from '@/composables/useListPage'
+import { notifySyncResult, useBatchAction } from '@/composables/useBatchAction'
+import { useExportCsv } from '@/composables/useExportCsv'
 import ShortUrlForm from './ShortUrlForm.vue'
-import TableSkeleton from '@/components/TableSkeleton.vue'
 import LinkStatsDialog, { type NormalizedStat } from '@/components/LinkStatsDialog.vue'
+import TableSkeleton from '@/components/TableSkeleton.vue'
 
 const tableRef = ref<TableInstance>()
-/** 首屏加载：仅此时展示骨架屏 */
-const loading = ref(false)
-/** 静默刷新：翻页/搜索等二次加载时不遮罩，仅顶部细进度条 */
-const refreshing = ref(false)
-/** 首次加载是否完成，作为骨架屏与内容的切换开关 */
-const initialized = ref(false)
-const rows = ref<ShortUrl[]>([])
-const total = ref(0)
-const selected = ref<ShortUrl[]>([])
 
-/** 首屏骨架行数：取当前分页 page-size，保证数据到达后无高度跳动 */
-const skeletonRows = computed(() => Math.min(query.per_page || 20, 20))
-/** 骨架列宽与真实列（短码 / 目标 URL / 点击数 / 状态 / 分组 / 操作）对齐 */
-const skeletonWidths = ['44px', 'minmax(140px, 1fr)', 'minmax(240px, 2fr)', '90px', '76px', '88px', '150px']
-
-/** 表格是否处于首屏骨架态 */
-const showSkeleton = computed(() => loading.value && !initialized.value)
-/** 任意加载态（用于禁用分页交互） */
-const isBusy = computed(() => loading.value || refreshing.value)
-
-// 窄屏下收敛分页器布局：jumper/sizes 在 <=640px 会溢出容器
-const { isMobile, isTablet } = useResponsive()
-const pagerLayout = computed(() =>
-  isMobile.value
-    ? 'prev, pager, next'
-    : isTablet.value
-      ? 'total, prev, pager, next'
-      : 'total, sizes, prev, pager, next, jumper'
-)
-
-const query = reactive<ShortUrlQuery>({
-  page: 1,
-  per_page: 20,
-  keyword: '',
-  status: '',
-  category_id: '',
-  date_from: '',
-  date_to: '',
-  sort: 'created_at',
-  order: 'desc',
-  include_deleted: 0
+/**
+ * 列表骨架：分页 / 筛选（含日期范围）/ 排序 / 批量选择 / 竞态防护
+ * 全部由 useListPage 提供；本页只保留派生字段组装与业务动作。
+ * 窄屏下分页器自动收敛布局（jumper/sizes 在 <=640px 会溢出容器）。
+ */
+const page = useListPage<ShortUrl>({
+  perPage: 20,
+  perPageOptions: [10, 20, 50, 100],
+  filters: {
+    keyword: '',
+    status: '' as ShortUrlStatus | '',
+    category_id: '' as number | '',
+    date_start: '',
+    date_end: '',
+    sort: 'created_at',
+    order: 'desc',
+    include_deleted: 0 as 0 | 1
+  },
+  fetcher: (params) => listShortUrls(buildParams(params)),
+  errorMessage: '加载短链列表失败'
 })
 
-/** 回收站视图开关：为 1 时只看已删除短链 */
-const showTrash = ref(false)
+// 暴露给模板与业务逻辑的列表状态（其余能力通过 `page` 命名空间访问）
+const { rows, total, loading, selected, pagerLayout, hasLoaded, refreshing, perPage } = page
+const handleSearch = page.search
+const loadData = page.reload
+const { handlePageChange, handleSizeChange } = page
 
-const dateRange = ref<[string, string] | null>(null)
+/** 首屏骨架：仅首次加载时展示，后续翻页/筛选保留旧内容（仅顶部细进度条） */
+const showSkeleton = computed(() => loading.value && !hasLoaded.value)
+/** 骨架行数取当前分页 page-size，保证数据到达后无高度跳动 */
+const skeletonRows = computed(() => Math.min(perPage.value || 20, 20))
+/** 骨架列宽与真实列（选择 / 短码 / 目标 URL / 点击数 / 状态 / 分组 / 操作）对齐 */
+const skeletonWidths = ['44px', 'minmax(140px, 1fr)', 'minmax(240px, 2fr)', '90px', '76px', '88px', '150px']
+
+// 批量删除复用 useBatchAction 的确认/结果契约（含公共库同步失败提示）
+const batch = useBatchAction<ShortUrl>()
+
+const keyword = page.filterRef<string>('keyword')
+const statusFilter = page.filterRef<ShortUrlStatus | ''>('status')
+const categoryFilter = page.filterRef<number | ''>('category_id')
+const dateStart = page.filterRef<string>('date_start')
+const dateEnd = page.filterRef<string>('date_end')
+
+/** 回收站视图开关：为 1 时只看已删除短链 */
+const showTrash = computed(() => page.filters.value.include_deleted === 1)
 
 // 表单弹窗
 const formVisible = ref(false)
 const editingRow = ref<ShortUrl | null>(null)
 
-function buildParams(): ShortUrlQuery {
-  const params: ShortUrlQuery = { ...query }
-  params.include_deleted = showTrash.value ? 1 : 0
-  if (dateRange.value) {
-    params.date_from = dayjs(dateRange.value[0]).format('YYYY-MM-DD')
-    params.date_to = dayjs(dateRange.value[1]).format('YYYY-MM-DD')
-  } else {
-    params.date_from = ''
-    params.date_to = ''
+/** 日期范围：date_start/date_end ↔ el-date-picker 的 [start, end] */
+const dateRange = computed({
+  get: (): [string, string] | null =>
+    dateStart.value && dateEnd.value
+      ? ([String(dateStart.value), String(dateEnd.value)] as [string, string])
+      : null,
+  set: (value: [string, string] | null) => {
+    page.setFilters({ date_start: value?.[0] ?? '', date_end: value?.[1] ?? '' })
   }
-  return params
+})
+
+/**
+ * 请求参数组装：useListQuery 负责分页与筛选透传，
+ * 页面在此补上 include_deleted（回收站视图）与日期范围的 date_from/date_to 转换。
+ */
+function buildParams(params: Record<string, unknown>): ShortUrlQuery {
+  const next = { ...params } as ShortUrlQuery & { date_start?: string; date_end?: string }
+  delete next.date_start
+  delete next.date_end
+  next.include_deleted = showTrash.value ? 1 : 0
+  next.date_from = dateStart.value ? dayjs(String(dateStart.value)).format('YYYY-MM-DD') : ''
+  next.date_to = dateEnd.value ? dayjs(String(dateEnd.value)).format('YYYY-MM-DD') : ''
+  return next
 }
 
 function toggleTrash() {
-  showTrash.value = !showTrash.value
-  query.page = 1
-  loadData()
+  page.setFilters({ include_deleted: showTrash.value ? 0 : 1 })
+  void page.load()
 }
 
 async function handleRestore(row: ShortUrl) {
@@ -129,73 +143,27 @@ async function handleRestore(row: ShortUrl) {
   try {
     await restoreShortUrl(row.id)
     ElMessage.success('短链已恢复')
-    loadData()
+    void loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '恢复失败')
   }
 }
 
-/**
- * 加载短链列表。
- * @param silent 静默模式：已有数据时不再显示骨架/遮罩，仅局部指示（翻页、筛选、刷新）
- */
-async function loadData(silent = initialized.value) {
-  if (silent) {
-    refreshing.value = true
-  } else {
-    loading.value = true
-  }
-  try {
-    const res = await listShortUrls(buildParams())
-    // 兼容后端返回数组或分页包裹
-    if (Array.isArray(res)) {
-      rows.value = res
-      total.value = res.length
-    } else {
-      rows.value = res?.list ?? []
-      total.value = res?.total ?? 0
-    }
-    initialized.value = true
-  } catch (err) {
-    if (!silent) {
-      rows.value = []
-      total.value = 0
-    }
-    ElMessage.error(err instanceof Error ? err.message : '加载短链列表失败')
-  } finally {
-    loading.value = false
-    refreshing.value = false
-  }
-}
-
-function handleSearch() {
-  query.page = 1
-  loadData()
-}
-
+/** 重置：清空全部筛选（含日期范围），回到第 1 页 */
 function handleReset() {
-  query.keyword = ''
-  query.status = ''
-  query.category_id = ''
-  dateRange.value = null
-  handleSearch()
-}
-
-function handlePageChange(page: number) {
-  query.page = page
-  loadData()
-}
-
-function handleSizeChange(size: number) {
-  query.per_page = size
-  query.page = 1
-  loadData()
+  page.resetFilters()
+  void page.search()
 }
 
 function handleSortChange({ prop, order }: { prop: string | null; order: string | null }) {
-  query.sort = prop && ['created_at', 'clicks'].includes(prop) ? prop : 'created_at'
-  query.order = order === 'ascending' ? 'asc' : 'desc'
-  loadData()
+  page.setFilters(
+    {
+      sort: prop && ['created_at', 'clicks'].includes(prop) ? prop : 'created_at',
+      order: order === 'ascending' ? 'asc' : 'desc'
+    },
+    { resetPage: false }
+  )
+  void loadData()
 }
 
 /* ---------------- 行操作 ---------------- */
@@ -276,16 +244,10 @@ async function handleRemove(row: ShortUrl) {
   }
   try {
     const res = await removeShortUrl(row.id)
-    // 本地已删除，但公共跳转库(wjoy_log)未同步成功：明确告知，避免「界面已删、链接仍可访问」
-    if (res?.public_sync_failed) {
-      ElMessage.warning({
-        message: `本地已删除，但公共库(wjoy_log)同步失败，链接可能仍可通过 PHP 路径访问（系统会在 30 分钟内自动补偿）。${res.warning ?? ''}`,
-        duration: 6000
-      })
-    } else {
-      ElMessage.success('删除成功')
-    }
-    loadData()
+    // 本地已删除，但公共跳转库(wjoy_log)未同步成功：统一走同步失败契约提示，
+    // 避免「界面已删、链接仍可访问」的误判（文案见 useBatchAction）
+    notifySyncResult(res, '删除成功')
+    void loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '删除失败')
   }
@@ -297,10 +259,8 @@ const batchExpire = ref(0)
 const batchUpdating = ref(false)
 
 function openBatchEdit() {
-  if (!selected.value.length) {
-    ElMessage.warning('请先勾选要操作的短链')
-    return
-  }
+  // 未勾选统一提示（与批量删除共用同一份文案）
+  if (!page.ensureSelection()) return
   batchStatus.value = ''
   batchExpire.value = 0
   batchEditVisible.value = true
@@ -323,7 +283,7 @@ async function submitBatchEdit() {
     const r = await batchUpdateShortUrls(selected.value.map((s) => s.id), data)
     ElMessage.success(`已更新 ${r.updated} 条短链`)
     batchEditVisible.value = false
-    loadData()
+    void loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '批量更新失败')
   } finally {
@@ -331,55 +291,31 @@ async function submitBatchEdit() {
   }
 }
 
+/** 批量删除：确认 → 执行 → 同步失败契约提示 → 刷新，统一交给 useBatchAction */
 async function handleBatchRemove() {
-  if (!selected.value.length) return
-  try {
-    await ElMessageBox.confirm(
-      `确定批量删除选中的 ${selected.value.length} 条短链吗？此操作不可撤销。`,
-      '批量删除',
-      { confirmButtonText: '全部删除', cancelButtonText: '取消', type: 'warning' }
-    )
-  } catch {
-    return
-  }
-  try {
-    const res = await batchRemoveShortUrls(selected.value.map((r) => r.id))
-    if (res?.public_sync_failed) {
-      const uids = res.sync_failed_uids ?? []
-      ElMessage.warning({
-        message: `本地已删除，但 ${uids.length} 条公共库(wjoy_log)同步失败${uids.length ? `（${uids.join('、')}）` : ''}，这些短码可能仍可通过 PHP 路径访问，系统将在 30 分钟内自动补偿。`,
-        duration: 8000
-      })
-    } else {
-      ElMessage.success(`已删除 ${selected.value.length} 条短链`)
-    }
-    loadData()
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '批量删除失败')
-  }
+  batch.setSelected(selected.value)
+  const ok = await batch.execute((ids) => batchRemoveShortUrls(ids), {
+    confirm: {
+      title: '批量删除',
+      message: (ids) => `确定批量删除选中的 ${ids.length} 条短链吗？此操作不可撤销。`,
+      confirmButtonText: '全部删除'
+    },
+    syncMessages: {
+      batch: '本地已删除，但部分公共库(wjoy_log)同步失败，这些短码可能仍可通过 PHP 路径访问，系统将在 30 分钟内自动补偿。'
+    },
+    errorMessage: '批量删除失败'
+  })
+  if (ok) void loadData()
 }
 
-const exporting = ref(false)
+/** 导出：筛选条件与列表一致，仅忽略分页（导出全部匹配行） */
+const { exporting, exportCsv } = useExportCsv({
+  fetcher: () => exportShortUrlsCsv(buildParams(page.buildParams())),
+  filename: 'short-urls'
+})
 
-async function handleExport() {
-  exporting.value = true
-  try {
-    const blob = await exportShortUrlsCsv(buildParams())
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `short-urls-${dayjs().format('YYYYMMDD-HHmm')}.csv`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    // 延迟释放 blob URL，确保下载已开始（旧浏览器立即 revoke 可能中断下载）
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-    ElMessage.success('CSV 导出成功')
-  } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '导出失败')
-  } finally {
-    exporting.value = false
-  }
+function handleExport() {
+  void exportCsv()
 }
 
 function truncateUrl(url: string, len = 46): string {
@@ -424,7 +360,7 @@ async function handleImport() {
     const res = await importShortUrls({ format: importFormat.value, content: importContent.value })
     importResult.value = { ok: res.total, fail: res.errors.length, errors: res.errors }
     ElMessage.success(`导入完成：成功 ${res.total} 条，失败 ${res.errors.length} 条`)
-    loadData()
+    void loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '导入失败')
   } finally {
@@ -437,7 +373,7 @@ function formatExpire(row: ShortUrl): string {
   return dayjs(row.expire_at).format('YYYY-MM-DD')
 }
 
-onMounted(() => loadData(false))
+// 初始化（含从 URL 还原筛选）由 useListPage 在 onMounted 中完成
 </script>
 
 <template>
@@ -486,7 +422,7 @@ onMounted(() => loadData(false))
       <!-- 筛选条 -->
       <div class="app-toolbar">
         <el-input
-          v-model="query.keyword"
+          v-model="keyword"
           placeholder="搜索短码 / URL / 标题"
           :prefix-icon="Search"
           clearable
@@ -495,7 +431,7 @@ onMounted(() => loadData(false))
           @clear="handleSearch"
         />
         <el-select
-          v-model="query.status"
+          v-model="statusFilter"
           placeholder="状态"
           clearable
           style="width: 120px"
@@ -506,7 +442,7 @@ onMounted(() => loadData(false))
           <el-option label="已过期" :value="2" />
         </el-select>
         <el-select
-          v-model="query.category_id"
+          v-model="categoryFilter"
           placeholder="分组"
           clearable
           style="width: 140px"
@@ -530,21 +466,15 @@ onMounted(() => loadData(false))
 
       <!-- 表格 -->
       <div class="app-table-wrap dwz-silent" :class="{ 'is-loading': showSkeleton }">
-        <!-- 首屏骨架：尺寸与真实表格行/列一致，数据到达后无布局跳动 -->
-        <TableSkeleton
-          v-if="showSkeleton"
-          :rows="skeletonRows"
-          :widths="skeletonWidths"
-        />
-        <!-- 静默刷新指示：翻页/筛选时不再整表遮罩，仅顶部进度条 -->
         <span v-if="refreshing" class="dwz-silent__bar" aria-hidden="true" />
+        <TableSkeleton v-if="showSkeleton" :rows="skeletonRows" :widths="skeletonWidths" />
         <el-table
           v-show="!showSkeleton"
           ref="tableRef"
           :data="rows"
           row-key="id"
           stripe
-          @selection-change="(val: ShortUrl[]) => (selected = val)"
+          @selection-change="page.setSelected"
           @sort-change="handleSortChange"
         >
           <el-table-column type="selection" width="44" />
@@ -657,12 +587,12 @@ onMounted(() => loadData(false))
       <!-- 分页 -->
       <div class="app-pager">
         <el-pagination
-          v-model:current-page="query.page"
-          v-model:page-size="query.per_page"
+          :current-page="page.page.value"
+          :page-size="page.perPage.value"
           :total="total"
-          :page-sizes="[10, 20, 50, 100]"
+          :page-sizes="page.perPageOptions"
           :layout="pagerLayout"
-          :disabled="isBusy"
+          :disabled="loading || refreshing"
           background
           @current-change="handlePageChange"
           @size-change="handleSizeChange"

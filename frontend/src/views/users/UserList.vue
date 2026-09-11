@@ -21,27 +21,43 @@ import {
 } from '@/api/users'
 import { listRoles, type Role } from '@/api/roles'
 import { USER_STATUS } from '@/utils/constants'
+import { useListPage } from '@/composables/useListPage'
 import TableSkeleton from '@/components/TableSkeleton.vue'
 
-/** 首屏加载：仅此时展示骨架屏 */
-const loading = ref(false)
-/** 静默刷新：翻页/筛选时不遮罩，仅顶部细进度条 */
-const refreshing = ref(false)
-/** 首次加载是否完成，作为骨架屏与内容的切换开关 */
-const initialized = ref(false)
-const rows = ref<AdminUser[]>([])
-const total = ref(0)
-
-/** 骨架行数取 page-size，尺寸与真实表格一致，避免 CLS */
-const skeletonRows = computed(() => Math.min(query.per_page || 20, 20))
-/** 骨架列宽与真实列（用户 / 邮箱 / 角色 / 状态 / 最近登录 / 操作）对齐 */
-const skeletonWidths = ['minmax(170px, 1fr)', 'minmax(180px, 1fr)', '150px', '70px', '140px', '170px']
-
-const showSkeleton = computed(() => loading.value && !initialized.value)
-const isBusy = computed(() => loading.value || refreshing.value)
 const allRoles = ref<Role[]>([])
 
-const query = reactive({ page: 1, per_page: 20, keyword: '' })
+/**
+ * 列表骨架：分页 / 筛选 / 加载 / 竞态防护统一由 useListPage 提供。
+ * keyword 变更（回车、清空、点查询）都走 `search()`，自动回到第 1 页。
+ */
+const page = useListPage<AdminUser>({
+  perPage: 20,
+  perPageOptions: [10, 20, 50],
+  filters: { keyword: '' },
+  fetcher: (params) => listUsers(params),
+  errorMessage: '加载用户列表失败'
+})
+
+const keyword = page.filterRef<string>('keyword')
+const {
+  rows,
+  total,
+  loading,
+  hasLoaded,
+  refreshing,
+  perPage,
+  search: handleSearch,
+  reload: loadData,
+  handlePageChange,
+  handleSizeChange
+} = page
+
+/** 首屏骨架：仅首次加载时展示，后续翻页/筛选保留旧内容（仅顶部细进度条） */
+const showSkeleton = computed(() => loading.value && !hasLoaded.value)
+/** 骨架行数取 page-size，尺寸与真实表格一致，避免 CLS */
+const skeletonRows = computed(() => Math.min(perPage.value || 20, 20))
+/** 骨架列宽与真实列（用户 / 邮箱 / 角色 / 状态 / 最近登录 / 操作）对齐 */
+const skeletonWidths = ['minmax(170px, 1fr)', 'minmax(180px, 1fr)', '150px', '70px', '140px', '170px']
 
 /* ---------------- 2FA (TOTP) 管理 ---------------- */
 
@@ -87,7 +103,7 @@ async function handleEnableTotp() {
     await enableTotp(totpUser.value.id, totpCode.value.trim(), totpSecret.value)
     ElMessage.success('两步验证已开启')
     totpVisible.value = false
-    loadData()
+    void loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '启用失败')
   } finally {
@@ -110,7 +126,7 @@ async function handleDisableTotp() {
     await disableTotp(totpUser.value.id)
     ElMessage.success('两步验证已关闭')
     totpVisible.value = false
-    loadData()
+    void loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '关闭失败')
   }
@@ -160,38 +176,6 @@ async function loadRoles() {
     allRoles.value = Array.isArray(res) ? res : ((res as unknown as { list: Role[] })?.list ?? [])
   } catch {
     allRoles.value = []
-  }
-}
-
-/**
- * 加载用户列表。
- * @param silent 静默模式：已有数据时不再遮罩整表
- */
-async function loadData(silent = initialized.value) {
-  if (silent) {
-    refreshing.value = true
-  } else {
-    loading.value = true
-  }
-  try {
-    const res = await listUsers({ ...query })
-    if (Array.isArray(res)) {
-      rows.value = res
-      total.value = res.length
-    } else {
-      rows.value = res?.list ?? []
-      total.value = res?.total ?? 0
-    }
-    initialized.value = true
-  } catch (err) {
-    if (!silent) {
-      rows.value = []
-      total.value = 0
-    }
-    ElMessage.error(err instanceof Error ? err.message : '加载用户列表失败')
-  } finally {
-    loading.value = false
-    refreshing.value = false
   }
 }
 
@@ -265,7 +249,7 @@ async function handleSubmit() {
 
     ElMessage.success(isEdit.value ? '用户已更新' : '用户创建成功')
     dialogVisible.value = false
-    loadData()
+    void loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '保存失败')
   } finally {
@@ -308,7 +292,7 @@ async function handleRemove(row: AdminUser) {
   try {
     await removeUser(row.id)
     ElMessage.success('用户已删除')
-    loadData()
+    void loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '删除失败')
   }
@@ -326,7 +310,7 @@ function roleDisplayName(name: string): string {
 
 onMounted(() => {
   loadRoles()
-  loadData(false)
+  // loadData 由 useListPage 在 onMounted 中按 URL 还原后的条件自动触发
 })
 </script>
 
@@ -346,22 +330,20 @@ onMounted(() => {
     <section class="app-card">
       <div class="app-toolbar">
         <el-input
-          v-model="query.keyword"
+          v-model="keyword"
           placeholder="搜索用户名 / 邮箱 / 昵称"
           :prefix-icon="Search"
           clearable
           style="width: 260px"
-          @keyup.enter="() => { query.page = 1; loadData() }"
-          @clear="() => { query.page = 1; loadData() }"
+          @keyup.enter="handleSearch"
+          @clear="handleSearch"
         />
-        <el-button type="primary" :icon="Search" @click="query.page = 1; loadData()">查询</el-button>
+        <el-button type="primary" :icon="Search" @click="handleSearch">查询</el-button>
       </div>
 
       <div class="app-table-wrap dwz-silent" :class="{ 'is-loading': showSkeleton }">
-        <!-- 首屏骨架：行数取 page-size，尺寸与真实表格一致，避免 CLS -->
-        <TableSkeleton v-if="showSkeleton" :rows="skeletonRows" :widths="skeletonWidths" />
-        <!-- 静默刷新指示：翻页/筛选不再整表遮罩 -->
         <span v-if="refreshing" class="dwz-silent__bar" aria-hidden="true" />
+        <TableSkeleton v-if="showSkeleton" :rows="skeletonRows" :widths="skeletonWidths" />
         <el-table v-show="!showSkeleton" :data="rows" row-key="id" stripe>
           <el-table-column label="用户" min-width="190">
             <template #default="{ row }">
@@ -446,15 +428,15 @@ onMounted(() => {
 
       <div class="app-pager">
         <el-pagination
-          v-model:current-page="query.page"
-          v-model:page-size="query.per_page"
+          :current-page="page.page.value"
+          :page-size="page.perPage.value"
           :total="total"
-          :page-sizes="[10, 20, 50]"
-          layout="total, sizes, prev, pager, next"
-          :disabled="isBusy"
+          :page-sizes="page.perPageOptions"
+          :layout="page.pagerLayout.value"
+          :disabled="loading || refreshing"
           background
-          @current-change="() => loadData()"
-          @size-change="() => { query.page = 1; loadData() }"
+          @current-change="handlePageChange"
+          @size-change="handleSizeChange"
         />
       </div>
     </section>
