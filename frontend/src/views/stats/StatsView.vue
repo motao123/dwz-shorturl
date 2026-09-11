@@ -371,7 +371,7 @@ onMounted(() => {
                 <td class="mono recent__clicks">{{ row.clicks.toLocaleString() }}</td>
                 <td class="mono recent__time">{{ dayjs(row.created_at).format('MM-DD HH:mm') }}</td>
                 <td>
-                  <button class="mini-btn" title="复制" @click="handleCopy(row.uid)">
+                  <button class="mini-btn" aria-label="复制短链" title="复制" @click="handleCopy(row.uid)">
                     <el-icon :size="12"><DocumentCopy /></el-icon>
                   </button>
                 </td>

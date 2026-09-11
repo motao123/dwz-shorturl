@@ -35,6 +35,22 @@ var (
 	ErrCodeCollision    = errors.New("short code collision, please retry")
 )
 
+// PublicSyncError reports that the admin-side write succeeded but the public
+// wjoy_log row (the PHP do.php path) could not be updated. Callers must surface
+// this to the operator instead of pretending the operation fully succeeded —
+// otherwise the console says "deleted" while the short link still resolves.
+type PublicSyncError struct {
+	Op   string // delete / batch_delete / update
+	UIDs []string
+	Err  error
+}
+
+func (e *PublicSyncError) Error() string {
+	return "本地已保存，但公共库(wjoy_log)同步失败: " + e.Err.Error()
+}
+
+func (e *PublicSyncError) Unwrap() error { return e.Err }
+
 type ShortUrlService interface {
 	Create(longURL, custom string, expireDays int, domainID *uint64, createdBy *uint64, source, ip, password string) (*model.ShortUrl, error)
 	CreatePublicAPI(longURL, custom string, expireDays int, domainID *uint64, ip, password string) (*model.ShortUrl, error)
@@ -604,6 +620,7 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 		if expireDays != nil && record.Status == 1 {
 			if err := s.wjoyLog.SetStatus(record.UID, 1); err != nil {
 				log.Printf("sync wjoy_log status on update failed: uid=%s err=%v", record.UID, err)
+				return record, &PublicSyncError{Op: "update", UIDs: []string{record.UID}, Err: err}
 			}
 		}
 	}
@@ -624,8 +641,13 @@ func (s *shortUrlService) Delete(id uint64) error {
 		return err
 	}
 	// Disable the public wjoy_log row so the primary PHP path also stops serving it.
+	// A failure here must NOT be silent: the row is already soft-deleted locally,
+	// so without sync the PHP path keeps serving a link the console shows as gone.
 	if s.wjoyLog != nil {
-		_ = s.wjoyLog.SetStatus(record.UID, 0)
+		if err := s.wjoyLog.SetStatus(record.UID, 0); err != nil {
+			log.Printf("sync wjoy_log status on delete failed: uid=%s err=%v", record.UID, err)
+			return &PublicSyncError{Op: "delete", UIDs: []string{record.UID}, Err: err}
+		}
 	}
 	return nil
 }
@@ -664,9 +686,20 @@ func (s *shortUrlService) BatchDelete(ids []uint64) error {
 		return err
 	}
 	// Disable the public wjoy_log rows so the primary PHP path stops serving them.
+	// Rows already soft-deleted locally cannot be rolled back, so report the
+	// failed subset instead of returning a misleading success.
 	if s.wjoyLog != nil {
+		var failed []string
+		var lastErr error
 		for _, r := range records {
-			_ = s.wjoyLog.SetStatus(r.UID, 0)
+			if err := s.wjoyLog.SetStatus(r.UID, 0); err != nil {
+				log.Printf("sync wjoy_log status on batch delete failed: uid=%s err=%v", r.UID, err)
+				failed = append(failed, r.UID)
+				lastErr = err
+			}
+		}
+		if len(failed) > 0 {
+			return &PublicSyncError{Op: "batch_delete", UIDs: failed, Err: lastErr}
 		}
 	}
 	return nil

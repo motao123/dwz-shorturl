@@ -167,10 +167,10 @@ onMounted(loadData)
           <el-table-column label="操作" width="140" fixed="right" align="center">
             <template #default="{ row }">
               <div class="op-row">
-                <button class="mini-btn" :disabled="pinging" title="测试 Ping" @click="handlePing(row as WebhookSub)">
+                <button class="mini-btn" aria-label="测试 Ping" :disabled="pinging" title="测试 Ping" @click="handlePing(row as WebhookSub)">
                   <el-icon :size="13"><Promotion /></el-icon>
                 </button>
-                <button class="mini-btn mini-btn--danger" @click="handleRemove(row as WebhookSub)">
+                <button class="mini-btn mini-btn--danger" aria-label="删除订阅" @click="handleRemove(row as WebhookSub)">
                   <el-icon :size="13"><Delete /></el-icon>
                 </button>
               </div>

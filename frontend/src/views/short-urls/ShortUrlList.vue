@@ -236,8 +236,16 @@ async function handleRemove(row: ShortUrl) {
     return
   }
   try {
-    await removeShortUrl(row.id)
-    ElMessage.success('删除成功')
+    const r = await removeShortUrl(row.id)
+    if (r && r.public_sync === false) {
+      // 本地已删除，但 PHP 跳转路径仍在服务：明确告知，避免用户以为链接已彻底失效
+      ElMessage.warning({
+        message: `本地已删除，但公共库同步失败，链接可能仍可访问（系统会在 30 分钟内自动补偿）。${r.sync_error ?? ''}`,
+        duration: 6000
+      })
+    } else {
+      ElMessage.success('删除成功')
+    }
     loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '删除失败')
@@ -296,8 +304,16 @@ async function handleBatchRemove() {
     return
   }
   try {
-    await batchRemoveShortUrls(selected.value.map((r) => r.id))
-    ElMessage.success(`已删除 ${selected.value.length} 条短链`)
+    const r = await batchRemoveShortUrls(selected.value.map((r) => r.id))
+    if (r && r.public_sync === false) {
+      const n = r.unsynced_uids?.length ?? 0
+      ElMessage.warning({
+        message: `本地已删除，但公共库同步失败${n ? `（${n} 条：${r.unsynced_uids!.join('、')}）` : ''}，这些短码可能仍可访问，系统将在 30 分钟内自动补偿。`,
+        duration: 8000
+      })
+    } else {
+      ElMessage.success(`已删除 ${selected.value.length} 条短链`)
+    }
     loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '批量删除失败')
@@ -338,6 +354,19 @@ const importing = ref(false)
 const importFormat = ref<'csv' | 'json'>('csv')
 const importContent = ref('')
 const importResult = ref<{ ok: number; fail: number; errors: string[] } | null>(null)
+const importErrorEl = ref<HTMLElement | null>(null)
+
+/** 复制全部导入错误，便于批量排查/回填 */
+async function copyImportErrors() {
+  const errs = importResult.value?.errors ?? []
+  if (!errs.length) return
+  try {
+    await copyText(errs.map((e, i) => `${i + 1}. ${e}`).join('\n'))
+    ElMessage.success(`已复制 ${errs.length} 条错误`)
+  } catch {
+    ElMessage.error('复制失败，请手动选择复制')
+  }
+}
 
 function openImport() {
   importResult.value = null
@@ -613,10 +642,26 @@ onMounted(loadData)
           />
         </el-form-item>
         <div v-if="importResult" class="import-result">
-          <p>成功 {{ importResult.ok }} 条，失败 {{ importResult.fail }} 条</p>
-          <ul v-if="importResult.errors.length">
-            <li v-for="(e, i) in importResult.errors.slice(0, 20)" :key="i" class="mono">{{ e }}</li>
-          </ul>
+          <div class="import-result-head">
+            <p>
+              成功 {{ importResult.ok }} 条，失败 {{ importResult.fail }} 条<template v-if="importResult.errors.length">（下方可滚动查看全部错误）</template>
+            </p>
+            <el-button
+              v-if="importResult.errors.length"
+              link
+              type="primary"
+              size="small"
+              aria-label="复制全部导入错误"
+              @click="copyImportErrors"
+            >
+              复制全部错误
+            </el-button>
+          </div>
+          <ol v-if="importResult.errors.length" ref="importErrorEl" class="import-error-list mono">
+            <li v-for="(e, i) in importResult.errors" :key="i">
+              <span class="idx">{{ i + 1 }}</span>{{ e }}
+            </li>
+          </ol>
         </div>
       </el-form>
       <template #footer>
@@ -746,5 +791,50 @@ onMounted(loadData)
   display: inline-flex;
   gap: 6px;
   justify-content: center;
+}
+
+/* 导入结果：错误不再截断，容器内可滚动查看全部 */
+.import-result {
+  margin-top: 4px;
+}
+
+.import-result-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.import-result-head p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--dwz-text);
+}
+
+.import-error-list {
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 8px 10px 8px 28px;
+  list-style: none;
+  border: 1px solid var(--dwz-line);
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  font-size: 12px;
+  color: var(--dwz-bad);
+}
+
+.import-error-list li {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  word-break: break-all;
+}
+
+.import-error-list .idx {
+  flex: none;
+  min-width: 22px;
+  color: var(--dwz-text-dim);
+  font-variant-numeric: tabular-nums;
 }
 </style>

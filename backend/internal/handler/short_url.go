@@ -440,12 +440,21 @@ func (h *ShortUrlHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.svc.Delete(id); err != nil {
+		// The admin row is already deleted; only the public wjoy_log sync failed.
+		// Return 200 with an explicit flag so the console can tell the operator
+		// "local delete done, public sync pending" instead of failing the action.
+		var syncErr *service.PublicSyncError
+		if errors.As(err, &syncErr) {
+			auditLog(c, h.auditSvc, "short_url", "short_url_delete", id, `{"sync":"failed"}`)
+			pkg.Success(c, gin.H{"deleted": true, "public_sync": false, "sync_error": syncErr.Error()})
+			return
+		}
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
 	}
 
 	auditLog(c, h.auditSvc, "short_url", "short_url_delete", id, "")
-	pkg.Success(c, nil)
+	pkg.Success(c, gin.H{"deleted": true, "public_sync": true})
 }
 
 func (h *ShortUrlHandler) BatchDelete(c *gin.Context) {
@@ -456,12 +465,22 @@ func (h *ShortUrlHandler) BatchDelete(c *gin.Context) {
 	}
 
 	if err := h.svc.BatchDelete(req.IDs); err != nil {
+		var syncErr *service.PublicSyncError
+		if errors.As(err, &syncErr) {
+			auditLog(c, h.auditSvc, "short_url", "short_url_batch_delete", 0, `{"count":`+strconv.Itoa(len(req.IDs))+`,"sync":"failed"}`)
+			pkg.Success(c, gin.H{
+				"deleted": true, "public_sync": false,
+				"sync_error":    syncErr.Error(),
+				"unsynced_uids": syncErr.UIDs,
+			})
+			return
+		}
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
 	}
 
 	auditLog(c, h.auditSvc, "short_url", "short_url_batch_delete", 0, `{"count":`+strconv.Itoa(len(req.IDs))+`}`)
-	pkg.Success(c, nil)
+	pkg.Success(c, gin.H{"deleted": true, "public_sync": true})
 }
 
 // Restore undeletes a soft-deleted short URL (回收站恢复).

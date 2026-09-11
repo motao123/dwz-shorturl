@@ -71,14 +71,22 @@ export function updateShortUrl(id: number, data: Partial<ShortUrlPayload>): Prom
   return request.put<ShortUrl>(`/short-urls/${id}`, data)
 }
 
+/** 删除结果：本地已删除，但公共库(wjoy_log)状态同步可能失败（PHP 路径仍可访问） */
+export interface RemoveResult {
+  deleted: boolean
+  public_sync: boolean
+  sync_error?: string
+  unsynced_uids?: string[]
+}
+
 /** 删除（软删除） */
-export function removeShortUrl(id: number): Promise<null> {
-  return request.delete<null>(`/short-urls/${id}`)
+export function removeShortUrl(id: number): Promise<RemoveResult> {
+  return request.delete<RemoveResult>(`/short-urls/${id}`)
 }
 
 /** 批量删除 */
-export function batchRemoveShortUrls(ids: number[]): Promise<{ deleted: number }> {
-  return request.post<{ deleted: number }>('/short-urls/batch-delete', { ids })
+export function batchRemoveShortUrls(ids: number[]): Promise<RemoveResult> {
+  return request.post<RemoveResult>('/short-urls/batch-delete', { ids })
 }
 
 /** 恢复已删除短链（回收站） */
