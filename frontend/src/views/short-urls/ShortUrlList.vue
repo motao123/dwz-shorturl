@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import type { TableInstance } from 'element-plus'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
@@ -39,6 +39,7 @@ import {
   categoryName
 } from '@/utils/constants'
 import { copyText } from '@/utils/clipboard'
+import { useResponsive } from '@/composables/useResponsive'
 import ShortUrlForm from './ShortUrlForm.vue'
 import LinkStatsDialog, { type NormalizedStat } from '@/components/LinkStatsDialog.vue'
 
@@ -47,6 +48,16 @@ const loading = ref(false)
 const rows = ref<ShortUrl[]>([])
 const total = ref(0)
 const selected = ref<ShortUrl[]>([])
+
+// 窄屏下收敛分页器布局：jumper/sizes 在 <=640px 会溢出容器
+const { isMobile, isTablet } = useResponsive()
+const pagerLayout = computed(() =>
+  isMobile.value
+    ? 'prev, pager, next'
+    : isTablet.value
+      ? 'total, prev, pager, next'
+      : 'total, sizes, prev, pager, next, jumper'
+)
 
 const query = reactive<ShortUrlQuery>({
   page: 1,
@@ -236,11 +247,11 @@ async function handleRemove(row: ShortUrl) {
     return
   }
   try {
-    const r = await removeShortUrl(row.id)
-    if (r && r.public_sync === false) {
-      // 本地已删除，但 PHP 跳转路径仍在服务：明确告知，避免用户以为链接已彻底失效
+    const res = await removeShortUrl(row.id)
+    // 本地已删除，但公共跳转库(wjoy_log)未同步成功：明确告知，避免「界面已删、链接仍可访问」
+    if (res?.public_sync_failed) {
       ElMessage.warning({
-        message: `本地已删除，但公共库同步失败，链接可能仍可访问（系统会在 30 分钟内自动补偿）。${r.sync_error ?? ''}`,
+        message: `本地已删除，但公共库(wjoy_log)同步失败，链接可能仍可通过 PHP 路径访问（系统会在 30 分钟内自动补偿）。${res.warning ?? ''}`,
         duration: 6000
       })
     } else {
@@ -304,11 +315,11 @@ async function handleBatchRemove() {
     return
   }
   try {
-    const r = await batchRemoveShortUrls(selected.value.map((r) => r.id))
-    if (r && r.public_sync === false) {
-      const n = r.unsynced_uids?.length ?? 0
+    const res = await batchRemoveShortUrls(selected.value.map((r) => r.id))
+    if (res?.public_sync_failed) {
+      const uids = res.sync_failed_uids ?? []
       ElMessage.warning({
-        message: `本地已删除，但公共库同步失败${n ? `（${n} 条：${r.unsynced_uids!.join('、')}）` : ''}，这些短码可能仍可访问，系统将在 30 分钟内自动补偿。`,
+        message: `本地已删除，但 ${uids.length} 条公共库(wjoy_log)同步失败${uids.length ? `（${uids.join('、')}）` : ''}，这些短码可能仍可通过 PHP 路径访问，系统将在 30 分钟内自动补偿。`,
         duration: 8000
       })
     } else {
@@ -614,7 +625,7 @@ onMounted(loadData)
           v-model:page-size="query.per_page"
           :total="total"
           :page-sizes="[10, 20, 50, 100]"
-          layout="total, sizes, prev, pager, next, jumper"
+          :layout="pagerLayout"
           background
           @current-change="handlePageChange"
           @size-change="handleSizeChange"
@@ -642,7 +653,7 @@ onMounted(loadData)
           />
         </el-form-item>
         <div v-if="importResult" class="import-result">
-          <div class="import-result-head">
+          <div class="import-result__head">
             <p>
               成功 {{ importResult.ok }} 条，失败 {{ importResult.fail }} 条<template v-if="importResult.errors.length">（下方可滚动查看全部错误）</template>
             </p>
@@ -657,6 +668,7 @@ onMounted(loadData)
               复制全部错误
             </el-button>
           </div>
+          <!-- 完整错误列表（可滚动），不再截断为前 20 条，便于定位失败行 -->
           <ol v-if="importResult.errors.length" ref="importErrorEl" class="import-error-list mono">
             <li v-for="(e, i) in importResult.errors" :key="i">
               <span class="idx">{{ i + 1 }}</span>{{ e }}
@@ -705,6 +717,7 @@ onMounted(loadData)
   display: flex;
   gap: 10px;
 }
+
 
 .uid-cell {
   display: flex;
@@ -793,19 +806,20 @@ onMounted(loadData)
   justify-content: center;
 }
 
-/* 导入结果：错误不再截断，容器内可滚动查看全部 */
+/* 导入结果：完整错误列表（可滚动）替代原先的前 20 条硬截断 */
 .import-result {
   margin-top: 4px;
 }
 
-.import-result-head {
+.import-result__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 
-.import-result-head p {
+.import-result__head p {
   margin: 0;
   font-size: 13px;
   color: var(--dwz-text);
@@ -814,14 +828,16 @@ onMounted(loadData)
 .import-error-list {
   max-height: 220px;
   overflow: auto;
-  margin: 8px 0 0;
+  margin: 0;
   padding: 8px 10px 8px 28px;
   list-style: none;
   border: 1px solid var(--dwz-line);
   border-radius: 8px;
   background: var(--el-fill-color-lighter);
   font-size: 12px;
+  line-height: 1.7;
   color: var(--dwz-bad);
+  word-break: break-all;
 }
 
 .import-error-list li {

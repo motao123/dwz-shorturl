@@ -6,8 +6,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="短网址管理后台 — 短链创建、统计分析、用户权限与系统配置" />
     <title>短网址管理后台</title>
-    <!-- 字体：优先使用国内可直连的 Google Fonts 镜像，避免大陆网络下静默降级到系统字体；
-         display=swap 保证字体未就绪时先用回退字体渲染，不阻塞首屏。加载失败也不影响可用性。 -->
+    <!--
+      字体：优先使用国内可直连的 fonts.googleapis.cn 镜像（googleapis.com 在大陆常被墙，
+      超时后才会回退系统字体，导致首屏 FOUT）；display=swap 保证字体未就绪时先用回退字体
+      渲染、不阻塞首屏。字体缺失时由 index.scss 的 --dwz-font-body / --dwz-font-mono
+      回退到系统字体，加载失败也不影响可用性。
+    -->
     <link rel="preconnect" href="https://fonts.googleapis.cn" />
     <link rel="preconnect" href="https://fonts.gstatic.cn" crossorigin />
     <link

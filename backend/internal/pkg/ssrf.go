@@ -10,10 +10,10 @@ import (
 	"time"
 )
 
-// maxSafeRedirects bounds how many redirect hops a server-side fetch may follow.
+// defaultMaxRedirects bounds how many redirect hops a server-side fetch may follow.
 // Without a limit a malicious target can chain redirects until the client
 // timeout, tying up the connection/worker for the full timeout window.
-const maxSafeRedirects = 3
+const defaultMaxRedirects = 3
 
 // NewSafeHTTPClient returns an *http.Client whose transport refuses to dial
 // loopback/private/link-local addresses at connection time. It complements the
@@ -22,45 +22,59 @@ const maxSafeRedirects = 3
 // (DNS rebinding), the dial is rejected. Use it for every server-side fetch —
 // link health checks, title scraping, and similar.
 //
-// Redirects are capped at maxSafeRedirects hops and every hop must use http(s)
-// and be a public host: a redirect target is a fresh request that would bypass
-// the pre-flight ValidateURL / validateURL check otherwise.
+// Redirects are capped at defaultMaxRedirects hops and every hop must use
+// http(s) and a public host: a redirect target is a fresh request that would
+// otherwise bypass the pre-flight ValidateURL / validateURL check.
 func NewSafeHTTPClient(timeout time.Duration) *http.Client {
+	return newSafeHTTPClient(timeout, defaultMaxRedirects)
+}
+
+// newSafeHTTPClient builds the client with an explicit redirect budget. The
+// parameter exists so tests can exercise the hop cap without depending on the
+// production default.
+func newSafeHTTPClient(timeout time.Duration, maxRedirects int) *http.Client {
 	dialer := &net.Dialer{
 		Timeout:   timeout,
 		KeepAlive: 30 * time.Second,
 		Control:   blockPrivateDial,
 	}
+	max := maxRedirects
+	if max <= 0 {
+		max = defaultMaxRedirects
+	}
 	return &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
-			DialContext:     dialer.DialContext,
+			DialContext:       dialer.DialContext,
 			DisableKeepAlives: true,
 		},
-		CheckRedirect: safeRedirectPolicy,
+		CheckRedirect: redirectPolicy(max),
 	}
 }
 
-// safeRedirectPolicy enforces the hop limit and re-validates each redirect
-// target (scheme + host) so an internal address cannot be reached via 302.
-func safeRedirectPolicy(req *http.Request, via []*http.Request) error {
-	if len(via) >= maxSafeRedirects {
-		return fmt.Errorf("stopped after %d redirects", maxSafeRedirects)
-	}
-	if err := ValidatePublicHTTPURL(req.URL); err != nil {
-		return err
-	}
-	// Keep the caller's User-Agent/Accept headers on every hop (Go drops them
-	// for cross-host redirects otherwise). via may be empty (no preceding
-	// request), in which case the new request already carries its own headers.
-	if len(via) > 0 {
-		for _, h := range []string{"User-Agent", "Accept"} {
-			if v := via[0].Header.Get(h); v != "" {
-				req.Header.Set(h, v)
+// redirectPolicy enforces the hop limit and re-validates each redirect target
+// (scheme + host) so an internal address cannot be reached via 302.
+func redirectPolicy(maxRedirects int) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= maxRedirects {
+			return fmt.Errorf("stopped after too many redirects (%d)", maxRedirects)
+		}
+		if err := ValidatePublicHTTPURL(req.URL); err != nil {
+			return err
+		}
+		// Keep the caller's User-Agent/Accept headers on every hop (Go drops
+		// them for cross-host redirects otherwise). via may be empty (no
+		// preceding request), in which case the new request already carries its
+		// own headers.
+		if len(via) > 0 {
+			for _, h := range []string{"User-Agent", "Accept"} {
+				if v := via[0].Header.Get(h); v != "" {
+					req.Header.Set(h, v)
+				}
 			}
 		}
+		return nil
 	}
-	return nil
 }
 
 // ValidatePublicHTTPURL rejects non-http(s) schemes and hosts that resolve to

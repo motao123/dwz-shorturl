@@ -35,10 +35,11 @@ var (
 	ErrCodeCollision    = errors.New("short code collision, please retry")
 )
 
-// PublicSyncError reports that the admin-side write succeeded but the public
-// wjoy_log row (the PHP do.php path) could not be updated. Callers must surface
-// this to the operator instead of pretending the operation fully succeeded —
-// otherwise the console says "deleted" while the short link still resolves.
+// PublicSyncError reports that an administrative change was applied to the
+// admin database but could not be mirrored to the public wjoy_log table (the
+// row read by the PHP redirect path). The caller should surface this to the
+// operator and leave the periodic reconcile job to retry, instead of silently
+// pretending the two stores agree.
 type PublicSyncError struct {
 	Op   string // delete / batch_delete / update
 	UIDs []string
@@ -640,9 +641,11 @@ func (s *shortUrlService) Delete(id uint64) error {
 	if err := s.repo.SoftDeleteWithDomainCount(record); err != nil {
 		return err
 	}
-	// Disable the public wjoy_log row so the primary PHP path also stops serving it.
-	// A failure here must NOT be silent: the row is already soft-deleted locally,
-	// so without sync the PHP path keeps serving a link the console shows as gone.
+	// Disable the public wjoy_log row so the primary PHP path also stops serving
+	// it. A failure here is NOT ignorable: the row was already soft-deleted in
+	// the admin DB, so returning nil would leave the admin UI saying "deleted"
+	// while the PHP path keeps 302-ing to the link. Surface it so the operator
+	// knows, and let reconcile_dual_write retry.
 	if s.wjoyLog != nil {
 		if err := s.wjoyLog.SetStatus(record.UID, 0); err != nil {
 			log.Printf("sync wjoy_log status on delete failed: uid=%s err=%v", record.UID, err)
@@ -685,8 +688,9 @@ func (s *shortUrlService) BatchDelete(ids []uint64) error {
 	if err := s.repo.BatchDeleteWithDomainCount(records); err != nil {
 		return err
 	}
-	// Disable the public wjoy_log rows so the primary PHP path stops serving them.
-	// Rows already soft-deleted locally cannot be rolled back, so report the
+	// Disable the public wjoy_log rows so the primary PHP path stops serving
+	// them. Rows already soft-deleted locally cannot be rolled back, so collect
+	// the per-row failures (rather than aborting on the first) and report the
 	// failed subset instead of returning a misleading success.
 	if s.wjoyLog != nil {
 		var failed []string

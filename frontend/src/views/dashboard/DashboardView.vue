@@ -171,7 +171,7 @@ onMounted(reload)
           <small>OVERVIEW · 运营全景</small>
         </h1>
       </div>
-      <el-button :icon="Refresh" circle @click="reload" title="刷新数据" />
+      <el-button :icon="Refresh" circle aria-label="刷新数据" @click="reload" title="刷新数据" />
     </div>
 
     <!-- 指标卡 -->
