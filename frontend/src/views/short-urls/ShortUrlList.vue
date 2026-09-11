@@ -248,9 +248,12 @@ async function handleRemove(row: ShortUrl) {
   }
   try {
     const res = await removeShortUrl(row.id)
+    // 本地已删除，但公共跳转库(wjoy_log)未同步成功：明确告知，避免「界面已删、链接仍可访问」
     if (res?.public_sync_failed) {
-      // 本地已删除，但公共跳转库未同步成功：明确告知，避免「界面已删、链接仍可访问」
-      ElMessage.warning('本地已删除，但公共跳转库同步失败，系统将自动重试')
+      ElMessage.warning({
+        message: `本地已删除，但公共库(wjoy_log)同步失败，链接可能仍可通过 PHP 路径访问（系统会在 30 分钟内自动补偿）。${res.warning ?? ''}`,
+        duration: 6000
+      })
     } else {
       ElMessage.success('删除成功')
     }
@@ -314,8 +317,11 @@ async function handleBatchRemove() {
   try {
     const res = await batchRemoveShortUrls(selected.value.map((r) => r.id))
     if (res?.public_sync_failed) {
-      const n = res.sync_failed_uids?.length ?? 0
-      ElMessage.warning(`本地已删除，但 ${n} 条公共跳转库同步失败，系统将自动重试`)
+      const uids = res.sync_failed_uids ?? []
+      ElMessage.warning({
+        message: `本地已删除，但 ${uids.length} 条公共库(wjoy_log)同步失败${uids.length ? `（${uids.join('、')}）` : ''}，这些短码可能仍可通过 PHP 路径访问，系统将在 30 分钟内自动补偿。`,
+        duration: 8000
+      })
     } else {
       ElMessage.success(`已删除 ${selected.value.length} 条短链`)
     }
@@ -359,22 +365,24 @@ const importing = ref(false)
 const importFormat = ref<'csv' | 'json'>('csv')
 const importContent = ref('')
 const importResult = ref<{ ok: number; fail: number; errors: string[] } | null>(null)
+const importErrorEl = ref<HTMLElement | null>(null)
+
+/** 复制全部导入错误，便于批量排查/回填 */
+async function copyImportErrors() {
+  const errs = importResult.value?.errors ?? []
+  if (!errs.length) return
+  try {
+    await copyText(errs.map((e, i) => `${i + 1}. ${e}`).join('\n'))
+    ElMessage.success(`已复制 ${errs.length} 条错误`)
+  } catch {
+    ElMessage.error('复制失败，请手动选择复制')
+  }
+}
 
 function openImport() {
   importResult.value = null
   importContent.value = ''
   importVisible.value = true
-}
-
-async function handleCopyImportErrors() {
-  const errors = importResult.value?.errors ?? []
-  if (!errors.length) return
-  try {
-    await copyText(errors.join('\n'))
-    ElMessage.success(`已复制 ${errors.length} 条错误`)
-  } catch {
-    ElMessage.error('复制失败，请手动选择文本复制')
-  }
 }
 
 async function handleImport() {
@@ -646,22 +654,26 @@ onMounted(loadData)
         </el-form-item>
         <div v-if="importResult" class="import-result">
           <div class="import-result__head">
-            <p>成功 {{ importResult.ok }} 条，失败 {{ importResult.fail }} 条</p>
+            <p>
+              成功 {{ importResult.ok }} 条，失败 {{ importResult.fail }} 条<template v-if="importResult.errors.length">（下方可滚动查看全部错误）</template>
+            </p>
             <el-button
               v-if="importResult.errors.length"
+              link
+              type="primary"
               size="small"
-              :disabled="importResult.errors.length === 0"
-              @click="handleCopyImportErrors"
+              aria-label="复制全部导入错误"
+              @click="copyImportErrors"
             >
               复制全部错误
             </el-button>
           </div>
           <!-- 完整错误列表（可滚动），不再截断为前 20 条，便于定位失败行 -->
-          <ul v-if="importResult.errors.length" class="import-result__list">
-            <li v-for="(e, i) in importResult.errors" :key="i" class="mono">
-              <span class="import-result__idx">{{ i + 1 }}.</span> {{ e }}
+          <ol v-if="importResult.errors.length" ref="importErrorEl" class="import-error-list mono">
+            <li v-for="(e, i) in importResult.errors" :key="i">
+              <span class="idx">{{ i + 1 }}</span>{{ e }}
             </li>
-          </ul>
+          </ol>
         </div>
       </el-form>
       <template #footer>
@@ -706,41 +718,6 @@ onMounted(loadData)
   gap: 10px;
 }
 
-/* 导入结果：完整错误列表（可滚动）替代原先的前 20 条硬截断 */
-.import-result {
-  margin-top: 4px;
-}
-
-.import-result__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.import-result__head p {
-  margin: 0;
-}
-
-.import-result__list {
-  max-height: 220px;
-  margin: 0;
-  padding: 10px 12px;
-  overflow-y: auto;
-  background: var(--el-fill-color-light);
-  border: 1px solid var(--dwz-line);
-  border-radius: 8px;
-  list-style: none;
-  font-size: 12px;
-  line-height: 1.7;
-  word-break: break-all;
-}
-
-.import-result__idx {
-  color: var(--dwz-text-dim);
-  font-variant-numeric: tabular-nums;
-}
 
 .uid-cell {
   display: flex;
@@ -827,5 +804,53 @@ onMounted(loadData)
   display: inline-flex;
   gap: 6px;
   justify-content: center;
+}
+
+/* 导入结果：完整错误列表（可滚动）替代原先的前 20 条硬截断 */
+.import-result {
+  margin-top: 4px;
+}
+
+.import-result__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.import-result__head p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--dwz-text);
+}
+
+.import-error-list {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 10px 8px 28px;
+  list-style: none;
+  border: 1px solid var(--dwz-line);
+  border-radius: 8px;
+  background: var(--el-fill-color-lighter);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--dwz-bad);
+  word-break: break-all;
+}
+
+.import-error-list li {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  word-break: break-all;
+}
+
+.import-error-list .idx {
+  flex: none;
+  min-width: 22px;
+  color: var(--dwz-text-dim);
+  font-variant-numeric: tabular-nums;
 }
 </style>

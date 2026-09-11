@@ -548,9 +548,65 @@ html.dark .mini-btn--danger:hover:not(:disabled) {
   border-color: var(--dwz-bad);
 }
 
+/* ---------- 分页器响应式（窄屏不再横向溢出/换行错乱） ---------- */
+
+.app-pager {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.app-pager .el-pagination {
+  flex-wrap: wrap;
+  row-gap: 8px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 992px) {
+  .app-pager {
+    justify-content: center;
+  }
+  .app-pager .el-pagination {
+    justify-content: center;
+  }
+}
+
+/* 640px 以下：隐藏跳页与每页条数，保留「总数 + 上一页/下一页 + 页码」，
+   并用横向滚动兜底，避免分页器把页面撑出横向滚动条。 */
+@media (max-width: 640px) {
+  .app-pager {
+    padding: 10px 8px 14px;
+    overflow-x: auto;
+  }
+  .app-pager .el-pagination__sizes,
+  .app-pager .el-pagination__jump {
+    display: none;
+  }
+  .app-pager .el-pagination__total {
+    margin-right: 8px;
+    font-size: 12px;
+  }
+  .app-pager .el-pagination button,
+  .app-pager .el-pager li {
+    min-width: 28px;
+  }
+  /* 页码过多时收窄可见范围由 Element 自动处理，这里只保证按钮不换行 */
+  .app-pager .el-pagination > * {
+    flex: none;
+  }
+}
+
+/* 触屏（无 hover）不依赖悬停态反馈 */
+@media (hover: none) {
+  .mini-btn:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
 /* 动画降级：尊重系统的「减少动态效果」偏好。
    前台 assets/app.css 已实现同类规则，管理台此前缺失，
    导致在该偏好下登录页淡入、卡片升起、按钮位移仍然播放。 */
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

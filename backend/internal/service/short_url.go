@@ -41,13 +41,13 @@ var (
 // operator and leave the periodic reconcile job to retry, instead of silently
 // pretending the two stores agree.
 type PublicSyncError struct {
-	Op   string
+	Op   string // delete / batch_delete / update
 	UIDs []string
 	Err  error
 }
 
 func (e *PublicSyncError) Error() string {
-	return "public path sync failed during " + e.Op + ", the change will be retried automatically"
+	return "本地已保存，但公共库(wjoy_log)同步失败: " + e.Err.Error()
 }
 
 func (e *PublicSyncError) Unwrap() error { return e.Err }
@@ -621,6 +621,7 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 		if expireDays != nil && record.Status == 1 {
 			if err := s.wjoyLog.SetStatus(record.UID, 1); err != nil {
 				log.Printf("sync wjoy_log status on update failed: uid=%s err=%v", record.UID, err)
+				return record, &PublicSyncError{Op: "update", UIDs: []string{record.UID}, Err: err}
 			}
 		}
 	}
@@ -647,6 +648,7 @@ func (s *shortUrlService) Delete(id uint64) error {
 	// knows, and let reconcile_dual_write retry.
 	if s.wjoyLog != nil {
 		if err := s.wjoyLog.SetStatus(record.UID, 0); err != nil {
+			log.Printf("sync wjoy_log status on delete failed: uid=%s err=%v", record.UID, err)
 			return &PublicSyncError{Op: "delete", UIDs: []string{record.UID}, Err: err}
 		}
 	}
@@ -687,18 +689,21 @@ func (s *shortUrlService) BatchDelete(ids []uint64) error {
 		return err
 	}
 	// Disable the public wjoy_log rows so the primary PHP path stops serving
-	// them. Collect per-row failures (rather than aborting on the first) so the
-	// operator gets the complete list of links still reachable via PHP.
+	// them. Rows already soft-deleted locally cannot be rolled back, so collect
+	// the per-row failures (rather than aborting on the first) and report the
+	// failed subset instead of returning a misleading success.
 	if s.wjoyLog != nil {
 		var failed []string
+		var lastErr error
 		for _, r := range records {
 			if err := s.wjoyLog.SetStatus(r.UID, 0); err != nil {
 				log.Printf("sync wjoy_log status on batch delete failed: uid=%s err=%v", r.UID, err)
 				failed = append(failed, r.UID)
+				lastErr = err
 			}
 		}
 		if len(failed) > 0 {
-			return &PublicSyncError{Op: "batch_delete", UIDs: failed, Err: errors.New("wjoy_log status sync failed")}
+			return &PublicSyncError{Op: "batch_delete", UIDs: failed, Err: lastErr}
 		}
 	}
 	return nil

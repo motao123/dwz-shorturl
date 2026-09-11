@@ -20,11 +20,11 @@ func NewMemberApiHandler(svc service.MemberApiService) *MemberApiHandler {
 }
 
 type MemberCreateLinkRequest struct {
-	URL        string  `json:"url" binding:"required"`
-	Title      string  `json:"title"`
-	Custom     string  `json:"custom"`
-	ExpireDays int     `json:"expire_days"`
-	Password   string  `json:"password"`
+	URL        string `json:"url" binding:"required"`
+	Title      string `json:"title"`
+	Custom     string `json:"custom"`
+	ExpireDays int    `json:"expire_days"`
+	Password   string `json:"password"`
 }
 
 func (h *MemberApiHandler) Me(c *gin.Context) {
@@ -337,12 +337,14 @@ func (h *MemberApiHandler) DeleteLink(c *gin.Context) {
 			return
 		}
 		// Local delete succeeded but the public mirror failed: report a partial
-		// success so the member is not told the delete outright failed.
+		// success so the member is not told the delete outright failed, and the
+		// compensation cron can retry the wjoy_log sync.
 		var syncErr *service.PublicSyncError
 		if errors.As(err, &syncErr) {
 			pkg.Success(c, gin.H{
 				"deleted":            true,
 				"public_sync_failed": true,
+				"sync_failed_uids":   syncErr.UIDs,
 				"warning":            syncErr.Error(),
 			})
 			return
@@ -350,5 +352,5 @@ func (h *MemberApiHandler) DeleteLink(c *gin.Context) {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
 	}
-	pkg.Success(c, nil)
+	pkg.Success(c, gin.H{"deleted": true, "public_sync": true})
 }

@@ -7,16 +7,17 @@
     <meta name="description" content="短网址管理后台 — 短链创建、统计分析、用户权限与系统配置" />
     <title>短网址管理后台</title>
     <!--
-      字体走 fonts.googleapis.cn 镜像（大陆网络可达；googleapis.com 常被墙，
-      超时后才会回退系统字体，导致首屏 FOUT）。字体缺失时由 index.scss 的
-      --dwz-font-body / --dwz-font-mono 回退到系统字体，不阻塞渲染。
-      display=swap 保证回退字体立即可见。
+      字体：优先使用国内可直连的 fonts.googleapis.cn 镜像（googleapis.com 在大陆常被墙，
+      超时后才会回退系统字体，导致首屏 FOUT）；display=swap 保证字体未就绪时先用回退字体
+      渲染、不阻塞首屏。字体缺失时由 index.scss 的 --dwz-font-body / --dwz-font-mono
+      回退到系统字体，加载失败也不影响可用性。
     -->
     <link rel="preconnect" href="https://fonts.googleapis.cn" />
     <link rel="preconnect" href="https://fonts.gstatic.cn" crossorigin />
     <link
       href="https://fonts.googleapis.cn/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
       rel="stylesheet"
+      onerror="this.onerror=null;this.href='https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap'"
     />
   </head>
   <body>
