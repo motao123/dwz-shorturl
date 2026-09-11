@@ -1,0 +1,84 @@
+# ============================================================
+# 依赖自动升级（Dependabot）
+#
+# 背景：本项目此前的依赖长期停留旧版本（如 golang.org/x/crypto 0.25.0、
+# echarts 5.6.0），一旦上游披露 CVE，仓库安全页就会累积大量告警，
+# 而缺少自动升级机制意味着只能人工发现、人工升级。
+#
+# 策略：
+#   - 每个生态每周一次检查，避免频繁打扰；
+#   - 仅对 minor / patch 做分组（安全修复通常落在 patch/minor），
+#     减少 PR 数量；major 升级单独成 PR，便于人工评估破坏性变更；
+#   - 安全更新由 Dependabot security updates 单独触发（仓库设置中开启），
+#     不受本文件的分组与频率限制。
+# ============================================================
+version: 2
+updates:
+  # ---------- Go 后端 ----------
+  - package-ecosystem: gomod
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - go
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    groups:
+      # minor + patch 合并为一个 PR，降低评审负担
+      go-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  # ---------- 前端 ----------
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - npm
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    groups:
+      npm-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # 大版本升级需人工评估（破坏性变更 + 样式回归面大），仍由
+      # Dependabot security updates 在出现漏洞时单独提醒
+      - dependency-name: "element-plus"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vue"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+
+  # ---------- GitHub Actions ----------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore(ci)"
+      include: scope
