@@ -62,7 +62,7 @@ type MemberApiService interface {
 	UpdateLink(memberID, linkID uint64, longURL string, title *string, expireDays *int) (*model.ShortUrl, error)
 	Summary(memberID uint64) (*MemberSummary, error)
 	ExportLinks(memberID uint64) ([]byte, error)
-	RenewExpiring(memberID uint64, expireDays int) (int64, error)
+	RenewExpiring(memberID uint64, expireDays int) (int64, *PublicSyncError, error)
 	FetchTitle(url string) (string, error)
 	ImportLinks(memberID uint64, content string, ip string) (*MemberImportResult, error)
 	RequestPasswordReset(email string) error
@@ -293,9 +293,14 @@ func (s *memberApiService) Summary(memberID uint64) (*MemberSummary, error) {
 // RenewExpiring renews (extend by expireDays) all of the member's links that
 // are already expired or expiring within 7 days. Returns the number renewed and
 // keeps short_urls + wjoy_log in sync.
-func (s *memberApiService) RenewExpiring(memberID uint64, expireDays int) (int64, error) {
+//
+// The public wjoy_log mirror is updated per row and its failures are collected
+// instead of silently dropped: a member who renews a link expects it to keep
+// working on the PHP path too, so the partial failure is reported back (the
+// reconcile_dual_write cron retries the sync within 30 minutes).
+func (s *memberApiService) RenewExpiring(memberID uint64, expireDays int) (int64, *PublicSyncError, error) {
 	if expireDays <= 0 {
-		return 0, errors.New("expire_days must be positive")
+		return 0, nil, errors.New("expire_days must be positive")
 	}
 	now := time.Now()
 	week := now.AddDate(0, 0, 7)
@@ -308,10 +313,12 @@ func (s *memberApiService) RenewExpiring(memberID uint64, expireDays int) (int64
 			now, week).
 		Find(&list).Error
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 
 	renewed := int64(0)
+	failedUIDs := make([]string, 0, 4)
+	var firstErr error
 	for i := range list {
 		rec := &list[i]
 		rec.ExpireAt = &expireAt
@@ -321,12 +328,24 @@ func (s *memberApiService) RenewExpiring(memberID uint64, expireDays int) (int64
 			continue
 		}
 		if s.wjoyLog != nil {
-			_ = s.wjoyLog.Update(rec.UID, rec.LongURL, rec.URLHash, rec.ExpireAt, nil)
-			_ = s.wjoyLog.SetStatus(rec.UID, 1)
+			updateErr := s.wjoyLog.Update(rec.UID, rec.LongURL, rec.URLHash, rec.ExpireAt, nil)
+			var statusErr error
+			if updateErr == nil {
+				statusErr = s.wjoyLog.SetStatus(rec.UID, 1)
+			}
+			if syncErr := errors.Join(updateErr, statusErr); syncErr != nil {
+				failedUIDs = append(failedUIDs, rec.UID)
+				if firstErr == nil {
+					firstErr = syncErr
+				}
+			}
 		}
 		renewed++
 	}
-	return renewed, nil
+	if len(failedUIDs) > 0 {
+		return renewed, &PublicSyncError{Op: "member_renew_expiring", UIDs: failedUIDs, Err: firstErr}, nil
+	}
+	return renewed, nil, nil
 }
 
 // UpdateLink edits one of the member's own short links (target URL, title and
@@ -679,9 +698,16 @@ func (s *memberApiService) UpdateLinkExpiry(memberID, linkID uint64, expireDays 
 		return nil, err
 	}
 	if s.wjoyLog != nil {
-		_ = s.wjoyLog.UpdateExpiry(record.UID, expireAt)
+		// The local row is already committed, so a mirror failure cannot be rolled
+		// back — it is reported instead of ignored, otherwise the console would
+		// show the new expiry while the PHP path still serves the old one.
+		if err := s.wjoyLog.UpdateExpiry(record.UID, expireAt); err != nil {
+			return record, &PublicSyncError{Op: "member_update_expiry", UIDs: []string{record.UID}, Err: err}
+		}
 		if expireDays > 0 {
-			_ = s.wjoyLog.SetStatus(record.UID, 1)
+			if err := s.wjoyLog.SetStatus(record.UID, 1); err != nil {
+				return record, &PublicSyncError{Op: "member_update_expiry", UIDs: []string{record.UID}, Err: err}
+			}
 		}
 	}
 	return record, nil
