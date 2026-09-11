@@ -2,12 +2,20 @@
 # ============================================================
 # DWZ 短网址系统 — 一键上线迁移
 #
-# 把原先需要人工依次执行的 4 步运维动作收敛成一条命令：
+# 把老库升级需要的运维动作收敛成一条命令：
 #   1) 备份两个库中受影响的表
-#   2) 把 url_hash 从「URL 全局唯一」重写为「同一 owner 作用域内唯一」
-#      （同时作用于公共库 wjoy_log 与管理库 short_urls）
-#   3) 建 webhook_queue 表（异步投递队列）
-#   4) 静态资源构建 + 内容哈希版本号注入
+#   2) SQL 迁移统一交给 backend/cmd/migrate（schema_migrations 版本表全量纳管）
+#   3) 静态资源构建 + 内容哈希版本号注入
+#
+# 关于 SQL 迁移：所有 .sql 迁移（url_hash 作用域化、webhook_queue、members、
+# violation_reviews 等）都由 `go run ./cmd/migrate` 执行并记录到
+# schema_migrations，不再由本脚本手工拼接库名后执行 —— 那样既不记录版本，
+# 也无法回答"哪些迁移已执行"。库名通过 {{PUBLIC_DB}} / {{ADMIN_DB}} 占位符
+# 注入，脚本内不再需要人工替换 USE 库名。
+#
+# 若目标库此前是手工升级的（schema 已到位但没有版本记录），先执行一次
+# `go run ./cmd/migrate -baseline` 补录，避免后续重跑 DDL：
+#   cd backend && go run ./cmd/migrate -baseline -migrations ../migrations -all
 #
 # 用法：
 #   DWZ_PUBLIC_DB=1_xk7_cn DWZ_ADMIN_DB=dwz_admin \
@@ -45,6 +53,8 @@ PHP_BIN="${DWZ_PHP_BIN:-php}"
 
 DO_BACKUP=1
 DO_ASSETS=1
+DO_SQL=1
+BASELINE=0
 DRY_RUN=0
 
 for arg in "$@"; do
@@ -59,6 +69,8 @@ for arg in "$@"; do
     --backup-dir=*)  BACKUP_DIR="${arg#*=}" ;;
     --skip-backup)   DO_BACKUP=0 ;;
     --skip-assets)   DO_ASSETS=0 ;;
+    --skip-sql)      DO_SQL=0 ;;
+    --baseline)      BASELINE=1 ;;
     --dry-run)       DRY_RUN=1 ;;
     -h|--help)
       sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
@@ -112,7 +124,7 @@ run_sql() {
 }
 
 # --- 0. 连接自检 ----------------------------------------------------------
-log "0/5 检查数据库连通性"
+log "0/4 检查数据库连通性"
 if ! "$MYSQL_BIN" "${MYSQL_OPTS[@]}" -e 'SELECT 1' >/dev/null 2>&1; then
   die "无法连接 MySQL ${HOST}:${PORT}（用户 ${DB_USER}）"
 fi
@@ -129,7 +141,7 @@ echo "  公共库=${PUBLIC_DB}  管理库=${ADMIN_DB}  主机=${HOST}:${PORT}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 TARGET_DIR="$BACKUP_DIR/migrate-$STAMP"
 if [ "$DO_BACKUP" = "1" ]; then
-  log "1/5 备份受影响表 → $TARGET_DIR"
+  log "1/4 备份受影响表 → $TARGET_DIR"
   if [ "$DRY_RUN" = "1" ]; then
     echo "  [dry-run] mysqldump wjoy_log / short_urls"
   else
@@ -144,58 +156,80 @@ else
   warn "已跳过备份（--skip-backup）"
 fi
 
-# --- 2. url_hash 作用域化 -------------------------------------------------
-log "2/5 重写 url_hash（URL 全局唯一 → 同一 owner 作用域内唯一）"
-SQL_TMP="$(mktemp -t dwz_scope_hash.XXXXXX.sql)"
-trap 'rm -f "$SQL_TMP"' EXIT
-# 迁移脚本原本把库名写死为 1_xk7_cn / dwz_admin，这里按实际配置替换，
-# 使其在任何库名组合下都能直接执行。
-sed \
-  -e "s/^USE \`1_xk7_cn\`;/USE \`${PUBLIC_DB}\`;/" \
-  -e "s/^USE \`dwz_admin\`;/USE \`${ADMIN_DB}\`;/" \
-  -e "s/\`dwz_admin\`\.\`short_urls\`/\`${ADMIN_DB}\`.\`short_urls\`/g" \
-  "$ROOT/migrations/scope_url_hash.sql" > "$SQL_TMP"
-grep -q "USE \`${PUBLIC_DB}\`;" "$SQL_TMP" || die "迁移脚本库名替换失败（公共库）"
-grep -q "USE \`${ADMIN_DB}\`;"  "$SQL_TMP" || die "迁移脚本库名替换失败（管理库）"
-run_sql "$PUBLIC_DB" "$SQL_TMP"
+# --- 2~4. SQL 迁移（统一入口） -------------------------------------------
+# 所有迁移由 backend/cmd/migrate 执行：目录扫描确定清单、schema_migrations
+# 记录版本、{{PUBLIC_DB}}/{{ADMIN_DB}} 占位符注入库名。
+GO_BIN="${DWZ_GO_BIN:-go}"
+if [ "$DO_SQL" = "1" ]; then
+  if ! command -v "$GO_BIN" >/dev/null 2>&1; then
+    warn "找不到 go（$GO_BIN），跳过 SQL 迁移。可在有 Go 的机器执行："
+    warn "  cd backend && go run ./cmd/migrate -all -migrations ../migrations"
+    warn "或设置 DWZ_GO_BIN 指向 go 可执行文件。"
+  else
+    MIGRATE_ARGS=(-all -migrations ../migrations)
+    # 迁移工具默认读 backend/configs/config.yaml；不存在时回退到 example，
+    # 由下面透传的 DWZ_DB_* 环境变量覆盖真实连接信息。
+    MIGRATE_CONFIG="${DWZ_MIGRATE_CONFIG:-}"
+    if [ -z "$MIGRATE_CONFIG" ]; then
+      if [ -f "$ROOT/backend/configs/config.yaml" ]; then
+        MIGRATE_CONFIG="configs/config.yaml"
+      else
+        MIGRATE_CONFIG="configs/config.example.yaml"
+      fi
+    fi
+    MIGRATE_ARGS+=(-config "$MIGRATE_CONFIG")
 
-# --- 3. webhook_queue -----------------------------------------------------
-log "3/5 建立 webhook 异步投递队列表"
-WEBHOOK_SQL="$ROOT/migrations/add_webhook_queue.sql"
-if [ -f "$WEBHOOK_SQL" ]; then
-  HOOK_TMP="$(mktemp -t dwz_webhook_queue.XXXXXX.sql)"
-  trap 'rm -f "$SQL_TMP" "$HOOK_TMP"' EXIT
-  sed -e "s/^USE \`1_xk7_cn\`;/USE \`${PUBLIC_DB}\`;/" \
-      -e "s/^USE \`dwz_admin\`;/USE \`${ADMIN_DB}\`;/" \
-      "$WEBHOOK_SQL" > "$HOOK_TMP"
-  run_sql "$PUBLIC_DB" "$HOOK_TMP" || warn "webhook_queue 建表失败（程序会自动退化为同步投递，可忽略后手动重试）"
-else
-  warn "未找到 migrations/add_webhook_queue.sql，跳过"
-fi
+    # 迁移工具从 backend/configs/config.yaml 读凭据，这里把命令行/环境变量的
+    # 值透传过去，避免运维必须写两遍配置。
+    export DWZ_DB_HOST="$HOST" DWZ_DB_PORT="$PORT"
+    export DWZ_DB_USER_OVERRIDE="$DB_USER" DWZ_DB_PASS_OVERRIDE="$DB_PASS"
+    export DWZ_ADMIN_DB_OVERRIDE="$ADMIN_DB" DWZ_PUBLIC_DB_OVERRIDE="$PUBLIC_DB"
 
-# --- 4. 校验 --------------------------------------------------------------
-log "4/5 校验迁移结果"
-if [ "$DRY_RUN" = "1" ]; then
-  echo "  [dry-run] 跳过校验"
+    if [ "$BASELINE" = "1" ]; then
+      log "2/4 补录迁移版本（-baseline，不执行 DDL）"
+      MIGRATE_ARGS=(-baseline -migrations ../migrations)
+    else
+      log "2/4 执行 SQL 迁移（schema_migrations 记录版本）"
+    fi
+
+    if [ "$DRY_RUN" = "1" ]; then
+      echo "  [dry-run] (cd backend && $GO_BIN run ./cmd/migrate -dry-run ${MIGRATE_ARGS[*]})"
+    else
+      ( cd "$ROOT/backend" && "$GO_BIN" run ./cmd/migrate "${MIGRATE_ARGS[@]}" ) \
+        || die "SQL 迁移失败，已执行的迁移均已记录在 schema_migrations，可修正后重跑"
+    fi
+
+    if [ "$BASELINE" = "1" ]; then
+      log "3/4 已补录版本，跳过校验（未执行 DDL）"
+    else
+      log "3/4 校验两库 url_hash 口径"
+      if [ "$DRY_RUN" = "1" ]; then
+        echo "  [dry-run] 跳过校验"
+      else
+        LEGACY_PUBLIC="$("$MYSQL_BIN" "${MYSQL_OPTS[@]}" -N -B "$PUBLIC_DB" \
+          -e 'SELECT COUNT(*) FROM `wjoy_log` WHERE `url_hash` = MD5(`longurl`)' 2>/dev/null || echo 'skip')"
+        LEGACY_ADMIN="$("$MYSQL_BIN" "${MYSQL_OPTS[@]}" -N -B "$ADMIN_DB" \
+          -e 'SELECT COUNT(*) FROM `short_urls` WHERE `url_hash` = MD5(`long_url`)' 2>/dev/null || echo 'skip')"
+        echo "  公共库剩余未作用域化行：$LEGACY_PUBLIC"
+        echo "  管理库剩余未作用域化行：$LEGACY_ADMIN"
+        if [ "$LEGACY_PUBLIC" != "skip" ] && [ "$LEGACY_PUBLIC" != "0" ]; then
+          die "公共库仍有 $LEGACY_PUBLIC 行未作用域化，迁移未完成"
+        fi
+        if [ "$LEGACY_ADMIN" != "skip" ] && [ "$LEGACY_ADMIN" != "0" ]; then
+          die "管理库仍有 $LEGACY_ADMIN 行未作用域化，迁移未完成"
+        fi
+        echo "  两个库的 url_hash 口径一致 ✅"
+      fi
+    fi
+  fi
 else
-  LEGACY_PUBLIC="$("$MYSQL_BIN" "${MYSQL_OPTS[@]}" -N -B "$PUBLIC_DB" \
-    -e 'SELECT COUNT(*) FROM `wjoy_log` WHERE `url_hash` = MD5(`longurl`)' 2>/dev/null || echo 'skip')"
-  LEGACY_ADMIN="$("$MYSQL_BIN" "${MYSQL_OPTS[@]}" -N -B "$ADMIN_DB" \
-    -e 'SELECT COUNT(*) FROM `short_urls` WHERE `url_hash` = MD5(`long_url`)' 2>/dev/null || echo 'skip')"
-  echo "  公共库剩余未作用域化行：$LEGACY_PUBLIC"
-  echo "  管理库剩余未作用域化行：$LEGACY_ADMIN"
-  if [ "$LEGACY_PUBLIC" != "skip" ] && [ "$LEGACY_PUBLIC" != "0" ]; then
-    die "公共库仍有 $LEGACY_PUBLIC 行未作用域化，迁移未完成"
-  fi
-  if [ "$LEGACY_ADMIN" != "skip" ] && [ "$LEGACY_ADMIN" != "0" ]; then
-    die "管理库仍有 $LEGACY_ADMIN 行未作用域化，迁移未完成"
-  fi
-  echo "  两个库的 url_hash 口径一致 ✅"
+  log "2/4 已跳过 SQL 迁移（--skip-sql）"
+  log "3/4 已跳过校验"
 fi
 
 # --- 5. 静态资源 ----------------------------------------------------------
 if [ "$DO_ASSETS" = "1" ]; then
-  log "5/5 构建静态资源（压缩 + 内容哈希版本号注入）"
+  log "4/4 构建静态资源（压缩 + 内容哈希版本号注入）"
   if [ "$DRY_RUN" = "1" ]; then
     echo "  [dry-run] php migrations/build_assets.php"
   elif command -v "$PHP_BIN" >/dev/null 2>&1; then
@@ -204,7 +238,7 @@ if [ "$DO_ASSETS" = "1" ]; then
     warn "找不到 php，跳过静态资源构建"
   fi
 else
-  log "5/5 已跳过静态资源构建（--skip-assets）"
+  log "4/4 已跳过静态资源构建（--skip-assets）"
 fi
 
 echo

@@ -31,7 +31,7 @@
 | 统计展示 | `stats.php` | Token 认证的只读统计页，展示总量/Top10/最近20 |
 | 公共逻辑 | `includes/` | 数据库封装、SSRF 校验、限流、短码算法、配置加载 |
 
-**数据模型**：单表 `wjoy_log`，字段包括 `uid`(短码)、`longurl`(目标URL)、`url_hash`(MD5(url + 0x1F + owner scope) 去重，见 `migrations/scope_url_hash.sql`)、`clicks`(点击数)、`expire_at`(过期时间)。
+**数据模型**：单表 `wjoy_log`，字段包括 `uid`(短码)、`longurl`(目标URL)、`url_hash`(MD5(url + 0x1F + owner scope) 去重，见 `migrations/040_scope_url_hash.sql`)、`clicks`(点击数)、`expire_at`(过期时间)。
 
 **安全机制**：POST-only 接口、文件级速率限制、SSRF 双向校验（创建+跳转）、可信代理 IP 白名单、统计页 Token 认证。
 
