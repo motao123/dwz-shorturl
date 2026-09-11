@@ -587,7 +587,7 @@ router.PUT("/short-urls/:id", RequirePermission("short_urls", "update"), handler
 
 | 组件 | 版本 | 最低配置 |
 |------|------|----------|
-| Go | 1.22+ | — |
+| Go | 1.26+ | — |
 | MySQL | 8.0+ | 2C4G |
 | Redis | 7.0+ | 1C2G |
 | Nginx | 1.24+ | — |

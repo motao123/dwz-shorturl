@@ -5,7 +5,7 @@
 **一次生成，随处链接 —— 高性能、高安全、可运营的企业级短链接服务**
 
 ![PHP](https://img.shields.io/badge/PHP-8.x-777BB4?style=flat-square&logo=php&logoColor=white)
-![Go](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat-square&logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go&logoColor=white)
 ![Vue3](https://img.shields.io/badge/Vue-3.x-42B883?style=flat-square&logo=vuedotjs&logoColor=white)
 ![Element Plus](https://img.shields.io/badge/Element_Plus-2.x-409EFF?style=flat-square&logo=element&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?style=flat-square&logo=mysql&logoColor=white)
@@ -118,7 +118,7 @@ DWZ 短网址平台是一套 **PHP 前台 + Go 核心 + Vue3 管理台** 的三�
 | 层 | 技术 |
 |----|------|
 | 前台 | PHP 8 + MySQL + 原生 JS（零依赖） |
-| 核心 | Go 1.22 · Gin · GORM · Redis |
+| 核心 | Go 1.26 · Gin · GORM · Redis |
 | 管理台 | Vue 3 · TypeScript · Element Plus · Pinia · ECharts |
 | 分析 | 自研 ip2region v1 读取器 + ISO 国家映射 + Referer 分类器 |
 | 部署 | Nginx · systemd · Docker Compose · GitHub Actions |
