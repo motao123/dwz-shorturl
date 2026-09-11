@@ -1,0 +1,40 @@
+# ============================================================
+# CNB 云原生构建流水线
+#
+# 目标：在 Pull Request 阶段做「增量」依赖风险检查 —— 只对本次 PR
+#       新引入的漏洞 / License 风险阻断，历史遗留告警不阻断。
+#
+# 背景：本项目依赖曾长期落后（golang.org/x/crypto 0.25.0、
+#       echarts 5.6.0 等），平台安全页因此累积大量存量告警。若在 PR
+#       阶段做全量门禁，任何一个 PR 都会被历史告警卡死；只有增量门禁
+#       才能让「新引入的风险」真正被拦住，同时不被存量噪音淹没。
+#
+# 配套：依赖自动升级见 .github/dependabot.yml
+#       平台仓库级扫描范围配置见 .cnb/security/code_scan_config.yml
+# ============================================================
+
+# 所有分支的 PR 都执行（含 master 与 auto/* 等特性分支）
+"**":
+  pull_request:
+    - name: dependency-risk-check
+      # 扫描为轻量任务，降低规格以节省资源
+      runner:
+        cpus: 4
+      stages:
+        # 新增依赖漏洞门禁：PR 新引入 high / critical 漏洞时失败
+        - name: 新增依赖漏洞扫描
+          image: cnbcool/sca-vulnerability:latest
+          settings:
+            failOnSeverity: high
+
+        # 新增 License 风险门禁：GPL 等高风险 License 新引入时失败
+        - name: 新增 License 风险扫描
+          image: cnbcool/sca-license:latest
+          settings:
+            failOnSeverity: high
+
+        # 生成组件变化清单（只产出报告，不阻断）
+        - name: 生成 SBOM Delta
+          image: cnbcool/sca-sbom:latest
+          settings:
+            output: ${CNB_BUILD_WORKSPACE}/.cnb-sca/sbom-delta.json
