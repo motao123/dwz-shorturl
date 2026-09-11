@@ -547,7 +547,7 @@ function webhook_queue_missing() {
     $res = @mysqli_query($ADMIN_DB->link, "SHOW TABLES LIKE 'webhook_queue'");
     $missing = !($res && mysqli_num_rows($res) > 0);
     if ($res) mysqli_free_result($res);
-    if ($missing) error_log('[dwz] webhook_queue 表缺失，已退化为同步投递；请执行 migrations/public__030_add_webhook_queue.sql');
+    if ($missing) error_log('[dwz] webhook_queue 表缺失，已退化为同步投递；请执行 cd backend && go run ./cmd/migrate（迁移 backend/migrations/php/add_webhook_queue.sql）');
     return $missing;
 }
 

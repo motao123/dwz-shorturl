@@ -1,3 +1,6 @@
+-- migrate: after php/legacy_schema.php
+--
+-- 由统一迁移入口执行（连接默认库 = 公共库），不再包含 `USE <库名>`。
 -- Public-facing member accounts for the PHP frontend.
 -- Non-destructive: created only if not already present.
 --
@@ -5,7 +8,7 @@
 -- schema). Older revisions of this file omitted the token_version / verify_* /
 -- reset_* columns, which made member_current() (includes/auth.php) fail on
 -- databases that only ran this migration. If you are upgrading an existing
--- database, run migrations/100_add_missing_columns.sql as well — it
+-- database, run backend/migrations/add_missing_columns.sql as well — it
 -- backfills any of these columns that are missing, idempotently.
 CREATE TABLE IF NOT EXISTS `members` (
   `id`            INT UNSIGNED NOT NULL AUTO_INCREMENT,
