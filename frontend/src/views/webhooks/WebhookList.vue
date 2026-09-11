@@ -240,7 +240,7 @@ onMounted(loadData)
   height: 26px;
   border: 1px solid var(--dwz-line);
   border-radius: 7px;
-  background: #fff;
+  background: var(--el-bg-color);
   color: var(--dwz-text-dim);
   cursor: pointer;
   transition: all 0.15s ease;

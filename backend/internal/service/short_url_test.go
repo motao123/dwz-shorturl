@@ -417,28 +417,32 @@ func TestBatchCreate_PreservesDomainAndDeduplicates(t *testing.T) {
 	svc := buildService(sr, dr)
 	domainID := uint64(9)
 
-	results, errs := svc.BatchCreate([]string{
+	outcomes := svc.BatchCreate([]string{
 		"https://www.example.com/a",
 		"https://www.example.com/a",
 		"https://www.example.com/b",
 	}, &domainID, nil, "127.0.0.1")
 
-	if len(errs) != 3 {
-		t.Fatalf("expected one error slot per input, got %d", len(errs))
+	// One outcome per input row, each carrying its input index.
+	if len(outcomes) != 3 {
+		t.Fatalf("expected one outcome slot per input, got %d", len(outcomes))
 	}
-	for i, err := range errs {
-		if err != nil {
-			t.Fatalf("unexpected error at index %d: %v", i, err)
+	for i, o := range outcomes {
+		if o.Index != i {
+			t.Fatalf("outcome %d carries wrong input index %d", i, o.Index)
+		}
+		if o.Err != nil {
+			t.Fatalf("unexpected error at index %d: %v", i, o.Err)
+		}
+		if o.Record == nil {
+			t.Fatalf("expected a record at index %d", i)
 		}
 	}
-	if len(results) != 3 {
-		t.Fatalf("expected one result per valid input, got %d", len(results))
-	}
-	if results[0].ID != results[1].ID {
+	if outcomes[0].Record.ID != outcomes[1].Record.ID {
 		t.Fatalf("duplicate URL should return the existing record")
 	}
-	for i, result := range results {
-		if result.DomainID == nil || *result.DomainID != domainID {
+	for i, o := range outcomes {
+		if o.Record.DomainID == nil || *o.Record.DomainID != domainID {
 			t.Fatalf("result %d did not preserve domain_id", i)
 		}
 	}
@@ -452,23 +456,72 @@ func TestBatchCreate_ReportsErrorsByInputIndex(t *testing.T) {
 	dr := &mockDomainRepo{}
 	svc := buildService(sr, dr)
 
-	results, errs := svc.BatchCreate([]string{
+	outcomes := svc.BatchCreate([]string{
 		"https://www.example.com/ok",
 		"http://127.0.0.1/private",
 		"",
 	}, nil, nil, "127.0.0.1")
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 successful record, got %d", len(results))
+	if len(outcomes) != 3 {
+		t.Fatalf("expected one outcome per input row, got %d", len(outcomes))
 	}
-	if errs[0] != nil {
-		t.Fatalf("expected first item to succeed: %v", errs[0])
+	ok := 0
+	for _, o := range outcomes {
+		if o.Err == nil && o.Record != nil {
+			ok++
+		}
 	}
-	if !errors.Is(errs[1], ErrSSRFBlocked) {
-		t.Fatalf("expected SSRF error at input index 1, got %v", errs[1])
+	if ok != 1 {
+		t.Fatalf("expected 1 successful record, got %d", ok)
 	}
-	if errs[2] != nil {
-		t.Fatalf("blank input is skipped and should not report an error, got %v", errs[2])
+	if outcomes[0].Err != nil {
+		t.Fatalf("expected first item to succeed: %v", outcomes[0].Err)
+	}
+	if !errors.Is(outcomes[1].Err, ErrSSRFBlocked) {
+		t.Fatalf("expected SSRF error at input index 1, got %v", outcomes[1].Err)
+	}
+	if outcomes[2].Err != nil {
+		t.Fatalf("blank input is skipped and should not report an error, got %v", outcomes[2].Err)
+	}
+	if outcomes[2].Record != nil {
+		t.Fatalf("blank input must not produce a record")
+	}
+}
+
+// 回归：批量「结果数组」与「错误数组」曾经长度/下标不一致 —— 失败行不占位
+// 导致 results[j] 并不对应第 j 行输入，前端按数组下标渲染会错位。
+// 现在返回定长 []BatchOutcome，每项显式携带输入下标 Index。
+func TestBatchCreate_OutcomeIndexStaysAlignedWhenMiddleRowFails(t *testing.T) {
+	sr := newMockShortRepo()
+	dr := &mockDomainRepo{}
+	svc := buildService(sr, dr)
+
+	outcomes := svc.BatchCreate([]string{
+		"https://www.example.com/first",
+		"http://127.0.0.1/blocked", // 中间行失败（SSRF）
+		"https://www.example.com/third",
+	}, nil, nil, "127.0.0.1")
+
+	if len(outcomes) != 3 {
+		t.Fatalf("expected 3 outcomes (one per input row), got %d", len(outcomes))
+	}
+	// 尽管中间行失败，最后一个成功行仍必须携带 Index=2，而不是被 compact 成 1。
+	for i, o := range outcomes {
+		if o.Index != i {
+			t.Fatalf("outcome[%d].Index = %d, want %d", i, o.Index, i)
+		}
+	}
+	if outcomes[0].Record == nil || outcomes[0].Err != nil {
+		t.Fatalf("row 0 should succeed, got err=%v", outcomes[0].Err)
+	}
+	if !errors.Is(outcomes[1].Err, ErrSSRFBlocked) {
+		t.Fatalf("row 1 should fail with SSRF error, got %v", outcomes[1].Err)
+	}
+	if outcomes[2].Record == nil || outcomes[2].Err != nil {
+		t.Fatalf("row 2 should succeed, got err=%v", outcomes[2].Err)
+	}
+	if outcomes[0].Record.UID == outcomes[2].Record.UID {
+		t.Fatalf("distinct URLs must produce distinct records")
 	}
 }
 

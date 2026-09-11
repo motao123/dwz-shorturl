@@ -64,7 +64,7 @@ type MemberApiService interface {
 	ExportLinks(memberID uint64) ([]byte, error)
 	RenewExpiring(memberID uint64, expireDays int) (int64, error)
 	FetchTitle(url string) (string, error)
-	ImportLinks(memberID uint64, content string, ip string) ([]MemberBatchResult, error)
+	ImportLinks(memberID uint64, content string, ip string) (*MemberImportResult, error)
 	RequestPasswordReset(email string) error
 	ResetPassword(token, password string) error
 	SendVerification(email string) error
@@ -84,6 +84,19 @@ type MemberBatchResult struct {
 	UID       string `json:"uid"`
 	ShortURL  string `json:"short_url"`
 	Error     string `json:"error,omitempty"`
+}
+
+// MemberImportResult is the outcome of a CSV import. MemberImportMaxRows bounds
+// how many rows are processed in one call; when the input exceeds it the extra
+// rows are skipped and Truncated is set so the caller can warn the user instead
+// of silently assuming everything was imported.
+const MemberImportMaxRows = 100
+
+type MemberImportResult struct {
+	Items     []MemberBatchResult `json:"items"`
+	TotalRows int                 `json:"total_rows"`
+	Processed int                 `json:"processed"`
+	Truncated bool                `json:"truncated"`
 }
 
 type memberApiService struct {
@@ -511,12 +524,26 @@ func (s *memberApiService) VerifyEmail(token string) error {
 
 // ImportLinks imports links from CSV text. Each line: url,title,custom,expire_days
 // (expire_days and the rest optional). Mirrors the admin CSV import columns.
-func (s *memberApiService) ImportLinks(memberID uint64, content string, ip string) ([]MemberBatchResult, error) {
+func (s *memberApiService) ImportLinks(memberID uint64, content string, ip string) (*MemberImportResult, error) {
 	results := make([]MemberBatchResult, 0, 16)
 	if len(content) > 210000 {
 		return nil, errors.New("import content too large")
 	}
 	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	// 先统计有效行数（跳过空行/注释/缺少 url 的行），用于判断是否会发生截断。
+	totalRows := 0
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.TrimSpace(strings.Split(line, ",")[0]) == "" {
+			continue
+		}
+		totalRows++
+	}
+	validTotal := totalRows
+	truncated := false
 	for _, raw := range lines {
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -548,14 +575,21 @@ func (s *memberApiService) ImportLinks(memberID uint64, content string, ip strin
 			row.ShortURL = PublicShortURL(record.UID)
 		}
 		results = append(results, row)
-		if len(results) >= 100 {
+		if len(results) >= MemberImportMaxRows {
+			// 还有剩余有效行未处理：标记截断，让调用方明确提示用户。
+			truncated = validTotal > len(results)
 			break
 		}
 	}
 	if len(results) == 0 {
 		return nil, errors.New("no valid rows")
 	}
-	return results, nil
+	return &MemberImportResult{
+		Items:     results,
+		TotalRows: validTotal,
+		Processed: len(results),
+		Truncated: truncated,
+	}, nil
 }
 
 // BatchCreateLinks creates multiple short links for a member, one per line.

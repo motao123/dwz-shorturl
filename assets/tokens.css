@@ -45,3 +45,41 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "SF Mono", "SFMono-Regular", "Fira Code", "Cascadia Code", Consolas, monospace;
 }
+
+/* 前台暗色模式：与已适配暗色的管理台/会员端保持一致。
+   仅覆写令牌取值，组件样式无需改动（app.css 均通过 var() 引用）。
+   用户若系统偏好暗色，主站/API 文档/统计页自动跟随。 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    /* 文本 */
+    --ink: #e6edf0;
+    --ink-strong: #f2f7f8;
+    --strong: #f2f7f8;
+    --muted: #9aa9ae;
+
+    /* 描边与表面 */
+    --line: #23343b;
+    --line-strong: #31454d;
+    --surface: #101d22;
+    --surface-soft: #16262d;
+    --soft: #16262d;
+    --page: #0d1b20;
+    --code-bg: #17262c;
+
+    /* 语义色（暗底上提高亮度以保持对比度） */
+    --accent: #e9eef0;
+    --accent-hover: #ffffff;
+    --success: #4ade80;
+    --success-soft: #12241a;
+    --danger: #f87171;
+    --danger-soft: #2a1618;
+    --focus: rgba(233, 238, 240, 0.24);
+
+    /* 阴影 */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.55);
+  }
+}
