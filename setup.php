@@ -35,8 +35,18 @@ function parseCliArguments($argv)
 {
     $params = array();
     foreach ($argv as $index => $argument) {
-        if ($index > 0 && preg_match('/^--([a-zA-Z][a-zA-Z0-9_-]*)=(.*)$/s', $argument, $matches)) {
+        if ($index === 0) {
+            continue;
+        }
+        // --key=value
+        if (preg_match('/^--([a-zA-Z][a-zA-Z0-9_-]*)=(.*)$/s', $argument, $matches)) {
             $params[$matches[1]] = $matches[2];
+            continue;
+        }
+        // 无值开关（如 --single-db）。此前只认 --key=value，导致 --single-db
+        // 被静默丢弃、配置里仍写着分库模式 —— 一个「看起来成功但没生效」的坑。
+        if (preg_match('/^--([a-zA-Z][a-zA-Z0-9_-]*)$/s', $argument, $matches)) {
+            $params[$matches[1]] = '1';
         }
     }
     return $params;
@@ -139,8 +149,10 @@ if (!extension_loaded('mysqli')) {
 
 $params = parseCliArguments($_SERVER['argv']);
 if (empty($params['host']) || empty($params['public-url'])) {
-    failInstall('用法: php setup.php --host=127.0.0.1 --port=3306 --user=root --pwd=密码 --db=Imotao --public-url=https://s.example.com');
+    failInstall('用法: php setup.php --host=127.0.0.1 --port=3306 --user=root --pwd=密码 --db=Imotao --public-url=https://s.example.com [--single-db]');
 }
+// --single-db：管理库与公共库同一个库（Docker 一键部署 / 最省事的自建方式）。
+$singleDb = isset($params['single-db']) && $params['single-db'] !== '0' && $params['single-db'] !== 'false';
 
 $host = trim($params['host']);
 $port = isset($params['port']) ? (int) $params['port'] : 3306;
@@ -195,6 +207,26 @@ $config .= '$public_base_url = ' . var_export($publicBaseUrl, true) . ";\n";
 $config .= "\n// 反向代理 IP 白名单：仅当 REMOTE_ADDR 命中此处才会信任 X-Forwarded-For。\n";
 $config .= "// 直连部署请保持空数组；反向代理（nginx/caddy/负载均衡）部署必须填写代理自身地址。\n";
 $config .= "\$trusted_proxies = array();\n";
+// 单库部署：管理库与公共库是同一个库时，双写连接与原库完全一致。
+// 只需打开 $admin_db_same_as_main 一个开关，其余连接参数自动复用，避免重复填写。
+$config .= "\n// 单库模式（推荐，Docker 一键部署默认启用）：\n";
+$config .= "// 管理库 short_urls 与公共库 wjoy_log 在同一个数据库里。\n";
+$config .= "// 开启后无需再填 admin_db_* 连接参数，双写即同库写入。\n";
+$config .= '$admin_db_same_as_main = ' . ($singleDb ? 'true' : 'false') . ";\n";
+$config .= "if (\$admin_db_same_as_main) {\n";
+$config .= "    \$admin_db_host = \$host;\n";
+$config .= "    \$admin_db_port = \$port;\n";
+$config .= "    \$admin_db_user = \$user;\n";
+$config .= "    \$admin_db_pwd = \$pwd;\n";
+$config .= "    \$admin_db_name = \$dbname;\n";
+$config .= "} else {\n";
+$config .= "    // 分库部署：填写管理库（short_urls）的连接信息；留空则关闭双写。\n";
+$config .= "    \$admin_db_host = '127.0.0.1';\n";
+$config .= "    \$admin_db_port = 3306;\n";
+$config .= "    \$admin_db_user = '';\n";
+$config .= "    \$admin_db_pwd = '';\n";
+$config .= "    \$admin_db_name = '';\n";
+$config .= "}\n";
 $config .= "\$rate_limit_dir = __DIR__ . '/logs/ratelimit';\n";
 // 链接访问密码与会员 token 的 HMAC 密钥：随机生成并写入配置。
 // 注意：必须与 Go 后端 config.yaml 的 jwt.member_secret 保持一致，
@@ -217,4 +249,4 @@ if (file_exists($configFile) || !@rename($temporary, $configFile)) {
 }
 
 mysqli_close($link);
-outputMessage('安装成功。已生成 config.php；请立即删除 setup.php。');
+outputMessage('安装成功。已生成 config.php（' . ($singleDb ? '单库模式' : '分库模式') . '）；请立即删除 setup.php。');

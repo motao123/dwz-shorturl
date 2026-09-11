@@ -1,0 +1,137 @@
+# ============================================================
+# dwz-shorturl 一键部署（单库模式）
+#
+#   cp .env.example .env      # 填 3 个必填项
+#   docker compose up -d
+#   # 等 init 容器跑完，浏览器打开 http://<主机>/admin/
+#   # 账号 = ADMIN_USERNAME，密码 = ADMIN_PASSWORD（.env 里那个）
+#
+# 与 deploy/docker-compose.yml 的区别：
+#   1. 只有一个 MySQL 库：管理表（short_urls/users/...）与公共表
+#      （wjoy_log/members/...）同库，不需要建两个库、也没有跨库权限问题
+#   2. init 容器自动完成「建表 + 迁移 + 生成配置 + 创建管理员」，
+#      不需要再手工跑 setup.php / go run ./cmd/migrate
+#   3. 令牌等密钥自动生成并写进卷，只有数据库密码和管理员密码必须你提供
+# ============================================================
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: dwz-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-dwz}
+      MYSQL_USER: ${DB_USER:-dwz}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # 单库模式下 MySQL 仍需允许迁移脚本使用预处理语句与跨库限定名。
+      - --local-infile=0
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      # 不把 root 密码放到命令行，避免 docker inspect / ps 泄露。
+      test: ['CMD-SHELL', 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+    networks: [dwz-net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: dwz-redis
+    command: >
+      redis-server --appendonly yes --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:?请在 .env 设置 REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [dwz-net]
+
+  # 一次性初始化：建库表 → 迁移 → 生成配置 → 创建管理员。
+  # 跑完即退出（restart: "no"），之后所有请求由 backend / frontend 服务。
+  init:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.entrypoint
+    container_name: dwz-init
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_NAME: ${DB_NAME:-dwz}
+      DB_USER: ${DB_USER:-dwz}
+      DB_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请在 .env 设置 REDIS_PASSWORD}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?请在 .env 设置 ADMIN_PASSWORD（管理员初始密码）}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@localhost}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-}
+      RESET_ADMIN_PASSWORD: ${RESET_ADMIN_PASSWORD:-0}
+    volumes:
+      # 迁移工具生成的 config.yaml 与前台 config.php 都落在共享卷：
+      # backend 复用前者，frontend 软链后者，保证「初始化生成的配置」与
+      # 「运行时读到的配置」永远是同一份，不会出现两边不一致。
+      - app_config:/app/configs
+    restart: "no"
+    networks: [dwz-net]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: dwz-backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    volumes:
+      - app_config:/app/configs:ro
+    restart: unless-stopped
+    networks: [dwz-net]
+    # 后端不直接暴露端口：所有流量经 frontend 的 nginx 转发，
+    # 避免绕过 nginx 直连时丢掉安全响应头。
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.web
+    container_name: dwz-frontend
+    depends_on:
+      backend:
+        condition: service_started
+      init:
+        condition: service_completed_successfully
+    volumes:
+      - app_config:/app/configs:ro
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    restart: unless-stopped
+    networks: [dwz-net]
+
+volumes:
+  mysql_data:
+  redis_data:
+  app_config:
+
+networks:
+  dwz-net:
+    driver: bridge

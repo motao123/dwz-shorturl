@@ -1,0 +1,57 @@
+# ============================================================
+# dwz-shorturl 一键部署的 Web 层镜像
+#
+# 一个容器同时承担三件事，避免用户再单独配 PHP 站点：
+#   1. /admin/   → Vue 管理台静态资源（Docker 构建阶段产出）
+#   2. /         → PHP 前台（do.php / api.php / member.php …）
+#   3. /<短码>   → 短链跳转（转发给 Go 后端，走统一统计）
+#
+# 用 nginx + php-fpm（Debian 基础镜像，PHP 8.2 与宝塔环境版本对应）。
+# ============================================================
+FROM node:20-alpine AS assets
+WORKDIR /app
+COPY frontend/package.json ./
+RUN npm install --no-audit --no-fund --registry=https://registry.npmmirror.com
+COPY frontend/ ./
+RUN npm run build
+
+FROM php:8.2-fpm-alpine
+
+RUN apk add --no-cache nginx supervisor tzdata \
+    && cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
+    && echo "Asia/Shanghai" > /etc/timezone \
+    && docker-php-ext-install mysqli opcache \
+    && rm -rf /var/cache/apk/*
+
+WORKDIR /var/www/dwz
+
+# PHP 前台（仓库根目录的 PHP 代码与静态资源）
+COPY do.php api.php batch.php member.php index.php stats.php sitemap.php /var/www/dwz/
+COPY includes/ /var/www/dwz/includes/
+COPY assets/ /var/www/dwz/assets/
+COPY site/ /var/www/dwz/site/
+
+# 管理台构建产物（/admin/ 与 /member/）
+COPY --from=assets /app/dist/ /var/www/dwz/admin/
+COPY --from=assets /app/dist/member.html /var/www/dwz/member/index.html
+COPY --from=assets /app/dist/assets/ /var/www/dwz/member/assets/
+
+RUN mkdir -p /etc/nginx/snippets
+COPY deploy/docker/web/nginx.conf /etc/nginx/http.d/default.conf
+COPY deploy/docker/snippets/dwz-proxy.conf /etc/nginx/snippets/dwz-proxy.conf
+COPY deploy/docker/web/supervisord.conf /etc/supervisord.conf
+COPY deploy/docker/web/entrypoint.sh /usr/local/bin/dwz-entrypoint
+RUN chmod +x /usr/local/bin/dwz-entrypoint
+
+# 运行期可写目录：限流文件与错误日志。config.php 由 init 容器生成到共享配置目录后
+# 由 entrypoint 软链接进来，不进镜像（镜像里绝不能有数据库口令）。
+RUN mkdir -p /var/www/dwz/logs/ratelimit /run/nginx \
+    && chown -R nobody:nobody /var/www/dwz/logs
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1/admin/ || exit 1
+
+ENTRYPOINT ["/usr/local/bin/dwz-entrypoint"]
+CMD ["supervisord", "-c", "/etc/supervisord.conf"]
