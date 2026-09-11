@@ -131,3 +131,91 @@ WCAG 2.2 AA、键盘优先交互、可见的焦点状态
 - 引入新模式时，同步提供既有组件的迁移指引。
 
 <!-- TYPEUI_SH_MANAGED_END -->
+
+---
+
+## 加载态规范（骨架屏 / 遮罩 / 静默刷新）
+
+> 实现载体：`frontend/src/components/TableSkeleton.vue`、`frontend/src/components/CardSkeleton.vue`、
+> `frontend/src/styles/index.scss`（`.sk-block` / `.dwz-silent*`）。
+
+### 背景与目标
+
+改造前：列表与卡片一律使用 `v-loading` 整块遮罩，首屏是"空白 + 转圈"，数据到达后布局整体跳动（CLS 明显）；
+监控页 30s 轮询每次都用遮罩覆盖整表后重绘，形成**周期性闪烁**。
+
+目标：首屏用骨架屏稳定布局；二次加载与轮询用局部指示，不遮罩内容、不阻塞交互。
+
+### 设计 Token
+
+| Token | 亮色 | 暗色 | 用途 |
+| --- | --- | --- | --- |
+| `--dwz-skeleton-bg` | `#e3eaed` | `#1d2d34` | 骨架占位块底色 |
+| `--dwz-skeleton-bg-strong` | `#d5e0e4` | `#24363d` | 强调占位块（可选） |
+| `--dwz-skeleton-shine` | `rgba(255,255,255,.65)` | `rgba(255,255,255,.07)` | 单向微光 |
+| `--dwz-skeleton-alt` | `#fafcfc` | `#16262d` | 骨架斑马纹 |
+
+- 占位块圆角 `4px`，与 `.sk-block` 一致；微光周期 `1.35s ease-in-out`。
+- 微光以 `background-position` 实现，**只改变绘制不改变布局**，因此数据到达时不会产生位移。
+
+### 判定规则：何时用骨架屏 / 何时用 loading 遮罩 / 何时静默
+
+1. **首屏加载（该区块尚无任何数据）→ 骨架屏。**
+   用在容器内部原位渲染，**禁止**同时叠加 `v-loading` 遮罩（避免遮罩层级叠加与点击穿透）。
+2. **二次加载（已有数据，仅内容替换）→ 静默刷新。**
+   翻页、排序、筛选、手动刷新、轮询一律默认静默：保留上一帧数据，顶部显示 2px 进度条（`.dwz-silent__bar`），数字类字段用 `.dwz-silent-value.is-refreshing` 淡入。
+   理由：已有数据时遮罩会让用户看到"闪白"，而等待期间点击又会被遮罩吞掉。
+3. **写操作（提交中）→ `v-loading` 遮罩或按钮 `loading`。**
+   表单提交、弹窗内操作、删除确认等**必须阻断重复提交**，此时遮罩是正确选择。
+4. **图表 / 无稳定尺寸的容器 → `v-loading` 遮罩。**
+   图表高度依赖数据，骨架无法保证同尺寸，强行骨架反而制造跳动。
+
+一句话：**空白首屏用骨架，有内容用静默，要阻断用遮罩。**
+
+### 必须遵守的实现约束
+
+- **尺寸对齐**：骨架行数必须等于当前分页 `page-size`（上限 20 行）；骨架列宽必须与真实列 `width`/`min-width` 对齐（列容器用 `minmax()` 表达 `min-width`）。
+  不应出现"骨架 8 行 → 真实数据 20 行"这类高度突变。
+- **切换方式**：骨架与真实内容之间用 `v-if` / `v-show` 切换，切换前后容器高度变化必须为 0。
+- **不确定态表达**：骨架容器必须带 `role="status"`、`aria-busy="true"`、`aria-label`，并提供 `.sk-sr` 屏幕阅读器文案。
+- **禁止遮罩叠加**：不得在同一容器上同时出现骨架与 `v-loading`；嵌套遮罩会导致用户误点下层控件。
+- **加载中禁用交互**：分页器在加载中必须 `:disabled="isBusy"`（`isBusy = loading || refreshing`），并在容器上以 `.is-loading { pointer-events: none }` 兜底。
+- **轮询必须清理定时器**：`setInterval` 需在 `onBeforeUnmount` 中 `clearInterval`；并加在途请求守卫，防止慢请求叠加（本仓库采用模块内 `inFlight` Promise）。
+- **轮询失败不清空数据**：静默刷新失败时保留上一帧数据，仅提示错误，避免整页闪空。
+- **动效降级**：`@media (prefers-reduced-motion: reduce)` 下必须关闭微光与进度条动画，改为静态占位块与静态进度条，信息不丢失。
+
+### 组件 API
+
+```vue
+<!-- 表格骨架 -->
+<TableSkeleton :rows="20" :widths="['44px', 'minmax(140px,1fr)', '90px']" :header="true" />
+
+<!-- 卡片骨架 -->
+<CardSkeleton :lines="3" title-width="84px" :icon="true" />
+```
+
+### 迁移指引（既有 `v-loading` 列表）
+
+1. 新增 `refreshing` / `initialized` 两个状态，`showSkeleton = loading && !initialized`。
+2. `loadData(silent = initialized.value)`：`silent` 时置 `refreshing` 而非 `loading`；**必须在 `catch` 中判断 `silent`**，静默失败不得清空 `rows`（`loadData` 会被分页器直接调用，禁止用可选参数接收页码）。
+3. 分页器事件改为 `@current-change="() => loadData()"`，避免事件对象被当作 `silent` 传入。
+4. 模板中 `v-loading` 换成 `TableSkeleton v-if="showSkeleton"` + `el-table v-show="!showSkeleton"`，并加 `.dwz-silent__bar`。
+5. `onMounted(() => loadData(false))` 保证首屏走骨架分支。
+
+### 反模式
+
+- ❌ 首屏用 `v-loading` 全屏遮罩，加载完成再整体撑开（CLS）。
+- ❌ 骨架行数写死 8 行而分页是 20 条。
+- ❌ 轮询时调用非静默 `loadData()`，导致整表周期性闪烁。
+- ❌ 静默刷新失败时清空列表，用户看到"闪一下空了"。
+- ❌ 在骨架容器上再套一层 `v-loading`。
+
+### QA 清单
+
+- [ ] 首屏（清缓存强刷）看到骨架，且骨架高度 = 数据到达后高度，Network 慢速 3G 下无跳动。
+- [ ] 翻页 / 排序 / 筛选不出现整块遮罩闪白，仅顶部进度条。
+- [ ] 监控页停留 90s（≥3 次轮询），定时任务表无整表闪烁，数字变化以淡入呈现。
+- [ ] 加载中快速点击分页器与操作按钮，无重复请求、无误触。
+- [ ] 系统开启"减少动态效果"后，微光与进度条停止动画，占位块仍可见。
+- [ ] 暗色模式下骨架对比度可辨（占位块与卡片底有明显区分）。
+- [ ] `npm run build` 通过。
