@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -31,6 +32,7 @@ type CronService struct {
 	partitionLastError      string
 	partitionLastErrorAt    time.Time
 	partitionFailures       int
+	partitionAlert          PartitionAlertFunc
 }
 
 // NewCronService creates and returns a CronService. Tasks are registered
@@ -429,14 +431,48 @@ func (s *CronService) reconcileClicks() {
 	}
 }
 
+// Partition maintenance: coverage state, idempotent catch-up and alerting.
+//
+// click_logs is RANGE partitioned by month, and the catch-all p_future
+// partition is split with REORGANIZE as the calendar advances. That task used
+// to only write a log line, so a failing ALTER (DDL lock, full disk, revoked
+// privilege, MySQL version differences) was invisible: month partitions ran
+// out, every new row fell into p_future and the table silently degraded into
+// one huge unpartitioned table, breaking partition pruning for both stats
+// queries and the retention cleanup. The state below is what makes that
+// observable and self-healing.
+
+const (
+	// partitionAheadMonths is how many months ahead of "now" must already have
+	// a dedicated partition. This is the coverage target: if the newest monthly
+	// partition is further back than now + partitionAheadMonths, new rows are
+	// at risk of landing in p_future.
+	partitionAheadMonths = 2
+	// partitionAlertThreshold is the number of consecutive failures before the
+	// monitor raises a hard (critical) alert.
+	partitionAlertThreshold = 2
+	// partitionMaxAheadMonths bounds the manual "catch up to N months" request.
+	partitionMaxAheadMonths = 12
+	// partitionSchemaMissing answers the "table does not exist" case from
+	// information_schema: a single row with a NULL PARTITION_NAME.
+	partitionSchemaMissing = "partition_schema_missing"
+)
+
+// partitionMismatch carries the "the table exists, but it is not the partitioned
+// shape we expect" cases detected during inspection.
+const (
+	partitionMismatchNotPartitioned = "table_not_partitioned"
+	partitionMismatchNoFuture       = "future_partition_missing"
+)
+
 // PartitionStatus describes how far click_logs monthly RANGE partitions
 // currently reach, plus the last maintenance outcome. It is exposed through the
 // monitor API so a silently-failing ALTER TABLE no longer hides behind a log
-// line: if the newest monthly partition lags behind the required horizon, rows
-// start landing in the catch-all p_future and the table degrades into a single
-// large table (query/cleanup performance decays without any visible error).
+// line.
 type PartitionStatus struct {
 	Table string `json:"table"`
+	// Available is false when the table is missing or not RANGE partitioned.
+	Available bool `json:"available"`
 	// Months is the sorted list of monthly partitions (pYYYYMM) that exist.
 	Months []string `json:"months"`
 	// EarliestMonth / LatestMonth bound the monthly partition range.
@@ -446,10 +482,20 @@ type PartitionStatus struct {
 	RequiredMonth string `json:"required_month"`
 	// BehindMonths is how many months the coverage lags the horizon; 0 = healthy.
 	BehindMonths int `json:"behind_months"`
-	// FutureRows counts rows in p_future. Any sustained growth means new rows
-	// are no longer landing in a real monthly partition.
-	FutureRows int64 `json:"future_rows"`
-	Healthy    bool  `json:"healthy"`
+	// PendingMonths lists the months the next reconcile would create.
+	PendingMonths []string `json:"pending_months"`
+	// FutureRows counts rows in p_future and FutureRatio is its share of the
+	// table (4 decimals). Sustained growth means new rows are no longer landing
+	// in a real monthly partition.
+	FutureRows  int64   `json:"future_rows"`
+	TotalRows   int64   `json:"total_rows"`
+	FutureRatio float64 `json:"future_ratio"`
+	// HasFuture is true when the p_future catch-all exists; REORGANIZE needs it.
+	HasFuture bool `json:"has_future"`
+	// Mismatch names a structural problem ("table_not_partitioned",
+	// "future_partition_missing"), empty when the shape is as expected.
+	Mismatch string `json:"mismatch,omitempty"`
+	Healthy  bool   `json:"healthy"`
 	// LastError is the most recent maintenance failure (empty when healthy).
 	LastError string `json:"last_error,omitempty"`
 	// LastErrorAt is when the last failure happened.
@@ -460,111 +506,337 @@ type PartitionStatus struct {
 	CreatedLastRun int `json:"created_last_run"`
 	// ConsecutiveFailures drives alerting: >= alertThreshold marks the task as
 	// failing so the monitor flags it red instead of silently succeeding.
-	ConsecutiveFailures int  `json:"consecutive_failures"`
-	Failing             bool `json:"failing"`
+	ConsecutiveFailures int `json:"consecutive_failures"`
+	// Failing is the alert signal (consecutive failures past the threshold or a
+	// structural mismatch that blocks maintenance).
+	Failing bool `json:"failing"`
+	// AlertLevel is "ok", "warning" or "critical" for the monitor badge.
+	AlertLevel string `json:"alert_level"`
+	// Alerts lists every reason behind AlertLevel, human readable.
+	Alerts []string `json:"alerts,omitempty"`
 }
 
-const (
-	// partitionAheadMonths is how many months ahead of "now" must already have a
-	// dedicated partition (matches the cron job's own target).
-	partitionAheadMonths = 2
-	// partitionAlertThreshold is the number of consecutive failures before the
-	// monitor raises a hard alert.
-	partitionAlertThreshold = 2
-)
-
 // InspectClickLogsPartitions reports the current partition coverage without
-// mutating anything. Used by the monitor endpoint and by tests.
+// mutating anything. Used by the monitor endpoint and by tests. It never
+// returns nil and never panics on a missing database: the read-only monitor
+// path has to keep rendering even while the DB is unavailable.
 func (s *CronService) InspectClickLogsPartitions() *PartitionStatus {
-	st := &PartitionStatus{Table: "click_logs"}
+	return inspectPartitionStatus(s.db, s.logger, s.partitionSnapshot(), time.Now())
+}
 
-	// Read the last maintenance outcome first so it is reported even when the
-	// coverage query below cannot run (DB down / not configured).
+// partitionSnapshot is the maintenance bookkeeping recorded by notePartitionRun.
+type partitionSnapshot struct {
+	lastRunAt      time.Time
+	createdLastRun int
+	lastError      string
+	lastErrorAt    time.Time
+	failures       int
+}
+
+func (s *CronService) partitionSnapshot() partitionSnapshot {
 	s.mu.RLock()
-	st.LastError = s.partitionLastError
-	st.ConsecutiveFailures = s.partitionFailures
-	if !s.partitionLastErrorAt.IsZero() {
-		t := s.partitionLastErrorAt
+	defer s.mu.RUnlock()
+	return partitionSnapshot{
+		lastRunAt:      s.partitionLastRunAt,
+		createdLastRun: s.partitionCreatedLastRun,
+		lastError:      s.partitionLastError,
+		lastErrorAt:    s.partitionLastErrorAt,
+		failures:       s.partitionFailures,
+	}
+}
+
+// inspectPartitionStatus is the pure, DB-shape-agnostic core of the inspection
+// so it can be unit-tested: every branch is driven by the row set it is handed.
+func inspectPartitionStatus(db *gorm.DB, logger *zap.Logger, snap partitionSnapshot, now time.Time) *PartitionStatus {
+	st := &PartitionStatus{Table: "click_logs"}
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+
+	// Report the last maintenance outcome first so it survives even when the
+	// coverage query below cannot run (DB down / not configured).
+	st.LastError = snap.lastError
+	st.ConsecutiveFailures = snap.failures
+	if !snap.lastErrorAt.IsZero() {
+		t := snap.lastErrorAt
 		st.LastErrorAt = &t
 	}
-	if !s.partitionLastRunAt.IsZero() {
-		t := s.partitionLastRunAt
+	if !snap.lastRunAt.IsZero() {
+		t := snap.lastRunAt
 		st.LastRunAt = &t
 	}
-	st.CreatedLastRun = s.partitionCreatedLastRun
-	s.mu.RUnlock()
+	st.CreatedLastRun = snap.createdLastRun
 
-	st.Failing = st.ConsecutiveFailures >= partitionAlertThreshold
-
-	if s.db == nil {
-		if st.LastError == "" {
-			st.LastError = "database not configured"
-		}
-		st.Healthy = false
+	if db == nil {
+		// A nil *gorm.DB would panic on the query below; the read-only monitor
+		// path must keep rendering while the DB is unavailable.
+		st.LastError = orDefault(st.LastError, "database not configured")
+		st.AlertLevel = "critical"
+		st.Alerts = []string{"数据库未配置，无法检查 click_logs 分区"}
+		st.Failing = true
 		return st
 	}
 
-	var names []string
-	if err := s.db.Raw(
-		`SELECT PARTITION_NAME FROM information_schema.PARTITIONS
-		 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'click_logs'
-		   AND PARTITION_NAME IS NOT NULL`,
-	).Scan(&names).Error; err != nil {
+	var rows []partitionRow
+	err := db.Raw(`SELECT PARTITION_NAME,
+	                      PARTITION_METHOD,
+	                      PARTITION_DESCRIPTION,
+	                      TABLE_ROWS
+	                 FROM information_schema.PARTITIONS
+	                WHERE TABLE_SCHEMA = DATABASE()
+	                  AND TABLE_NAME = 'click_logs'
+	                ORDER BY PARTITION_ORDINAL_POSITION`).Scan(&rows).Error
+	if err != nil {
+		// Coverage is unknown, but the last known failure bookkeeping stays
+		// visible so an operator still sees why maintenance broke.
 		st.LastError = "partition check failed: " + err.Error()
+		st.AlertLevel = "critical"
+		st.Alerts = append(st.Alerts, "分区状态查询失败："+err.Error())
+		st.Failing = true
+		return st
+	}
+	if len(rows) == 0 {
+		// information_schema knows nothing about click_logs: table missing.
+		st.LastError = orDefault(st.LastError, "click_logs 表不存在")
+		st.AlertLevel = "critical"
+		st.Alerts = append(st.Alerts, "click_logs 表不存在，无法进行分区维护")
+		st.Failing = true
 		return st
 	}
 
-	for _, n := range names {
-		if n == "p_future" {
+	st.Available = true
+	for _, r := range rows {
+		if r.PartitionMethod == nil || *r.PartitionMethod != "RANGE" {
+			st.Available = false
+		}
+		if r.PartitionName == nil {
 			continue
 		}
-		t, err := time.Parse("200601", strings.TrimPrefix(n, "p"))
-		if err != nil {
-			continue
+		name := *r.PartitionName
+		if isFuturePartition(name, r.PartitionDescription) {
+			st.HasFuture = true
 		}
-		st.Months = append(st.Months, n)
-		if st.EarliestMonth == "" || t.Before(parseMonth(st.EarliestMonth)) {
-			st.EarliestMonth = n
+		if t, ok := parseMonthPartition(name); ok {
+			st.Months = append(st.Months, name)
+			if st.EarliestMonth == "" || t.Before(parseMonthValue(st.EarliestMonth)) {
+				st.EarliestMonth = name
+			}
+			if st.LatestMonth == "" || t.After(parseMonthValue(st.LatestMonth)) {
+				st.LatestMonth = name
+			}
 		}
-		if st.LatestMonth == "" || t.After(parseMonth(st.LatestMonth)) {
-			st.LatestMonth = n
+		if r.TableRows != nil {
+			st.TotalRows += *r.TableRows
+			if isFuturePartition(name, r.PartitionDescription) {
+				st.FutureRows += *r.TableRows
+			}
 		}
 	}
 	sort.Strings(st.Months)
 
-	now := time.Now()
 	required := monthStart(now.AddDate(0, partitionAheadMonths, 0))
 	st.RequiredMonth = required.Format("200601")
 
 	var latest time.Time
 	if st.LatestMonth != "" {
-		latest = parseMonth(st.LatestMonth)
+		latest = parseMonthValue(st.LatestMonth)
 	}
-	if latest.IsZero() || latest.Before(required) {
-		if latest.IsZero() {
-			st.BehindMonths = monthsBetween(monthStart(now), required) + 1
-		} else {
-			st.BehindMonths = monthsBetween(latest, required)
+	st.PendingMonths = pendingPartitionMonths(latest, now, partitionAheadMonths)
+	st.BehindMonths = len(st.PendingMonths)
+	if latest.IsZero() {
+		st.BehindMonths = monthsBetween(monthStart(now), required) + 1
+	}
+
+	if st.TotalRows > 0 {
+		st.FutureRatio = float64(st.FutureRows) / float64(st.TotalRows)
+	}
+
+	// Structural problems have to be reported separately from "just behind":
+	// maintenance cannot run at all without RANGE partitioning and p_future.
+	if !st.Available {
+		st.Mismatch = partitionMismatchNotPartitioned
+	} else if !st.HasFuture {
+		st.Mismatch = partitionMismatchNoFuture
+	}
+
+	// Alerting: repeated failures, structural mismatch, lagging coverage and
+	// p_future overflow each contribute. Any alert is also logged so a
+	// log-based rule can fire without polling the API.
+	level := "ok"
+	failing := false
+	addAlert := func(critical bool, msg string) {
+		st.Alerts = append(st.Alerts, msg)
+		if critical && level != "critical" {
+			level = "critical"
+		} else if !critical && level == "ok" {
+			level = "warning"
 		}
 	}
-
-	// Rows that fell through into the catch-all partition.
-	if err := s.db.Raw(`SELECT COUNT(*) FROM click_logs PARTITION (p_future)`).Scan(&st.FutureRows).Error; err != nil {
-		// PARTITION clause unsupported / table not partitioned: leave 0 but note it.
-		s.logger.Debug("p_future row count unavailable", zap.Error(err))
+	if snap.failures >= partitionAlertThreshold {
+		failing = true
+		addAlert(true, fmt.Sprintf("分区维护任务连续失败 %d 次，新数据可能已写入 p_future", snap.failures))
+	} else if snap.failures > 0 {
+		addAlert(false, "分区维护任务最近一次执行失败，将在下个周期重试")
 	}
+	if st.Mismatch != "" {
+		failing = true
+		switch st.Mismatch {
+		case partitionMismatchNotPartitioned:
+			addAlert(true, "click_logs 未按 RANGE 分区，分区裁剪与自动扩展均失效")
+		case partitionMismatchNoFuture:
+			addAlert(true, "缺少 p_future 兜底分区，无法通过 REORGANIZE 新增月份分区")
+		}
+	}
+	if st.BehindMonths > 0 {
+		addAlert(st.Mismatch != "", fmt.Sprintf(
+			"分区仅覆盖至 %s，落后目标月 %s 共 %d 个月（待建：%s）",
+			orDefault(st.LatestMonth, "无月度分区"), st.RequiredMonth, st.BehindMonths, strings.Join(st.PendingMonths, ", ")))
+	}
+	if st.FutureRatio >= 0.1 && st.FutureRows > 0 {
+		failing = true
+		addAlert(true, fmt.Sprintf("p_future 已积累 %d 行（占比 %.2f%%），存在未按月分区的数据",
+			st.FutureRows, st.FutureRatio*100))
+	}
+	if len(st.Alerts) == 0 {
+		st.AlertLevel = "ok"
+	} else {
+		st.AlertLevel = level
+	}
+	st.Failing = failing
+	st.Healthy = st.Available && st.HasFuture && st.BehindMonths == 0 && !st.Failing
 
-	st.Healthy = st.BehindMonths == 0 && !st.Failing
+	// Failure state is logged on inspection as well as on the write path, so an
+	// operator tailing the logs sees the alert even between cron windows.
+	for _, a := range st.Alerts {
+		logger.Warn("click_logs partition alert", zap.String("table", st.Table), zap.String("level", st.AlertLevel), zap.String("detail", a))
+	}
 	return st
 }
 
-// notePartitionRun records the outcome of a maintenance attempt so the monitor
-// can surface consecutive failures instead of only a log line.
-func (s *CronService) notePartitionRun(created int, err error) {
+// EnsurePartitionsAhead idempotently creates every missing click_logs month
+// partition up to `months` ahead of now. It returns how many partitions were
+// created and records the outcome for the monitor. Re-running is a no-op and
+// every month is committed by its own ALTER, so a failure half-way still keeps
+// the months that were already created.
+func (s *CronService) EnsurePartitionsAhead(months int) (int, error) {
+	months = normaliseAheadMonths(months)
+	created, err := s.ensureClickLogsPartitionsAhead(months)
+	s.notePartitionRun(created, err)
+	if err != nil {
+		s.logger.Error("partition creation failed", zap.Error(err))
+		// Emit the alert immediately: waiting for the next cron window would
+		// leave the failure invisible for up to 24h.
+		if st := s.InspectClickLogsPartitions(); len(st.Alerts) > 0 {
+			s.logger.Error("click_logs partition maintenance failed",
+				zap.Strings("alerts", st.Alerts),
+				zap.Int("consecutive_failures", st.ConsecutiveFailures),
+				zap.Int("months_behind", st.BehindMonths),
+				zap.Error(err))
+		}
+		return len(created), err
+	}
+	if len(created) > 0 {
+		s.logger.Info("click_logs partitions created",
+			zap.Int("count", len(created)),
+			zap.Strings("months", created),
+			zap.String("coverage_until", s.partitionCoverage()),
+			zap.Int("ahead_months", months))
+	}
+	return len(created), nil
+}
+
+// partitionCoverage is a best-effort "newest monthly partition" label for logs.
+func (s *CronService) partitionCoverage() string {
+	if s.db == nil {
+		return ""
+	}
+	var latest *string
+	if err := s.db.Raw(
+		`SELECT MAX(PARTITION_NAME) FROM information_schema.PARTITIONS
+		  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'click_logs'
+		    AND PARTITION_NAME REGEXP '^p[0-9]{6}$'`).Scan(&latest).Error; err != nil || latest == nil {
+		return ""
+	}
+	return *latest
+}
+
+// ensureClickLogsPartitionsAhead performs the DDL. Every month boundary is the
+// first day of the FOLLOWING month, matching the schema's
+// `PARTITION pYYYYMM VALUES LESS THAN (TO_DAYS('<next month>-01'))` layout.
+// Idempotency comes from reading the existing coverage first, so an already
+// covered month is never re-created (a duplicate partition name is a hard MySQL
+// error).
+func (s *CronService) ensureClickLogsPartitionsAhead(ahead int) ([]string, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("database not configured")
+	}
+	st := inspectPartitionStatus(s.db, s.logger, partitionSnapshot{}, time.Now())
+	if st.LastError != "" && !st.Available {
+		return nil, fmt.Errorf("%s", st.LastError)
+	}
+	if st.Mismatch != "" {
+		switch st.Mismatch {
+		case partitionMismatchNotPartitioned:
+			return nil, fmt.Errorf("click_logs is not RANGE partitioned; cannot extend monthly partitions")
+		case partitionMismatchNoFuture:
+			return nil, fmt.Errorf("click_logs has no p_future catch-all partition; REORGANIZE is not possible")
+		}
+	}
+
+	pending := pendingPartitionMonths(parseMonthValue(st.LatestMonth), time.Now(), ahead)
+	var created []string
+	for _, name := range pending {
+		pname := "p" + name
+		month := parseMonthValue(name)
+		// Boundary for partition pYYYYMM is the first day of the FOLLOWING month.
+		boundary := month.AddDate(0, 1, 0).Format("2006-01-01")
+		// Partition names come from pendingPartitionMonths (p + 6 digits) and
+		// the boundary is a bound parameter, so this is not injectable even
+		// though MySQL forbids placeholders in identifiers.
+		if err := s.db.Exec(
+			`ALTER TABLE click_logs REORGANIZE PARTITION p_future INTO (
+				PARTITION `+pname+` VALUES LESS THAN (TO_DAYS(?)),
+				PARTITION p_future VALUES LESS THAN MAXVALUE
+			)`, boundary).Error; err != nil {
+			return created, &partitionCreateError{month: pname, boundary: boundary, err: err}
+		}
+		created = append(created, pname)
+	}
+	return created, nil
+}
+
+// partitionCreateError carries the month whose ALTER failed, so partial
+// progress can be reported precisely.
+type partitionCreateError struct {
+	month    string
+	boundary string
+	err      error
+}
+
+func (e *partitionCreateError) Error() string {
+	return fmt.Sprintf("create partition %s (VALUES LESS THAN TO_DAYS('%s')): %v", e.month, e.boundary, e.err)
+}
+
+func (e *partitionCreateError) Unwrap() error { return e.err }
+
+// ensureClickLogsPartitions keeps the monthly RANGE partitions of click_logs
+// ahead of the calendar (the cron entry point) and surfaces the outcome through
+// the monitor, not just a log line.
+func (s *CronService) ensureClickLogsPartitions() {
+	if _, err := s.EnsurePartitionsAhead(partitionAheadMonths); err != nil {
+		// EnsurePartitionsAhead already logged the detailed alert.
+		return
+	}
+}
+
+// notePartitionRun records the outcome of a maintenance attempt. Consecutive
+// failures are counted so the monitor can escalate instead of treating every
+// failure as a fresh, equally-expected event.
+func (s *CronService) notePartitionRun(created []string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.partitionLastRunAt = time.Now()
-	s.partitionCreatedLastRun = created
+	s.partitionCreatedLastRun = len(created)
 	if err != nil {
 		s.partitionFailures++
 		s.partitionLastError = err.Error()
@@ -576,97 +848,122 @@ func (s *CronService) notePartitionRun(created int, err error) {
 	s.partitionLastErrorAt = time.Time{}
 }
 
-func monthStart(t time.Time) time.Time {
-	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
+// --- pure partition helpers (unit-tested without a database) ---
+
+// partitionRow mirrors the information_schema.PARTITIONS columns we read. The
+// explicit column tags are required: gorm scans raw-SQL results by name, and the
+// service queries these columns directly (no model/schema involved).
+type partitionRow struct {
+	PartitionName        *string `gorm:"column:PARTITION_NAME"`
+	PartitionMethod      *string `gorm:"column:PARTITION_METHOD"`
+	PartitionDescription *string `gorm:"column:PARTITION_DESCRIPTION"`
+	TableRows            *int64  `gorm:"column:TABLE_ROWS"`
 }
 
-func parseMonth(s string) time.Time {
-	t, err := time.ParseInLocation("200601", s, time.Local)
+// monthStart floors a timestamp to the first day of its month at local midnight.
+func monthStart(t time.Time) time.Time {
+	t = t.In(time.Local)
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.Local)
+}
+
+// parseMonth parses a "YYYYMM" (or "pYYYYMM") label into a month start. Invalid
+// input yields the zero time.
+func parseMonth(v string) time.Time {
+	v = strings.TrimPrefix(v, "p")
+	t, err := time.ParseInLocation("200601", v, time.Local)
 	if err != nil {
 		return time.Time{}
 	}
-	return t
+	return monthStart(t)
 }
 
-// monthsBetween returns the whole number of months from a to b (b later).
+// parseMonthValue is parseMonth with a "" → zero-time passthrough.
+func parseMonthValue(v string) time.Time {
+	return parseMonth(v)
+}
+
+// parseMonthPartition accepts only the pYYYYMM partition naming scheme. A
+// partition called "p000000" is not a month and is rejected.
+func parseMonthPartition(name string) (time.Time, bool) {
+	if len(name) != 7 || name[0] != 'p' {
+		return time.Time{}, false
+	}
+	for i := 1; i < len(name); i++ {
+		if name[i] < '0' || name[i] > '9' {
+			return time.Time{}, false
+		}
+	}
+	if name == "p000000" {
+		return time.Time{}, false
+	}
+	t := parseMonth(name[1:])
+	if t.IsZero() {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// isFuturePartition recognises the catch-all partition by name or by its
+// MAXVALUE upper bound (the schema names it p_future).
+func isFuturePartition(name string, description *string) bool {
+	if strings.EqualFold(name, "p_future") {
+		return true
+	}
+	return description != nil && strings.EqualFold(strings.TrimSpace(*description), "MAXVALUE")
+}
+
+// monthsBetween counts whole months from a to b (0 when a is not before b).
 func monthsBetween(a, b time.Time) int {
-	return (b.Year()-a.Year())*12 + int(b.Month()) - int(a.Month())
+	a, b = monthStart(a), monthStart(b)
+	diff := (b.Year()-a.Year())*12 + int(b.Month()) - int(a.Month())
+	if diff < 0 {
+		return 0
+	}
+	return diff
 }
 
-// ensureClickLogsPartitions keeps the monthly RANGE partitions of click_logs
-// ahead of the calendar so new rows are written to a real partition instead of
-// the catch-all p_future (which would silently turn the table back into a plain
-// large table). It creates one partition per missing month up to two months out
-// using the standard REORGANIZE p_future idiom; re-running is a no-op.
+// pendingPartitionMonths returns the pYYYYMM names that must be created so
+// coverage reaches now + ahead, ascending.
 //
-// Outcome is always recorded via notePartitionRun so a failure becomes
-// observable through the monitor endpoint, not just a server log line.
-func (s *CronService) ensureClickLogsPartitions() {
-	created, err := s.ensureClickLogsPartitionsAhead(partitionAheadMonths)
-	s.notePartitionRun(created, err)
-	if err != nil {
-		s.logger.Error("partition creation failed", zap.Error(err))
-		return
+// When no month partition exists yet (initial setup on a table that was created
+// without any, or a table whose monthly partitions were all reorganised away)
+// the run starts at the current month and creates a gap-free range up to the
+// target. That is deterministic and keeps the requirement "任意时刻手动触发均
+// 可补齐缺失月份" satisfied: whatever the starting point, the end state is the
+// same and re-running changes nothing.
+//
+// History is deliberately NOT back-filled: `REORGANIZE PARTITION p_future` can
+// only split the rows that are actually stored in p_future, so a month that
+// predates the first existing partition could only be created empty, and rows
+// already sitting in an older month partition cannot be moved without a data
+// rebuild (documented in docs/partition-maintenance.md).
+func pendingPartitionMonths(latest time.Time, now time.Time, ahead int) []string {
+	if ahead <= 0 {
+		ahead = partitionAheadMonths
 	}
-	if created > 0 {
-		s.logger.Info("click_logs partitions created", zap.Int("count", created))
+	cur := monthStart(now)
+	target := cur.AddDate(0, ahead, 0)
+
+	next := latest.AddDate(0, 1, 0)
+	if latest.IsZero() || next.Before(cur) {
+		// No month partition yet, or coverage is in the past: start at the
+		// current month so every month up to the target exists.
+		next = cur
 	}
+
+	var out []string
+	for !next.After(target) {
+		out = append(out, next.Format("200601"))
+		next = next.AddDate(0, 1, 0)
+	}
+	return out
 }
 
-// EnsurePartitionsAhead is the idempotent manual entry point (used by the
-// monitor "补齐分区" action). It never errors out on an already-covered range.
-func (s *CronService) EnsurePartitionsAhead(months int) (int, error) {
-	if months < 0 {
-		months = partitionAheadMonths
+func orDefault(v, fallback string) string {
+	if v == "" {
+		return fallback
 	}
-	created, err := s.ensureClickLogsPartitionsAhead(months)
-	s.notePartitionRun(created, err)
-	return created, err
-}
-
-func (s *CronService) ensureClickLogsPartitionsAhead(ahead int) (int, error) {
-	if s.db == nil {
-		return 0, fmt.Errorf("database not configured")
-	}
-	var names []string
-	if err := s.db.Raw(
-		`SELECT PARTITION_NAME FROM information_schema.PARTITIONS
-		 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'click_logs'
-		   AND PARTITION_NAME REGEXP '^p[0-9]{6}$'`,
-	).Scan(&names).Error; err != nil {
-		return 0, fmt.Errorf("partition check failed: %w", err)
-	}
-
-	var maxMonth time.Time
-	for _, n := range names {
-		if t, err := time.Parse("200601", strings.TrimPrefix(n, "p")); err == nil {
-			if t.After(maxMonth) {
-				maxMonth = t
-			}
-		}
-	}
-	if maxMonth.IsZero() {
-		// No monthly partition found; initialise from the current month.
-		maxMonth = monthStart(time.Now())
-	}
-
-	target := time.Now().AddDate(0, ahead, 0) // keep `ahead` months in front
-	created := 0
-	for !maxMonth.AddDate(0, 1, 0).After(target) {
-		next := maxMonth.AddDate(0, 1, 0)
-		// Boundary for partition pYYYYMM is the first day of the FOLLOWING month.
-		boundary := next.AddDate(0, 1, 0).Format("2006-01-01")
-		if err := s.db.Exec(
-			`ALTER TABLE click_logs REORGANIZE PARTITION p_future INTO (
-				PARTITION p`+next.Format("200601")+` VALUES LESS THAN (TO_DAYS(?)),
-				PARTITION p_future VALUES LESS THAN MAXVALUE
-			)`, boundary).Error; err != nil {
-			return created, fmt.Errorf("create partition p%s: %w", next.Format("200601"), err)
-		}
-		created++
-		maxMonth = next
-	}
-	return created, nil
+	return v
 }
 
 // zapLogger adapts zap.Logger to a simple Printf interface.
@@ -805,4 +1102,162 @@ func (s *CronService) reconcileDualWrite() {
 			s.logger.Info("reconcile public→admin done", zap.Int("inserted", inserted))
 		}
 	}
+}
+
+// InspectClickLogsPartitionsContext is InspectClickLogsPartitions bound to a
+// caller-supplied context, so the monitor endpoint cannot hang on a slow
+// information_schema query.
+func (s *CronService) InspectClickLogsPartitionsContext(ctx context.Context) *PartitionStatus {
+	return inspectPartitionStatus(s.db.WithContext(ctx), s.logger, s.partitionSnapshot(), time.Now())
+}
+
+// partitionSnapshotValues exposes the maintenance bookkeeping as plain values
+// (monitor cron table): last run, last error, consecutive failures.
+func (s *CronService) partitionSnapshotValues() (time.Time, string, int) {
+	snap := s.partitionSnapshot()
+	return snap.lastRunAt, snap.lastError, snap.failures
+}
+
+func orTime(v, fallback time.Time) time.Time {
+	if v.IsZero() {
+		return fallback
+	}
+	return v
+}
+
+// PartitionReconcileResult describes what a catch-up attempt did (or would do,
+// for a dry run). The created list is the interesting part for a partial
+// failure: every month in it is already committed.
+type PartitionReconcileResult struct {
+	// Created lists the months (pYYYYMM) materialised by this run, ascending.
+	Created []string `json:"created"`
+	// Pending lists the months that still need to be created after this run.
+	Pending []string `json:"pending"`
+	// DryRun is true when no DDL was executed.
+	DryRun bool `json:"dry_run"`
+	// FailedMonth is the month whose ALTER failed, empty on success.
+	FailedMonth string `json:"failed_month,omitempty"`
+	// Error is the failure message, mirrored into the body for partial
+	// successes so the UI can explain a non-200 response.
+	Error string `json:"error,omitempty"`
+	// Status is the post-run coverage snapshot.
+	Status *PartitionStatus `json:"status,omitempty"`
+	// Alerts / AlertLevel carry the post-run health signal.
+	Alerts     []string `json:"alerts,omitempty"`
+	AlertLevel string   `json:"alert_level,omitempty"`
+}
+
+// PreviewEnsurePartitions reports what EnsurePartitionsWithStatus would create
+// without taking any DDL lock. Useful before running it against a large table.
+func (s *CronService) PreviewEnsurePartitions(months int) (*PartitionReconcileResult, error) {
+	months = normaliseAheadMonths(months)
+	if s.db == nil {
+		return nil, fmt.Errorf("database not configured")
+	}
+	st := s.InspectClickLogsPartitions()
+	if st.LastError != "" && !st.Available {
+		return nil, fmt.Errorf("%s", st.LastError)
+	}
+	pending := pendingPartitionMonths(parseMonthValue(st.LatestMonth), time.Now(), months)
+	res := &PartitionReconcileResult{DryRun: true, Status: st, Alerts: st.Alerts, AlertLevel: st.AlertLevel}
+	for _, m := range pending {
+		res.Created = append(res.Created, "p"+m)
+	}
+	res.Pending = st.PendingMonths
+	return res, nil
+}
+
+// EnsurePartitionsWithStatus runs the catch-up and reports the resulting
+// coverage. It is the same operation as EnsurePartitionsAhead plus a status
+// snapshot, so the manual entry point and the cron task cannot drift apart.
+func (s *CronService) EnsurePartitionsWithStatus(months int) (*PartitionReconcileResult, error) {
+	months = normaliseAheadMonths(months)
+	created, err := s.ensureClickLogsPartitionsAhead(months)
+	s.notePartitionRun(created, err)
+
+	res := &PartitionReconcileResult{Created: created}
+	if err != nil {
+		res.Error = err.Error()
+		res.FailedMonth = failedMonthFromError(err)
+		s.logger.Error("partition creation failed", zap.Error(err))
+	}
+
+	// Always return the post-run snapshot: on failure it shows the progress
+	// made before the error, and with it the remaining gap.
+	st := s.InspectClickLogsPartitions()
+	res.Status = st
+	res.Pending = st.PendingMonths
+	res.Alerts = st.Alerts
+	res.AlertLevel = st.AlertLevel
+	if len(res.Alerts) > 0 {
+		// One consolidated log line, so the alert path does not depend on the
+		// monitor page being open.
+		s.firePartitionAlert(res, st)
+		s.logger.Warn("click_logs partition maintenance finished with alerts",
+			zap.Strings("alerts", res.Alerts),
+			zap.Int("created", len(res.Created)),
+			zap.String("failed_month", res.FailedMonth),
+			zap.Int("months_behind", st.BehindMonths),
+			zap.Int64("future_rows", st.FutureRows),
+			zap.Float64("future_ratio", st.FutureRatio))
+	}
+	if err != nil {
+		return res, err
+	}
+	if len(res.Created) > 0 {
+		s.logger.Info("click_logs partitions created",
+			zap.Int("count", len(res.Created)),
+			zap.Strings("months", res.Created),
+			zap.String("coverage_until", st.LatestMonth))
+	}
+	return res, nil
+}
+
+func normaliseAheadMonths(months int) int {
+	if months <= 0 {
+		return partitionAheadMonths
+	}
+	if months > partitionMaxAheadMonths {
+		return partitionMaxAheadMonths
+	}
+	return months
+}
+
+// failedMonthFromError extracts the pYYYYMM partition name from a
+// partitionCreateError, empty when the error carries no month information.
+func failedMonthFromError(err error) string {
+	var pce *partitionCreateError
+	if errors.As(err, &pce) {
+		return pce.month
+	}
+	return ""
+}
+
+// PartitionAlertFunc is invoked whenever a maintenance run finishes with
+// concerns, so the alert can reach an outbound channel instead of only the
+// server log.
+type PartitionAlertFunc func(res *PartitionReconcileResult, st *PartitionStatus)
+
+// SetPartitionAlertHook registers the alerting callback (nil disables it).
+// main.go wires this to the webhook dispatcher, which means a failing ALTER
+// notifies subscribers instead of degrading silently.
+func (s *CronService) SetPartitionAlertHook(fn PartitionAlertFunc) {
+	s.mu.Lock()
+	s.partitionAlert = fn
+	s.mu.Unlock()
+}
+
+// firePartitionAlert reports an unhealthy result to the registered hook. It is
+// best-effort: alerting must never fail the maintenance path.
+func (s *CronService) firePartitionAlert(res *PartitionReconcileResult, st *PartitionStatus) {
+	if st == nil || len(st.Alerts) == 0 {
+		return
+	}
+	s.mu.RLock()
+	hook := s.partitionAlert
+	s.mu.RUnlock()
+	if hook == nil {
+		return
+	}
+	hook(res, st)
 }
