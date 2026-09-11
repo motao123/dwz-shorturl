@@ -12,9 +12,12 @@ import type { LineSeriesOption } from 'echarts/charts'
 import type { GridComponentOption, TooltipComponentOption, DataZoomComponentOption } from 'echarts/components'
 import { getOverview, getTrend } from '@/api/stats'
 import type { StatsOverview } from '@/api/stats'
+import { useChartTheme } from '@/composables/useChartTheme'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, DataZoomComponent])
 type ECOption = ComposeOption<LineSeriesOption | GridComponentOption | TooltipComponentOption | DataZoomComponentOption>
+
+const chart = useChartTheme()
 
 const loading = ref(false)
 const chartLoading = ref(false)
@@ -66,34 +69,43 @@ async function loadOverview() {
   }
 }
 
+/** #rrggbb → rgba(r,g,b,a)，保持渐变与主题色一致 */
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return hex
+  const n = parseInt(m[1], 16)
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
+}
+
 const chartOption = ref<ECOption>({})
 
 async function loadTrend() {
   chartLoading.value = true
   try {
     const points = (await getTrend({ granularity: 'day', days: 7 })) ?? []
+    const c = chart.value
     chartOption.value = {
       tooltip: {
         trigger: 'axis',
-        backgroundColor: 'rgba(12, 42, 48, 0.92)',
+        backgroundColor: c.tooltipBg,
         borderWidth: 0,
-        textStyle: { color: '#e8f4f2', fontSize: 12.5 },
-        axisPointer: { type: 'line', lineStyle: { color: '#f5a623', width: 1, type: 'dashed' } }
+        textStyle: { color: c.tooltipFg, fontSize: 12.5 },
+        axisPointer: { type: 'line', lineStyle: { color: c.accent, width: 1, type: 'dashed' } }
       },
       grid: { left: 8, right: 18, top: 26, bottom: 6, containLabel: true },
       xAxis: {
         type: 'category',
         boundaryGap: false,
         data: points.map((p) => p.label),
-        axisLine: { lineStyle: { color: '#dfe7ea' } },
+        axisLine: { lineStyle: { color: c.grid } },
         axisTick: { show: false },
-        axisLabel: { color: '#6b7f86', fontSize: 11.5, fontFamily: 'JetBrains Mono' }
+        axisLabel: { color: c.axis, fontSize: 11.5, fontFamily: c.fontMono }
       },
       yAxis: {
         type: 'value',
         minInterval: 1,
-        axisLabel: { color: '#6b7f86', fontSize: 11.5, fontFamily: 'JetBrains Mono' },
-        splitLine: { lineStyle: { color: '#e8eef0', type: 'dashed' } }
+        axisLabel: { color: c.axis, fontSize: 11.5, fontFamily: c.fontMono },
+        splitLine: { lineStyle: { color: c.grid, type: 'dashed' } }
       },
       series: [
         {
@@ -103,16 +115,16 @@ async function loadTrend() {
           symbol: 'circle',
           symbolSize: 7,
           data: points.map((p) => p.clicks),
-          lineStyle: { width: 3, color: '#0e6e75' },
-          itemStyle: { color: '#0e6e75', borderColor: '#fff', borderWidth: 2 },
-          emphasis: { itemStyle: { color: '#f5a623', borderColor: '#fff' } },
+          lineStyle: { width: 3, color: c.primary },
+          itemStyle: { color: c.primary, borderColor: c.tooltipBg, borderWidth: 2 },
+          emphasis: { itemStyle: { color: c.accent, borderColor: c.tooltipBg } },
           areaStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(14, 110, 117, 0.22)' },
-                { offset: 1, color: 'rgba(14, 110, 117, 0.01)' }
+                { offset: 0, color: hexToRgba(c.primary, 0.22) },
+                { offset: 1, color: hexToRgba(c.primary, 0.01) }
               ]
             }
           }

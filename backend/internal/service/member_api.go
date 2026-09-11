@@ -59,7 +59,7 @@ type MemberApiService interface {
 	Me(memberID uint64) (*model.Member, error)
 	GetLinkStats(memberID uint64, uid string) (*MemberLinkStat, error)
 	UpdateLinkExpiry(memberID, linkID uint64, expireDays int) (*model.ShortUrl, error)
-	UpdateLink(memberID, linkID uint64, longURL, title string, expireDays *int) (*model.ShortUrl, error)
+	UpdateLink(memberID, linkID uint64, longURL string, title *string, expireDays *int) (*model.ShortUrl, error)
 	Summary(memberID uint64) (*MemberSummary, error)
 	ExportLinks(memberID uint64) ([]byte, error)
 	RenewExpiring(memberID uint64, expireDays int) (int64, error)
@@ -319,7 +319,7 @@ func (s *memberApiService) RenewExpiring(memberID uint64, expireDays int) (int64
 // UpdateLink edits one of the member's own short links (target URL, title and
 // optionally expiry). Ownership is enforced and the public wjoy_log row is kept
 // in sync so the primary PHP path serves the updated target.
-func (s *memberApiService) UpdateLink(memberID, linkID uint64, longURL, title string, expireDays *int) (*model.ShortUrl, error) {
+func (s *memberApiService) UpdateLink(memberID, linkID uint64, longURL string, title *string, expireDays *int) (*model.ShortUrl, error) {
 	record, err := s.shortUrlRepo.FindByID(linkID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -339,26 +339,47 @@ func (s *memberApiService) UpdateLink(memberID, linkID uint64, longURL, title st
 		record.LongURL = longURL
 		record.URLHash = urlHash(longURL, urlScopeKey(record.MemberID, record.CreatedBy))
 	}
-	if title != "" {
-		record.Title = title
+	// title is a three-state pointer: nil keeps the current title, an empty
+	// string clears it and any other value replaces it.
+	if title != nil {
+		record.Title = strings.TrimSpace(*title)
 	}
 	if expireDays != nil {
 		if *expireDays > 0 {
 			exp := time.Now().Add(time.Duration(*expireDays) * 24 * time.Hour)
 			record.ExpireAt = &exp
-			record.Status = 1 // re-enable if it was expired/disabled
 		} else {
+			// Permanent: clear the expiry and re-activate the link so the public
+			// path stops returning 410 for a link the UI reports as enabled.
 			record.ExpireAt = nil
 		}
+		record.Status = 1
 		record.ReminderSentAt = nil // 改有效期后允许再次触发到期提醒
 	}
 
-	if err := s.shortUrlRepo.Update(record); err != nil {
+	// Only persist the fields the member actually changed instead of saving the
+	// whole record, so a concurrent admin edit is not silently overwritten.
+	updates := map[string]interface{}{
+		"long_url": record.LongURL,
+		"url_hash": record.URLHash,
+		"title":    record.Title,
+	}
+	if expireDays != nil {
+		updates["expire_at"] = record.ExpireAt
+		updates["status"] = record.Status
+		updates["reminder_sent_at"] = record.ReminderSentAt
+	}
+	if err := s.shortUrlRepo.UpdatesByID(record.ID, updates); err != nil {
+		return nil, err
+	}
+	// Refresh the returned record so the caller sees the persisted state.
+	record, err = s.shortUrlRepo.FindByID(linkID)
+	if err != nil {
 		return nil, err
 	}
 	if s.wjoyLog != nil {
 		_ = s.wjoyLog.Update(record.UID, record.LongURL, record.URLHash, record.ExpireAt, nil)
-		if expireDays != nil && *expireDays > 0 {
+		if expireDays != nil && record.Status == 1 {
 			_ = s.wjoyLog.SetStatus(record.UID, 1)
 		}
 	}

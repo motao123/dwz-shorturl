@@ -544,7 +544,13 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 				record.Status = 1
 			}
 		} else {
+			// expireDays <= 0 means "permanent": clear the expiry AND bring an
+			// expired/disabled link back to active, otherwise the row would show
+			// enabled in the console while the public path still returns 410.
 			record.ExpireAt = nil
+			if status == nil && record.Status != 1 {
+				record.Status = 1
+			}
 		}
 		// 续期/改有效期后允许再次触发到期提醒
 		record.ReminderSentAt = nil
@@ -579,9 +585,12 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 		if err := s.wjoyLog.Update(record.UID, record.LongURL, record.URLHash, record.ExpireAt, password); err != nil {
 			log.Printf("sync wjoy_log on update failed: uid=%s err=%v", record.UID, err)
 		}
-		// Re-enable the public row when the admin renews an expired link.
-		if expireDays != nil && *expireDays > 0 && record.Status == 1 {
-			_ = s.wjoyLog.SetStatus(record.UID, 1)
+		// Keep the public row's status in sync: renewing an expired link, or
+		// switching it to permanent (expire_days <= 0), must both re-enable it.
+		if expireDays != nil && record.Status == 1 {
+			if err := s.wjoyLog.SetStatus(record.UID, 1); err != nil {
+				log.Printf("sync wjoy_log status on update failed: uid=%s err=%v", record.UID, err)
+			}
 		}
 	}
 

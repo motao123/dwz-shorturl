@@ -31,21 +31,7 @@ func (h *StatsHandler) Overview(c *gin.Context) {
 
 func (h *StatsHandler) Trend(c *gin.Context) {
 	granularity := c.DefaultQuery("granularity", "day")
-
-	var dateFrom, dateTo *time.Time
-	if df := c.Query("date_from"); df != "" {
-		t, err := time.Parse("2006-01-02", df)
-		if err == nil {
-			dateFrom = &t
-		}
-	}
-	if dt := c.Query("date_to"); dt != "" {
-		t, err := time.Parse("2006-01-02", dt)
-		if err == nil {
-			end := t.Add(24*time.Hour - time.Millisecond)
-			dateTo = &end
-		}
-	}
+	dateFrom, dateTo := queryDateRange(c)
 
 	result, err := h.svc.Trend(granularity, dateFrom, dateTo)
 	if err != nil {
@@ -56,15 +42,41 @@ func (h *StatsHandler) Trend(c *gin.Context) {
 	pkg.Success(c, result)
 }
 
-func (h *StatsHandler) TopN(c *gin.Context) {
-	n := 10
-	if ns := c.Query("n"); ns != "" {
-		if v, err := strconv.Atoi(ns); err == nil && v > 0 {
-			n = v
+// queryLimit reads a list-size parameter, accepting both `limit` (used by the
+// frontend) and the legacy `n` name. Without this the frontend's `limit` was
+// silently dropped and Top/Recent always returned the default size.
+func queryLimit(c *gin.Context, fallback int) int {
+	for _, key := range []string{"limit", "n"} {
+		if raw := c.Query(key); raw != "" {
+			if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+				return v
+			}
 		}
 	}
+	return fallback
+}
 
-	result, err := h.svc.TopN(n)
+// queryDateRange parses the shared date_from/date_to (YYYY-MM-DD) filters.
+func queryDateRange(c *gin.Context) (dateFrom, dateTo *time.Time) {
+	if df := c.Query("date_from"); df != "" {
+		if t, err := time.Parse("2006-01-02", df); err == nil {
+			dateFrom = &t
+		}
+	}
+	if dt := c.Query("date_to"); dt != "" {
+		if t, err := time.Parse("2006-01-02", dt); err == nil {
+			end := t.Add(24*time.Hour - time.Millisecond)
+			dateTo = &end
+		}
+	}
+	return dateFrom, dateTo
+}
+
+func (h *StatsHandler) TopN(c *gin.Context) {
+	n := queryLimit(c, 10)
+	dateFrom, dateTo := queryDateRange(c)
+
+	result, err := h.svc.TopN(n, dateFrom, dateTo)
 	if err != nil {
 		pkg.Fail(c, http.StatusInternalServerError, pkg.CodeInternalError, "failed to get top urls")
 		return
@@ -88,12 +100,7 @@ func (h *StatsHandler) LinkStats(c *gin.Context) {
 }
 
 func (h *StatsHandler) Recent(c *gin.Context) {
-	n := 20
-	if ns := c.Query("n"); ns != "" {
-		if v, err := strconv.Atoi(ns); err == nil && v > 0 {
-			n = v
-		}
-	}
+	n := queryLimit(c, 20)
 
 	result, err := h.svc.Recent(n)
 	if err != nil {
@@ -106,12 +113,7 @@ func (h *StatsHandler) Recent(c *gin.Context) {
 
 // Countries returns the global traffic-source country distribution (30 days).
 func (h *StatsHandler) Countries(c *gin.Context) {
-	limit := 12
-	if ns := c.Query("limit"); ns != "" {
-		if v, err := strconv.Atoi(ns); err == nil && v > 0 {
-			limit = v
-		}
-	}
+	limit := queryLimit(c, 12)
 	result, err := h.svc.Countries(limit)
 	if err != nil {
 		pkg.Fail(c, http.StatusInternalServerError, pkg.CodeInternalError, "failed to get country distribution")
@@ -122,12 +124,7 @@ func (h *StatsHandler) Countries(c *gin.Context) {
 
 // ReferrerTypes returns the global referrer-type breakdown (30 days).
 func (h *StatsHandler) ReferrerTypes(c *gin.Context) {
-	limit := 8
-	if ns := c.Query("limit"); ns != "" {
-		if v, err := strconv.Atoi(ns); err == nil && v > 0 {
-			limit = v
-		}
-	}
+	limit := queryLimit(c, 8)
 	result, err := h.svc.ReferrerTypes(limit)
 	if err != nil {
 		pkg.Fail(c, http.StatusInternalServerError, pkg.CodeInternalError, "failed to get referrer types")
