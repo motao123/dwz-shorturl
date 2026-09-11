@@ -321,7 +321,7 @@ onMounted(() => {
           style="width: 260px"
           @change="handleFilterChange"
         />
-        <el-button :icon="Refresh" circle title="刷新" @click="reload" />
+        <el-button :icon="Refresh" circle aria-label="刷新" title="刷新" @click="reload" />
       </div>
     </div>
 

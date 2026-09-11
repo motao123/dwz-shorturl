@@ -78,6 +78,8 @@ func (h *ShortUrlHandler) CheckLink(c *gin.Context) {
 		pkg.Success(c, gin.H{"id": id, "url": record.LongURL, "ok": false, "status": 0, "error": "url not allowed for health check"})
 		return
 	}
+	// Redirects are capped at 3 hops: an unbounded 302 chain would otherwise
+	// pin a connection slot until the 5s timeout expires.
 	client := pkg.NewSafeHTTPClient(5 * time.Second)
 	req, err := http.NewRequest(http.MethodHead, record.LongURL, nil)
 	if err != nil {
@@ -440,13 +442,19 @@ func (h *ShortUrlHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.svc.Delete(id); err != nil {
-		// The admin row is already deleted; only the public wjoy_log sync failed.
-		// Return 200 with an explicit flag so the console can tell the operator
-		// "local delete done, public sync pending" instead of failing the action.
+		// A PublicSyncError means the admin-side delete succeeded but the public
+		// wjoy_log mirror did not. Report it as a partial success so the operator
+		// sees the affected UID and knows the periodic reconcile will retry,
+		// instead of an opaque 400 that hides the successful local delete.
 		var syncErr *service.PublicSyncError
 		if errors.As(err, &syncErr) {
-			auditLog(c, h.auditSvc, "short_url", "short_url_delete", id, `{"sync":"failed"}`)
-			pkg.Success(c, gin.H{"deleted": true, "public_sync": false, "sync_error": syncErr.Error()})
+			auditLog(c, h.auditSvc, "short_url", "short_url_delete", id, `{"public_sync_failed":true}`)
+			pkg.Success(c, gin.H{
+				"deleted":            true,
+				"public_sync_failed": true,
+				"sync_failed_uids":   syncErr.UIDs,
+				"warning":            syncErr.Error(),
+			})
 			return
 		}
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
@@ -465,13 +473,17 @@ func (h *ShortUrlHandler) BatchDelete(c *gin.Context) {
 	}
 
 	if err := h.svc.BatchDelete(req.IDs); err != nil {
+		// Local rows are already deleted; only the public wjoy_log mirror failed.
+		// Return a partial success carrying the affected UIDs so the console can
+		// report "local delete done, public sync pending" instead of a 400.
 		var syncErr *service.PublicSyncError
 		if errors.As(err, &syncErr) {
-			auditLog(c, h.auditSvc, "short_url", "short_url_batch_delete", 0, `{"count":`+strconv.Itoa(len(req.IDs))+`,"sync":"failed"}`)
+			auditLog(c, h.auditSvc, "short_url", "short_url_batch_delete", 0, `{"count":`+strconv.Itoa(len(req.IDs))+`,"public_sync_failed":true}`)
 			pkg.Success(c, gin.H{
-				"deleted": true, "public_sync": false,
-				"sync_error":    syncErr.Error(),
-				"unsynced_uids": syncErr.UIDs,
+				"deleted":            true,
+				"public_sync_failed": true,
+				"sync_failed_uids":   syncErr.UIDs,
+				"warning":            syncErr.Error(),
 			})
 			return
 		}

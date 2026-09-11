@@ -3,32 +3,18 @@ package pkg
 import (
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
 
-func TestNewSafeHTTPClientCapsRedirects(t *testing.T) {
-	c := NewSafeHTTPClient(2 * time.Second)
+// TestSafeRedirectPolicyBlocksInternalTargets covers the redirect-time guard on
+// NewSafeHTTPClient: every hop must use http(s) and a public host.
+func TestSafeRedirectPolicyBlocksInternalTargets(t *testing.T) {
+	c := NewSafeHTTPClient(time.Second)
 	if c.CheckRedirect == nil {
 		t.Fatal("expected a redirect policy to be installed")
 	}
-	// Build a chain of len(via) == maxSafeRedirects requests: must be rejected.
-	via := make([]*http.Request, maxSafeRedirects)
-	for i := range via {
-		via[i] = &http.Request{URL: mustURL(t, "https://example.com/a")}
-	}
-	req := &http.Request{URL: mustURL(t, "https://example.com/b")}
-	if err := c.CheckRedirect(req, via); err == nil {
-		t.Fatalf("expected redirect chain of %d hops to be blocked", maxSafeRedirects)
-	}
-	// One hop fewer is allowed.
-	if err := c.CheckRedirect(req, via[:maxSafeRedirects-1]); err != nil {
-		t.Fatalf("expected %d hops to be allowed, got %v", maxSafeRedirects-1, err)
-	}
-}
-
-func TestSafeRedirectPolicyBlocksInternalTargets(t *testing.T) {
-	c := NewSafeHTTPClient(time.Second)
 	cases := []struct {
 		name string
 		raw  string
@@ -75,4 +61,37 @@ func mustURL(t *testing.T, raw string) *url.URL {
 		t.Fatalf("bad test URL %q: %v", raw, err)
 	}
 	return u
+}
+
+// TestSafeHTTPClientCapsRedirects verifies the hop cap is enforced: once the
+// number of followed redirects reaches the budget the chain is aborted, so an
+// endless 302 loop cannot consume the whole request timeout.
+//
+// The cap is exercised through the installed CheckRedirect policy rather than
+// an httptest chain: httptest always binds to a loopback address, and the
+// production policy (correctly) rejects such redirect targets first, so the
+// limit error would never be the one surfaced.
+func TestSafeHTTPClientCapsRedirects(t *testing.T) {
+	client := newSafeHTTPClient(2*time.Second, defaultMaxRedirects)
+	if client.CheckRedirect == nil {
+		t.Fatal("expected a redirect policy to be installed")
+	}
+
+	via := make([]*http.Request, 0, defaultMaxRedirects)
+	for i := 0; i < defaultMaxRedirects; i++ {
+		via = append(via, &http.Request{URL: mustURL(t, "https://93.184.216.34/next")})
+	}
+	// len(via) already at the budget: the next hop must be refused.
+	req := &http.Request{URL: mustURL(t, "https://93.184.216.34/next")}
+	err := client.CheckRedirect(req, via)
+	if err == nil {
+		t.Fatal("expected the redirect chain to be capped")
+	}
+	if !strings.Contains(err.Error(), "too many redirects") {
+		t.Fatalf("expected redirect-limit error, got %v", err)
+	}
+	// One hop fewer than the budget is still allowed.
+	if err := client.CheckRedirect(req, via[:defaultMaxRedirects-1]); err != nil {
+		t.Fatalf("expected %d hops to be allowed, got %v", defaultMaxRedirects-1, err)
+	}
 }

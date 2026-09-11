@@ -336,11 +336,17 @@ func (h *MemberApiHandler) DeleteLink(c *gin.Context) {
 			pkg.Fail(c, http.StatusNotFound, pkg.CodeNotFound, "link not found")
 			return
 		}
+		// Local delete succeeded but the public mirror failed: report a partial
+		// success so the member is not told the delete outright failed, and the
+		// compensation cron can retry the wjoy_log sync.
 		var syncErr *service.PublicSyncError
 		if errors.As(err, &syncErr) {
-			// Local row already deleted; tell the member the public path may
-			// still serve briefly until the compensation cron catches up.
-			pkg.Success(c, gin.H{"deleted": true, "public_sync": false, "sync_error": syncErr.Error()})
+			pkg.Success(c, gin.H{
+				"deleted":            true,
+				"public_sync_failed": true,
+				"sync_failed_uids":   syncErr.UIDs,
+				"warning":            syncErr.Error(),
+			})
 			return
 		}
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())

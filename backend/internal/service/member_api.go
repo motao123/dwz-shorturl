@@ -412,6 +412,8 @@ func (s *memberApiService) FetchTitle(rawURL string) (string, error) {
 	}
 	// P1-5: the dialer also refuses private IPs at connect time, closing the
 	// DNS-rebinding window between validation and fetch.
+	// Same redirect cap as the health check: a malicious target can otherwise
+	// keep us hopping until the timeout.
 	client := pkg.NewSafeHTTPClient(5 * time.Second)
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -637,9 +639,10 @@ func (s *memberApiService) DeleteLink(memberID, linkID uint64) error {
 		return err
 	}
 	// Disable the public wjoy_log row so the primary PHP path stops serving it.
-	// The local row is already gone, so a sync failure is reported (not rolled
-	// back) and surfaced to the member instead of silently leaving the PHP path
-	// serving a link the console shows as deleted.
+	// Same rationale as the admin path: the local row is already gone, so a sync
+	// failure is reported (not rolled back) and surfaced to the member — ignoring
+	// it would leave the link reachable through PHP while the member console
+	// reports it deleted.
 	if s.wjoyLog != nil {
 		if err := s.wjoyLog.SetStatus(record.UID, 0); err != nil {
 			return &PublicSyncError{Op: "member_delete", UIDs: []string{record.UID}, Err: err}

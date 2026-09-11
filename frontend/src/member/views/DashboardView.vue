@@ -8,6 +8,7 @@ import { Link, Refresh, Delete, CopyDocument, Sunny, Moon, ArrowDown } from '@el
 import dayjs from 'dayjs'
 import { useThemeStore } from '@/stores/theme'
 import { copyText } from '@/utils/clipboard'
+import { useResponsive } from '@/composables/useResponsive'
 import {
   fetchSession,
   getMyLinks,
@@ -39,6 +40,10 @@ const loading = ref(false)
 const rows = ref<MemberLink[]>([])
 const total = ref(0)
 const page = ref(1)
+
+// 窄屏下分页器收敛，避免溢出；宽屏仍保持简洁布局
+const { isTablet } = useResponsive()
+const pagerLayout = computed(() => (isTablet.value ? 'prev, pager, next' : 'total, prev, pager, next'))
 const keyword = ref('')
 const statusFilter = ref('')
 const summary = ref<MemberSummary>({ total_links: 0, total_clicks: 0, month_new: 0 })
@@ -189,10 +194,11 @@ async function handleDelete(row: MemberLink) {
     return
   }
   try {
-    const r = await deleteLink(row.id)
-    if (r && r.public_sync === false) {
+    const res = await deleteLink(row.id)
+    // 本地已删除，但公共跳转库(wjoy_log)同步失败，需明确告知以免误判
+    if (res?.public_sync_failed) {
       ElMessage.warning({
-        message: `已从列表移除，但公共库同步失败，短码可能仍可访问，系统会自动补偿。`,
+        message: `已从列表移除，但公共库(wjoy_log)同步失败，短码可能仍可访问，系统会在 30 分钟内自动补偿。`,
         duration: 6000
       })
     } else {
@@ -467,7 +473,7 @@ onMounted(async () => {
         <span>短网址会员中心</span>
       </a>
       <div class="user">
-        <el-button text :icon="themeStore.dark ? Sunny : Moon" :title="themeStore.dark ? '切换到浅色' : '切换到深色'" @click="themeStore.toggle()" />
+        <el-button text :icon="themeStore.dark ? Sunny : Moon" :aria-label="themeStore.dark ? '切换到浅色' : '切换到深色'" :title="themeStore.dark ? '切换到浅色' : '切换到深色'" @click="themeStore.toggle()" />
         <span class="user-name">{{ member?.username }}</span>
         <a class="home-link" href="/">返回首页</a>
         <el-button text @click="handleLogout">退出</el-button>
@@ -536,7 +542,7 @@ onMounted(async () => {
             <el-button type="warning" plain @click="handleRenewExpiring">一键续期</el-button>
             <el-button @click="handleExport">导出 CSV</el-button>
             <el-button @click="openImport">导入</el-button>
-            <el-button :icon="Refresh" circle @click="load" />
+            <el-button :icon="Refresh" circle aria-label="刷新列表" @click="load" />
           </div>
         </div>
         <el-table v-loading="loading" :data="rows" stripe>
@@ -577,10 +583,10 @@ onMounted(async () => {
           <el-table-column label="操作" width="160" align="center">
             <template #default="{ row }">
               <div class="ops">
-                <el-button :icon="CopyDocument" circle size="small" title="复制短链" @click="copy(row.short_url)" />
-                <el-button :icon="Delete" circle size="small" type="danger" plain title="删除" @click="handleDelete(row as MemberLink)" />
+                <el-button :icon="CopyDocument" circle size="small" aria-label="复制短链" title="复制短链" @click="copy(row.short_url)" />
+                <el-button :icon="Delete" circle size="small" type="danger" plain aria-label="删除短链" title="删除" @click="handleDelete(row as MemberLink)" />
                 <el-dropdown trigger="click" @command="(cmd: string) => handleMore(cmd, row as MemberLink)">
-                  <el-button size="small" title="更多">
+                  <el-button size="small" aria-label="更多操作" title="更多">
                     更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
                   </el-button>
                   <template #dropdown>
@@ -604,7 +610,7 @@ onMounted(async () => {
             v-model:current-page="page"
             :total="total"
             :page-size="20"
-            layout="prev, pager, next"
+            :layout="pagerLayout"
             background
             @current-change="load"
           />
