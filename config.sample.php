@@ -23,12 +23,26 @@ $trusted_proxies = array();
 $rate_limit_dir = __DIR__ . '/logs/ratelimit';
 
 // 管理后台数据库（用于把新短链双写到 short_urls，收敛数据源）。
-// 留空 user/name 则关闭双写（仅写 wjoy_log）。
-$admin_db_host = '127.0.0.1';
-$admin_db_port = 3306;
-$admin_db_user = '';
-$admin_db_pwd = '';
-$admin_db_name = '';
+//
+// 【推荐】单库模式：short_urls 与 wjoy_log 放在同一个库里。
+// 只需要打开下面这个开关，其余连接参数自动复用上面的主库配置，
+// 不用再填第二套账号密码，也没有跨库权限与 COLLATE 问题。
+// Docker 一键部署（docker compose up -d）默认就是这个模式。
+$admin_db_same_as_main = true;
+if ($admin_db_same_as_main) {
+    $admin_db_host = $host;
+    $admin_db_port = $port;
+    $admin_db_user = $user;
+    $admin_db_pwd = $pwd;
+    $admin_db_name = $dbname;
+} else {
+    // 分库模式：独立的管理库。留空 user/name 则关闭双写（仅写 wjoy_log）。
+    $admin_db_host = '127.0.0.1';
+    $admin_db_port = 3306;
+    $admin_db_user = '';
+    $admin_db_pwd = '';
+    $admin_db_name = '';
+}
 
 // 链接访问密码 + 会员 JWT 的 HMAC 密钥（≥32 字节随机值）。
 // - 必须与 Go 后端 config.yaml 的 jwt.member_secret 保持一致，否则 PHP 与 Go

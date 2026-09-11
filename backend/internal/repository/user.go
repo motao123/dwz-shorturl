@@ -16,6 +16,7 @@ type UserRepo interface {
 	Update(user *model.User) error
 	List(page, perPage int, keyword string) ([]model.User, int64, error)
 	UpdateLastLogin(id uint64, ip string) error
+	UpdatePassword(id uint64, passwordHash string) error
 	SoftDelete(id uint64) error
 	GetRoles(userID uint64) ([]model.Role, error)
 	SetRoles(userID uint64, roleIDs []uint64) error
@@ -92,6 +93,14 @@ func (r *userRepo) UpdateLastLogin(id uint64, ip string) error {
 		"last_login_at": now,
 		"last_login_ip": ip,
 	}).Error
+}
+
+// UpdatePassword writes only the password hash, so a password reset cannot
+// clobber concurrent edits to the rest of the row (Save would write every
+// column it holds in memory).
+func (r *userRepo) UpdatePassword(id uint64, passwordHash string) error {
+	return r.db.Model(&model.User{}).Where("id = ?", id).
+		Update("password_hash", passwordHash).Error
 }
 
 // SoftDelete soft-deletes a user and its role bindings so user_roles never

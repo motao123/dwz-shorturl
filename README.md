@@ -129,7 +129,45 @@ DWZ 短网址平台是一套 **PHP 前台 + Go 核心 + Vue3 管理台** 的三�
 
 ## 🚀 快速开始
 
-### Docker Compose（推荐）
+### 一键 Docker 部署（推荐，单库模式）
+
+只需填 4 个密码，起来就能用 —— **不需要建两个数据库，也不需要跑 setup.php**：
+
+```bash
+git clone https://github.com/motao123/dwz-shorturl.git
+cd dwz-shorturl
+cp .env.example .env      # 填 MYSQL_ROOT_PASSWORD / DB_PASSWORD / ADMIN_PASSWORD / REDIS_PASSWORD
+docker compose up -d
+docker compose logs init  # 看初始化结果，会打印管理台地址与登录账号
+```
+
+然后浏览器打开 `http://<主机IP>/admin/`，用 `.env` 里的 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 直接登录。
+
+一个 `up -d` 自动完成四件事：
+
+| 步骤 | 说明 |
+|---|---|
+| ① 建库建表 | 单个数据库，管理表（`short_urls`/`users`…）与公共表（`wjoy_log`/`members`…）同库 |
+| ② 执行迁移 | 统一入口 `cmd/migrate` 跑完全部迁移并记录 `schema_migrations`，幂等可重跑 |
+| ③ 生成配置 | 自动生成后端 `config.yaml` 与前台 `config.php`，密钥同源、互相对得上 |
+| ④ 创建管理员 | 用你给的 `ADMIN_PASSWORD` 建号并授予 `super_admin`，**不留任何默认口令** |
+
+忘记管理台密码时：把 `.env` 里 `RESET_ADMIN_PASSWORD=1`，然后 `docker compose up -d --force-recreate init`。
+
+> 进阶：需要单独拆分数据库/Redis/前后端时，用 `deploy/docker-compose.yml`（分库部署，行为与旧版一致）。
+
+##### 单库 vs 分库
+
+| | 单库（`docker-compose.yml`） | 分库（`deploy/docker-compose.yml`） |
+|---|---|---|
+| 数据库数量 | **1 个**，管理表与公共表同库 | 2 个（管理库 + 公共库） |
+| 配置项 | 只填主库连接，`admin_db_*` 自动复用 | 需要分别配置两套连接 |
+| 初始化 | `init` 容器全自动 | 手工跑迁移 + `setup.php` |
+| 适用 | 绝大多数自建场景、宝塔/单机、Docker | 已有独立两库、多站点共用公共库 |
+
+单库模式由 `$admin_db_same_as_main = true`（PHP）与 `public_db.dbname == database.dbname`（Go）表达；迁移工具识别到两者同名时会自动进入单库模式（也可用 `-same-db` 显式指定）。
+
+### Docker Compose 分库部署
 
 ```bash
 git clone https://github.com/motao123/dwz-shorturl.git
@@ -169,10 +207,25 @@ DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh --public-db=<�
 cd backend && go run ./cmd/migrate -baseline -migrations ../backend/migrations
 
 # 4. PHP 前台（需 PHP 8 + mysqli）
+#    单库部署（推荐）：--single-db 让 config.php 直接复用主库连接，
+#    不需要再配第二套 admin_db_*，也没有跨库权限/COLLATE 问题。
 php setup.php --host=127.0.0.1 --port=3306 \
-  --user=dwz --pwd='密码' --db=dwz_admin \
-  --public-url=https://localhost
+  --user=dwz --pwd='密码' --db=dwz \
+  --public-url=https://localhost --single-db
+
+#    分库部署（已有独立两库时）：不加 --single-db，随后编辑 config.php 填 admin_db_*
+
+# 5. 创建管理员账号（重要：库表基线不再预置任何默认口令）
+cd backend
+go run ./cmd/createadmin -username=admin -password='你的强密码'
+# 忘记密码时重置：
+go run ./cmd/createadmin -username=admin -password='新密码' -reset
 ```
+
+> ⚠️ 安全提示：`backend/migrations/schema.sql` **不会**创建带默认密码的 `admin`。
+> 历史版本曾预置一个固定 bcrypt 哈希，等于给每个全新部署留了一把公开可用的
+> 钥匙；现已移除，并由 `cmd/createadmin` / 一键部署的 `init.php` 按你提供的
+> 密码建号。仓库内另有回归测试 `TestNoHardcodedAdminCredentialInSchema` 守住这一点。
 
 ### 部署到服务器
 
@@ -214,7 +267,14 @@ go run ./cmd/migrate -status -migrations ../backend/migrations   # 全部迁移�
 go run ./cmd/migrate -all     -migrations ../backend/migrations  # 两库全部迁移 + 口径校验
 go run ./cmd/migrate -only public -migrations ../backend/migrations   # 只处理公共库
 go run ./cmd/migrate -baseline -migrations ../backend/migrations  # 手工升级过的库补录版本（不执行 DDL）
+go run ./cmd/migrate -same-db -all -migrations ../backend/migrations  # 单库部署：两个角色解析到同一个库
 ```
+
+**单库模式**：当 `config.yaml` 里 `public_db.dbname` 与 `database.dbname` 相同时，
+工具自动判定为单库（等价于显式加 `-same-db`），此时两组迁移都写入那一个库，
+版本只记在一张 `schema_migrations` 里 —— 不会出现「一边显示已应用、另一边显示待应用」。
+实测覆盖：全新单库安装 → 19 张表 + 1 视图全部落库、幂等重跑 `no pending migrations`、
+分库安装行为不变。
 
 > `-baseline` 用于生产库「schema 已经手工改过、但没有 `schema_migrations` 记录」的场景：
 > 它只把文件标记为已应用，**不执行任何 DDL**，避免重跑时冲突。
