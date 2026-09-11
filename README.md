@@ -306,17 +306,33 @@ php migrations/build_assets.php --check
 | [🗺️ 功能路线图](docs/FEATURE_ROADMAP.md) | 5 个 Phase / 10 大模块 / 79.5 人日规划 |
 | [🔬 深度分析报告](docs/ANALYSIS_REPORT_2026-08.md) | 功能/UI/交互/架构四维审计 + 13 批修复记录 |
 | [🧩 分区维护](docs/partition-maintenance.md) | click_logs 月度分区：覆盖目标、告警阈值、幂等补齐与生产注意事项 |
+| [🛡️ 依赖风险与安全扫描](docs/SECURITY_SCAN.md) | PR 增量门禁 / 仓库级降噪 / 存量告警分类：哪些会阻断、哪些只记录 |
 | [🖥️ 项目官网](https://motao123.github.io/dwz-shorturl/) | GitHub Pages 宣传站（由 Actions 自动构建，Vercel 极简浅色设计语言，见 site/DESIGN.md） |
 
 ---
 
-## 🚦 GitHub Actions 工作流
+## 🚦 CI / CD 工作流
+
+### GitHub Actions
 
 | 工作流 | 触发 | 作用 |
 |--------|------|------|
 | `pages.yml` | push 到 `site/` 或手动 | 构建宣传站并发布到 GitHub Pages |
 
 > 首次启用：仓库 **Settings → Pages → Source 选择 "GitHub Actions"**，之后每次 push `site/` 目录修改都会自动重新发布。
+
+### CNB 云原生构建
+
+| 流水线 | 触发 | 作用 |
+|--------|------|------|
+| `dependency-risk-check` | PR | **增量**依赖风险门禁：只拦本次 PR 新引入的 High/Critical 漏洞与高风险 License，存量告警不阻断 |
+
+配套机制：
+
+- **依赖自动升级** `.github/dependabot.yml`：每周对 Go / npm minor+patch 分组提 PR；
+- **仓库级扫描降噪** `.scanignore` + `.cnb/security/code_scan_config.yml`：排除第三方代码、构建产物、示例配置等确定无攻击面路径。
+
+> 设计取舍与存量告警分类见 [🛡️ 依赖风险与安全扫描](docs/SECURITY_SCAN.md)。
 
 ---
 
