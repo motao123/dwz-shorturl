@@ -7,6 +7,7 @@ import LinkStatsDialog, { type NormalizedStat } from '@/components/LinkStatsDial
 import { Link, Refresh, Delete, CopyDocument, Sunny, Moon, ArrowDown } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { useThemeStore } from '@/stores/theme'
+import { copyText } from '@/utils/clipboard'
 import {
   fetchSession,
   getMyLinks,
@@ -132,9 +133,18 @@ async function submitImport() {
   importing.value = true
   importResults.value = []
   try {
-    importResults.value = await importLinks(importText.value)
-    const okCount = importResults.value.filter((r) => !r.error).length
-    ElMessage.success(`导入成功 ${okCount} 条，失败 ${importResults.value.length - okCount} 条`)
+    const res = await importLinks(importText.value)
+    importResults.value = res.items
+    const okCount = res.items.filter((r) => !r.error).length
+    const failCount = res.items.length - okCount
+    ElMessage.success(`导入成功 ${okCount} 条，失败 ${failCount} 条`)
+    if (res.truncated) {
+      // 后端单次最多处理固定行数，超出部分被跳过，必须显式告知用户，
+      // 否则用户会误以为全部导入成功。
+      ElMessage.warning(
+        `单次最多处理 ${res.processed} 条，本次仅处理前 ${res.processed} 条，剩余 ${res.total_rows - res.processed} 条未导入，请分批提交`
+      )
+    }
     load()
     loadSummary()
   } catch (err) {
@@ -189,7 +199,9 @@ async function handleDelete(row: MemberLink) {
 
 async function copy(text: string) {
   try {
-    await navigator.clipboard.writeText(text)
+    // 复用全局降级实现：Clipboard API 不可用（HTTP 部署/内网/老浏览器）时
+    // 自动回退 execCommand，避免非安全上下文下复制永久失败。
+    await copyText(text)
     ElMessage.success('已复制')
   } catch {
     ElMessage.error('复制失败')

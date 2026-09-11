@@ -38,9 +38,9 @@ var (
 type ShortUrlService interface {
 	Create(longURL, custom string, expireDays int, domainID *uint64, createdBy *uint64, source, ip, password string) (*model.ShortUrl, error)
 	CreatePublicAPI(longURL, custom string, expireDays int, domainID *uint64, ip, password string) (*model.ShortUrl, error)
-	BatchCreatePublicAPI(urls []string, domainID *uint64, ip string) ([]model.ShortUrl, []error)
-	BatchCreate(urls []string, domainID *uint64, createdBy *uint64, ip string) ([]model.ShortUrl, []error)
-	BatchImport(items []ImportItem, domainID *uint64, createdBy *uint64, ip string) ([]model.ShortUrl, []error)
+	BatchCreatePublicAPI(urls []string, domainID *uint64, ip string) []BatchOutcome
+	BatchCreate(urls []string, domainID *uint64, createdBy *uint64, ip string) []BatchOutcome
+	BatchImport(items []ImportItem, domainID *uint64, createdBy *uint64, ip string) []BatchOutcome
 	GetByID(id uint64) (*model.ShortUrl, error)
 	// Restore undeletes a soft-deleted link (回收站恢复).
 	Restore(id uint64) (*model.ShortUrl, error)
@@ -274,72 +274,86 @@ func (s *shortUrlService) resurrectDeleted(hash string, expireDays int, domainID
 	return deleted, nil
 }
 
+// BatchOutcome is the result of one row inside a batch operation.
+//
+// Index is the row's position in the *input* slice, so callers can render
+// per-row outcomes without relying on the compacted result slice lining up
+// with the input (which it does not once some rows fail or are blank).
+type BatchOutcome struct {
+	Index  int
+	Record *model.ShortUrl
+	Err    error
+}
+
 // BatchCreatePublicAPI batch-creates short URLs through the API-key-authenticated
 // public endpoint, dual-writing each to wjoy_log so the links are redirectable.
-func (s *shortUrlService) BatchCreatePublicAPI(urls []string, domainID *uint64, ip string) ([]model.ShortUrl, []error) {
-	results := make([]model.ShortUrl, 0, len(urls))
-	errs := make([]error, len(urls))
+// It returns exactly one BatchOutcome per input row, in input order.
+func (s *shortUrlService) BatchCreatePublicAPI(urls []string, domainID *uint64, ip string) []BatchOutcome {
+	outcomes := make([]BatchOutcome, len(urls))
 	// 批量内按 URL 去重：同一批中重复 URL 直接复用首个结果，避免重复 DNS 校验
 	// 与重复 INSERT（全局 url_hash 去重本就会返回同一条短链）。
 	seen := make(map[string]*model.ShortUrl, len(urls))
 	seenErr := make(map[string]error, len(urls))
 
 	for i, u := range urls {
+		outcomes[i].Index = i
 		u = strings.TrimSpace(u)
 		if u == "" {
 			continue
 		}
 		if rec, ok := seen[u]; ok {
-			results = append(results, *rec)
+			outcomes[i].Record = rec
 			continue
 		}
 		if e, ok := seenErr[u]; ok {
-			errs[i] = e
+			outcomes[i].Err = e
 			continue
 		}
 		record, err := s.CreatePublicAPI(u, "", 0, domainID, ip, "")
 		if err != nil {
-			errs[i] = err
+			outcomes[i].Err = err
 			seenErr[u] = err
 		} else {
-			results = append(results, *record)
+			outcomes[i].Record = record
 			seen[u] = record
 		}
 	}
-	return results, errs
+	return outcomes
 }
 
-func (s *shortUrlService) BatchCreate(urls []string, domainID *uint64, createdBy *uint64, ip string) ([]model.ShortUrl, []error) {
-	results := make([]model.ShortUrl, 0, len(urls))
-	errs := make([]error, len(urls))
+// BatchCreate mirrors BatchCreatePublicAPI for admin-authenticated callers and
+// returns one BatchOutcome per input row, in input order.
+func (s *shortUrlService) BatchCreate(urls []string, domainID *uint64, createdBy *uint64, ip string) []BatchOutcome {
+	outcomes := make([]BatchOutcome, len(urls))
 	// 批量内去重：重复 URL 复用首个结果
 	seen := make(map[string]*model.ShortUrl, len(urls))
 	seenErr := make(map[string]error, len(urls))
 
 	for i, u := range urls {
+		outcomes[i].Index = i
 		u = strings.TrimSpace(u)
 		if u == "" {
 			continue
 		}
 		if rec, ok := seen[u]; ok {
-			results = append(results, *rec)
+			outcomes[i].Record = rec
 			continue
 		}
 		if e, ok := seenErr[u]; ok {
-			errs[i] = e
+			outcomes[i].Err = e
 			continue
 		}
 		record, err := s.Create(u, "", 0, domainID, createdBy, "batch", ip, "")
 		if err != nil {
-			errs[i] = err
+			outcomes[i].Err = err
 			seenErr[u] = err
 		} else {
-			results = append(results, *record)
+			outcomes[i].Record = record
 			seen[u] = record
 		}
 	}
 
-	return results, errs
+	return outcomes
 }
 
 // ImportItem is a single row from a CSV/JSON import.
@@ -351,39 +365,39 @@ type ImportItem struct {
 }
 
 // BatchImport creates short URLs from CSV/JSON import rows, preserving each
-// row's title. Returns parallel results and per-row errors.
-func (s *shortUrlService) BatchImport(items []ImportItem, domainID *uint64, createdBy *uint64, ip string) ([]model.ShortUrl, []error) {
-	results := make([]model.ShortUrl, 0, len(items))
-	errs := make([]error, len(items))
+// row's title. It returns one BatchOutcome per input row, in input order.
+func (s *shortUrlService) BatchImport(items []ImportItem, domainID *uint64, createdBy *uint64, ip string) []BatchOutcome {
+	outcomes := make([]BatchOutcome, len(items))
 	// 批量内去重：重复 URL 复用首个结果（与全局 url_hash 去重语义一致）
 	seen := make(map[string]*model.ShortUrl, len(items))
 	seenErr := make(map[string]error, len(items))
 
 	for i, it := range items {
+		outcomes[i].Index = i
 		it.URL = strings.TrimSpace(it.URL)
 		if it.URL == "" {
-			errs[i] = errors.New("url is empty")
+			outcomes[i].Err = errors.New("url is empty")
 			continue
 		}
 		if rec, ok := seen[it.URL]; ok {
-			results = append(results, *rec)
+			outcomes[i].Record = rec
 			continue
 		}
 		if e, ok := seenErr[it.URL]; ok {
-			errs[i] = e
+			outcomes[i].Err = e
 			continue
 		}
 		record, err := s.createWithTitle(it.URL, it.Title, it.Custom, it.ExpireDays, domainID, createdBy, "import", ip, "")
 		if err != nil {
-			errs[i] = err
+			outcomes[i].Err = err
 			seenErr[it.URL] = err
 		} else {
-			results = append(results, *record)
+			outcomes[i].Record = record
 			seen[it.URL] = record
 		}
 	}
 
-	return results, errs
+	return outcomes
 }
 
 // createWithTitle mirrors Create but also sets the record title.

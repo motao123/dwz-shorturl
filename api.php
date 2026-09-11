@@ -28,6 +28,15 @@ if ($domain_id !== null && $domain_id !== '' && member_id() <= 0) {
 
 if (!headers_sent() && $format !== 'txt') header('Content-Type: application/json; charset=utf-8');
 
+// CSRF 防护：仅当请求携带已登录会员会话时校验（与 member.php / batch.php 一致），
+// 避免攻击者借受害者身份建链。匿名 API 调用（curl、API Key 等无会话请求）不受影响。
+if (member_id() > 0) {
+    $csrf = isset($_POST['csrf']) && is_string($_POST['csrf']) ? trim($_POST['csrf']) : '';
+    if ($csrf === '' || !hash_equals($_SESSION['member_csrf'] ?? '', $csrf)) {
+        api_result(0, '页面已过期，请刷新后重试', 10020, 403);
+    }
+}
+
 // B11：限流必须在任何昂贵的校验（validate_long_url 含 DNS 解析）之前执行，
 // 否则攻击者可用解析开销打满请求，导致限流失效。
 if (!rate_limit(real_ip(), 20, 60)) {

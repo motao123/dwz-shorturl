@@ -166,6 +166,24 @@ body {
   letter-spacing: 0.02em;
 }
 
+/* 固定列（fixed="right"/"left"）用 box-shadow 伪造边框，未铺实底色时
+   hover 会让下层滚动内容透色，形成一条贯穿表格的竖线。这里给固定列
+   补实底色，并覆盖 hover 态，保持滚动时视觉连续。 */
+.el-table .el-table-fixed-column--right,
+.el-table .el-table-fixed-column--left {
+  background: var(--el-table-tr-bg-color, #fff) !important;
+}
+
+.el-table .el-table-fixed-column--right.el-table__cell,
+.el-table .el-table-fixed-column--left.el-table__cell {
+  background: var(--el-table-tr-bg-color, #fff) !important;
+}
+
+.el-table__body tr:hover > td.el-table-fixed-column--right,
+.el-table__body tr:hover > td.el-table-fixed-column--left {
+  background: var(--el-table-row-hover-bg-color, #f0f7f7) !important;
+}
+
 /* ---------- 按钮质感 ---------- */
 
 .el-button {
@@ -472,19 +490,19 @@ html.dark .member-shell .home-link {
   }
 }
 
-/* 暗色模式补全：覆盖各页面 scoped 样式里散落的硬编码浅色背景 */
-html.dark .stat,
-html.dark .mini-btn,
+/* 暗色模式补全：各页面 scoped 样式已改用语义 token（--el-bg-color 等），
+   这里只需补充少量确实需要统一收敛的容器，且不使用 !important，
+   以免覆盖 .mini-btn--danger / .result-item.is-error / .role-tag--super
+   等状态类，破坏「危险/成功/警告」的视觉可辨识性。 */
 html.dark .summary-card,
 html.dark .stats-block,
 html.dark .stats-total,
-html.dark .toolbar,
 html.dark .app-toolbar,
 html.dark .head-actions,
 html.dark .user-cell,
 html.dark .empty-box {
-  background: #122027 !important;
-  border-color: var(--dwz-line) !important;
+  background: #122027;
+  border-color: var(--dwz-line);
   color: var(--dwz-text);
 }
 
@@ -502,10 +520,17 @@ html.dark .stat .stat__num {
 }
 
 html.dark .mini-btn {
-  border-color: var(--dwz-line) !important;
+  background: var(--el-bg-color);
+  border-color: var(--dwz-line);
 }
 
 html.dark .mini-btn:hover:not(:disabled) {
-  background: var(--el-fill-color-light) !important;
-  color: var(--dwz-petrol) !important;
+  background: var(--el-fill-color-light);
+  color: var(--dwz-petrol);
+}
+
+/* 危险/告警状态按钮在暗色下保留语义色（优先级低于各页 :hover，不覆盖） */
+html.dark .mini-btn--danger:hover:not(:disabled) {
+  color: var(--dwz-bad);
+  border-color: var(--dwz-bad);
 }

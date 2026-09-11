@@ -190,8 +190,13 @@ export async function exportLinksCsv(): Promise<void> {
     credentials: 'same-origin'
   })
   if (!res.ok) {
+    // 401/403 说明登录态已失效：必须给出可操作的提示，
+    // 否则用户只看到笼统的「导出失败」，不知道需要重新登录。
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('登录状态已失效，请重新登录后再导出')
+    }
     const body = await res.json().catch(() => null)
-    throw new Error(body?.msg || '导出失败')
+    throw new Error(body?.msg || `导出失败（${res.status}）`)
   }
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)
@@ -234,7 +239,14 @@ export interface MemberBatchResult {
   error?: string
 }
 
-export async function importLinks(content: string): Promise<MemberBatchResult[]> {
+export interface MemberImportResult {
+  items: MemberBatchResult[]
+  total_rows: number
+  processed: number
+  truncated: boolean
+}
+
+export async function importLinks(content: string): Promise<MemberImportResult> {
   return go('/member/api/links/import', {
     method: 'POST',
     body: JSON.stringify({ content })

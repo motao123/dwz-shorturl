@@ -210,12 +210,12 @@ func (h *MemberApiHandler) ImportLinks(c *gin.Context) {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "content is required")
 		return
 	}
-	results, err := h.svc.ImportLinks(memberID, req.Content, c.ClientIP())
+	result, err := h.svc.ImportLinks(memberID, req.Content, c.ClientIP())
 	if err != nil {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
 	}
-	pkg.Success(c, results)
+	pkg.Success(c, result)
 }
 
 type MemberBatchCreateRequest struct {
