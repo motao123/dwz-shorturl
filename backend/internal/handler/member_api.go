@@ -252,12 +252,20 @@ func (h *MemberApiHandler) RenewExpiring(c *gin.Context) {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "expire_days is required")
 		return
 	}
-	renewed, err := h.svc.RenewExpiring(memberID, req.ExpireDays)
+	renewed, syncErr, err := h.svc.RenewExpiring(memberID, req.ExpireDays)
 	if err != nil {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
 	}
-	pkg.Success(c, gin.H{"renewed": renewed})
+	// Renewals are already persisted locally; a partial mirror failure is
+	// reported so the member knows some links may still fail on the PHP path.
+	payload := gin.H{"renewed": renewed}
+	if syncErr != nil {
+		payload["public_sync_failed"] = true
+		payload["sync_failed_uids"] = syncErr.UIDs
+		payload["warning"] = syncErr.Error()
+	}
+	pkg.Success(c, payload)
 }
 
 type MemberUpdateLinkRequest struct {
@@ -312,6 +320,20 @@ func (h *MemberApiHandler) UpdateLinkExpiry(c *gin.Context) {
 	if err != nil {
 		if errors.Is(err, service.ErrMemberLinkNotFound) {
 			pkg.Fail(c, http.StatusNotFound, pkg.CodeNotFound, "link not found")
+			return
+		}
+		// Local expiry is saved but the public mirror failed: return a partial
+		// success so the member can trigger a manual retry if needed.
+		var syncErr *service.PublicSyncError
+		if errors.As(err, &syncErr) && record != nil {
+			pkg.Success(c, gin.H{
+				"id":                 record.ID,
+				"uid":                record.UID,
+				"expire_at":          record.ExpireAt,
+				"public_sync_failed": true,
+				"sync_failed_uids":   syncErr.UIDs,
+				"warning":            syncErr.Error(),
+			})
 			return
 		}
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
