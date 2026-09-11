@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"dwz-admin/internal/model"
 	"dwz-admin/internal/repository"
@@ -179,7 +180,10 @@ func (m *mockShortRepo) CountByStatus(int8) (int64, error)        { return 0, ni
 func (m *mockShortRepo) CountToday() (int64, error)               { return 0, nil }
 func (m *mockShortRepo) BatchCreate(urls []model.ShortUrl) error  { return nil }
 func (m *mockShortRepo) IncrementClicks(uint64) error             { return nil }
-func (m *mockShortRepo) FindTopN(int) ([]model.ShortUrl, error)   { return nil, nil }
+func (m *mockShortRepo) UpdatesByID(uint64, map[string]interface{}) error        { return nil }
+func (m *mockShortRepo) FindTopN(int, *time.Time, *time.Time) ([]model.ShortUrl, error) {
+	return nil, nil
+}
 func (m *mockShortRepo) FindRecent(int) ([]model.ShortUrl, error) { return nil, nil }
 
 // --- mock DomainRepo (only counting ops exercised here) ---

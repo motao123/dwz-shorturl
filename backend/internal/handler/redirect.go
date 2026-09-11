@@ -218,18 +218,30 @@ func (q *ClickQueue) persist(events []ClickEvent) {
 		}
 	}
 
-	// Increment click counters (group by short_url_id)
-	uidSet := make(map[uint64]bool, len(uidToID))
-	for _, id := range uidToID {
-		uidSet[id] = true
-	}
-	for id := range uidSet {
+	// Increment click counters. Multiple clicks on the same link may land in
+	// the same batch, so count them per short_url_id and add the real number
+	// (clicks + n). Deduplicating ids and incrementing by 1 each would
+	// permanently undercount the counter relative to the click_logs rows.
+	for id, n := range countClicksPerURL(events) {
 		if err := q.db.Model(&model.ShortUrl{}).
 			Where("id = ?", id).
-			UpdateColumn("clicks", gorm.Expr("clicks + 1")).Error; err != nil {
-			q.logger.Error("increment clicks failed", zap.Uint64("id", id), zap.Error(err))
+			UpdateColumn("clicks", gorm.Expr("clicks + ?", n)).Error; err != nil {
+			q.logger.Error("increment clicks failed",
+				zap.Uint64("id", id), zap.Uint32("count", n), zap.Error(err))
 		}
 	}
+}
+
+// countClicksPerURL aggregates a batch of click events into
+// short_url_id -> number of clicks. Events without a resolvable id are skipped.
+func countClicksPerURL(events []ClickEvent) map[uint64]uint32 {
+	counts := make(map[uint64]uint32, len(events))
+	for _, e := range events {
+		if e.ShortUrlID != 0 {
+			counts[e.ShortUrlID]++
+		}
+	}
+	return counts
 }
 
 // --- Redirect Handler ---
