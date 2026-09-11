@@ -282,7 +282,10 @@ export async function updateLinkExpiry(id: number, expireDays: number): Promise<
   })
 }
 
-export async function updateLink(id: number, data: { long_url?: string; title?: string; expire_days?: number }): Promise<MemberLink> {
+export async function updateLink(
+  id: number,
+  data: { long_url?: string; title?: string; expire_days?: number }
+): Promise<MemberLink> {
   return go(`/member/api/links/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data)

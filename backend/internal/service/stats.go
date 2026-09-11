@@ -22,6 +22,10 @@ type OverviewResult struct {
 type TrendPoint struct {
 	Label  string `json:"label"`
 	Clicks int64  `json:"clicks"`
+	// NewURLs counts short links created inside the same time bucket. It is
+	// only filled by Trend (other aggregations leave it at zero) and is
+	// omitted from JSON when absent so existing consumers are unaffected.
+	NewURLs int64 `json:"new_urls,omitempty"`
 }
 
 // LinkStatsResult is per-link click analytics for the admin console.
@@ -39,7 +43,7 @@ type LinkStatsResult struct {
 type StatsService interface {
 	Overview() (*OverviewResult, error)
 	Trend(granularity string, dateFrom, dateTo *time.Time) ([]TrendPoint, error)
-	TopN(n int) ([]model.ShortUrl, error)
+	TopN(n int, dateFrom, dateTo *time.Time) ([]model.ShortUrl, error)
 	Recent(n int) ([]model.ShortUrl, error)
 	LinkStats(shortURLID uint64) (*LinkStatsResult, error)
 	// Countries returns the top traffic-source countries across all links.
@@ -109,15 +113,6 @@ func (s *statsService) Overview() (*OverviewResult, error) {
 func (s *statsService) Trend(granularity string, dateFrom, dateTo *time.Time) ([]TrendPoint, error) {
 	results := make([]TrendPoint, 0)
 
-	query := s.db.Model(&model.ClickLog{})
-
-	if dateFrom != nil {
-		query = query.Where("created_at >= ?", *dateFrom)
-	}
-	if dateTo != nil {
-		query = query.Where("created_at <= ?", *dateTo)
-	}
-
 	var format string
 	switch granularity {
 	case "hour":
@@ -134,27 +129,81 @@ func (s *statsService) Trend(granularity string, dateFrom, dateTo *time.Time) ([
 	}
 	var rows []row
 
-	err := query.
+	clickQuery := s.db.Model(&model.ClickLog{})
+	if dateFrom != nil {
+		clickQuery = clickQuery.Where("created_at >= ?", *dateFrom)
+	}
+	if dateTo != nil {
+		clickQuery = clickQuery.Where("created_at <= ?", *dateTo)
+	}
+	if err := clickQuery.
 		Select("DATE_FORMAT(created_at, ?) as date, COUNT(*) as clicks", format).
 		Group("date").
 		Order("date ASC").
-		Scan(&rows).Error
-	if err != nil {
+		Scan(&rows).Error; err != nil {
 		return results, err
 	}
 
+	// New short links created inside the same buckets. Merged into the click
+	// series so the dashboard can plot both on the same x-axis.
+	type bucketRow struct {
+		Date    string
+		NewURLs int64
+	}
+	var bucketRows []bucketRow
+
+	newQuery := s.db.Model(&model.ShortUrl{})
+	if dateFrom != nil {
+		newQuery = newQuery.Where("created_at >= ?", *dateFrom)
+	}
+	if dateTo != nil {
+		newQuery = newQuery.Where("created_at <= ?", *dateTo)
+	}
+	if err := newQuery.
+		Select("DATE_FORMAT(created_at, ?) as date, COUNT(*) as new_urls", format).
+		Group("date").
+		Scan(&bucketRows).Error; err != nil {
+		return results, err
+	}
+
+	newByLabel := make(map[string]int64, len(bucketRows))
+	for _, r := range bucketRows {
+		newByLabel[r.Date] = r.NewURLs
+	}
+
+	// Preserve every bucket that has either clicks or new links, ordered by
+	// time. Click buckets are already ascending; merge the remainder.
+	seen := make(map[string]bool, len(rows)+len(bucketRows))
 	for _, r := range rows {
-		results = append(results, TrendPoint{Label: r.Date, Clicks: r.Clicks})
+		seen[r.Date] = true
+		results = append(results, TrendPoint{
+			Label:   r.Date,
+			Clicks:  r.Clicks,
+			NewURLs: newByLabel[r.Date],
+		})
+	}
+	missing := make([]string, 0)
+	for _, r := range bucketRows {
+		if !seen[r.Date] {
+			missing = append(missing, r.Date)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		for _, label := range missing {
+			results = append(results, TrendPoint{Label: label, NewURLs: newByLabel[label]})
+		}
+		sort.Slice(results, func(i, j int) bool { return results[i].Label < results[j].Label })
 	}
 
 	return results, nil
 }
 
-func (s *statsService) TopN(n int) ([]model.ShortUrl, error) {
+func (s *statsService) TopN(n int, dateFrom, dateTo *time.Time) ([]model.ShortUrl, error) {
 	if n <= 0 || n > 100 {
 		n = 10
 	}
-	return s.shortUrlRepo.FindTopN(n)
+	return s.shortUrlRepo.FindTopN(n, dateFrom, dateTo)
 }
 
 func (s *statsService) Recent(n int) ([]model.ShortUrl, error) {

@@ -20,6 +20,16 @@
   --dwz-warn: #d97706;
   --dwz-bad: #dc2626;
 
+  /* ECharts 图表 token（暗色模式在 html.dark 中覆写，图表据此重绘） */
+  --dwz-chart-axis: #6b7f86;
+  --dwz-chart-grid: #e8eef0;
+  --dwz-chart-label: #1f3238;
+  --dwz-chart-primary: #0e6e75;
+  --dwz-chart-primary-2: #2fa3a8;
+  --dwz-chart-accent: #f5a623;
+  --dwz-chart-tooltip-bg: rgba(12, 42, 48, 0.92);
+  --dwz-chart-tooltip-fg: #e8f4f2;
+
   /* 字体栈 */
   --dwz-font-body: 'Manrope', 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei',
     'Helvetica Neue', Arial, sans-serif;
@@ -301,6 +311,15 @@ body {
    暗色模式（html.dark 时覆盖）
    ============================================================ */
 html.dark {
+  --dwz-chart-axis: #7d9299;
+  --dwz-chart-grid: #24333a;
+  --dwz-chart-label: #d6e2e5;
+  --dwz-chart-primary: #2aa3ab;
+  --dwz-chart-primary-2: #45c2ca;
+  --dwz-chart-accent: #f5a623;
+  --dwz-chart-tooltip-bg: rgba(9, 24, 29, 0.94);
+  --dwz-chart-tooltip-fg: #e8f4f2;
+
   --dwz-paper: #0d171c;
   --dwz-line: #24333a;
   --dwz-text: #d6e2e5;
