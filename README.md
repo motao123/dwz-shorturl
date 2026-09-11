@@ -154,9 +154,17 @@ cd backend
 go run ./cmd/migrate -status          # 查看待执行迁移
 go run ./cmd/migrate                  # 执行全部幂等迁移
 
-# 老库升级：把 url_hash 从「URL 全局唯一」改为「同一 owner 作用域内唯一」
-# （同时作用于 wjoy_log 与 short_urls，幂等可重复执行，执行前请备份）
-mysql -h127.0.0.1 -uroot -p < migrations/scope_url_hash.sql
+# 老库升级（推荐）：一条命令完成全部上线迁移
+#   备份 → url_hash 作用域化 → webhook_queue 建表 → 静态资源构建
+#   幂等，可重复执行；库名留空时会自动从 config.php / config.yaml 读取
+DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh --public-db=<公共库> --admin-db=<管理库>
+
+# 只想看会执行什么、不落库：
+DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh --public-db=<公共库> --admin-db=<管理库> --dry-run
+
+# 等价的手工做法（脚本内部就是执行这些；库名需自行替换）
+# mysql <公共库> < migrations/scope_url_hash.sql   # 需先把脚本内 USE 的库名改对
+# go run ./cmd/migrate -all                        # 管理库 + 公共库结构对齐与口径校验
 
 # 4. PHP 前台（需 PHP 8 + mysqli）
 php setup.php --host=127.0.0.1 --port=3306 \
@@ -171,6 +179,42 @@ DWZ_SERVER=your.host DWZ_USER=root DWZ_PASS='密码' ./deploy.sh
 ```
 
 一键完成：交叉编译 Go 二进制 → 构建 Vue → 上传 PHP/前端 dist → 重启服务。
+
+> `deploy.sh` 只负责发布代码，**不碰数据库**。数据库侧的上线动作由
+> `ops/one_click_migrate.sh` 一条命令完成（见上），两者互不依赖。
+
+### 一条命令完成上线迁移
+
+`ops/one_click_migrate.sh` 把老库升级需要的全部运维动作收敛成一条命令：
+
+| 步骤 | 动作 |
+|---|---|
+| 0 | 检查两库连通性、确认库名存在 |
+| 1 | 备份 `wjoy_log` 与 `short_urls` 到 `backups/migrate-<时间戳>/` |
+| 2 | 重写 `url_hash`（URL 全局唯一 → 同一 owner 作用域内唯一），自动替换脚本内库名 |
+| 3 | 建 `webhook_queue` 异步投递队列表 |
+| 4 | 校验两库 `url_hash` 口径一致（残留未迁移行直接报错退出） |
+| 5 | 构建静态资源并注入内容哈希版本号 |
+
+特点：
+
+- **幂等**：中途失败可直接重跑，不会因索引已存在而报 1061/1091；
+- **零手工替换**：库名从 `config.php` / `backend/configs/config.yaml` 自动读取，也可 `--public-db=` / `--admin-db=` 显式指定；
+- **密码不落命令行**：通过 `MYSQL_PWD` 环境变量传给 mysql/mysqldump，`ps` 与 shell history 不可见；
+- **有 `--dry-run`**：先看清要执行什么，再决定是否落库。
+
+```bash
+# 先干跑一遍确认
+DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh \
+  --public-db=1_xk7_cn --admin-db=dwz_admin --dry-run
+
+# 确认无误后正式执行
+DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh \
+  --public-db=1_xk7_cn --admin-db=dwz_admin
+```
+
+> ⚠️ 第 2 步会重写哈希并重建唯一索引。脚本已自动备份，但仍建议挑流量低谷执行，
+> 并确保跑的时候没有其他进程在写库。
 
 ### 后台任务（cron）
 
