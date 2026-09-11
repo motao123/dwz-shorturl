@@ -3,7 +3,8 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { Refresh, Cpu, Connection, DataBoard, Timer, Odometer } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
-import { getMonitorStatus, type MonitorStatus } from '@/api/monitor'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { getMonitorStatus, ensurePartitions, type MonitorStatus } from '@/api/monitor'
 
 const loading = ref(false)
 const status = ref<MonitorStatus | null>(null)
@@ -32,7 +33,32 @@ async function load() {
   }
 }
 
-function fmtTime(iso: string | null): string {
+/** 把 pYYYYMM 分区名渲染成 YYYY-MM 可读文本 */
+function fmtMonth(name: string): string {
+  return /^p\d{6}$/.test(name) ? `${name.slice(1, 5)}-${name.slice(5)}` : name
+}
+
+// 手动补齐分区：幂等，已覆盖的月份不会重复创建
+async function handleEnsurePartitions() {
+  try {
+    await ElMessageBox.confirm(
+      '将按后端默认目标（当前月 + 2 个月）补齐缺失的 click_logs 月度分区，已存在的月份不会重复创建。',
+      '补齐分区',
+      { type: 'warning', confirmButtonText: '开始补齐', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    const res = await ensurePartitions()
+    ElMessage.success(res.created > 0 ? `已创建 ${res.created} 个分区` : '分区已覆盖，无需创建')
+    await load()
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '补齐分区失败')
+  }
+}
+
+function fmtTime(iso: string | null | undefined): string {
   if (!iso) return '从未运行'
   return dayjs(iso).format('YYYY-MM-DD HH:mm:ss')
 }
@@ -129,6 +155,79 @@ onBeforeUnmount(() => {
         </dl>
       </section>
 
+      <!-- click_logs 分区覆盖率 -->
+      <section v-if="status.partitions" class="app-card wide">
+        <h3 class="card-title">
+          <el-icon><Timer /></el-icon>点击日志分区
+          <el-tag
+            :type="status.partitions.healthy ? 'success' : 'danger'"
+            size="small"
+            round
+            :aria-label="`分区状态：${status.partitions.healthy ? '正常' : '异常'}`"
+          >
+            {{ status.partitions.healthy ? '正常' : '需关注' }}
+          </el-tag>
+          <el-button
+            class="partition-fix"
+            size="small"
+            type="warning"
+            plain
+            aria-label="补齐缺失的点击日志分区"
+            @click="handleEnsurePartitions"
+          >
+            补齐分区
+          </el-button>
+        </h3>
+        <el-alert
+          v-if="status.partitions.failing"
+          type="error"
+          show-icon
+          :closable="false"
+          class="partition-alert"
+          title="分区维护连续失败"
+          :description="`最近失败：${status.partitions.last_error || '未知错误'}（连续 ${status.partitions.consecutive_failures} 次）`"
+        />
+        <el-alert
+          v-else-if="status.partitions.behind_months > 0"
+          type="warning"
+          show-icon
+          :closable="false"
+          class="partition-alert"
+          title="分区覆盖落后于目标"
+          :description="`已落后 ${status.partitions.behind_months} 个月，新数据可能落入 p_future 兜底分区，请点击「补齐分区」。`"
+        />
+        <dl class="kv">
+          <div>
+            <dt>覆盖月份</dt>
+            <dd class="mono">
+              {{ status.partitions.earliest_month ? fmtMonth(status.partitions.earliest_month) : '—' }}
+              ~
+              {{ status.partitions.latest_month ? fmtMonth(status.partitions.latest_month) : '—' }}
+            </dd>
+          </div>
+          <div>
+            <dt>目标月份</dt>
+            <dd class="mono">{{ fmtMonth(status.partitions.required_month) }}</dd>
+          </div>
+          <div>
+            <dt>落后月数</dt>
+            <dd class="mono">{{ status.partitions.behind_months }}</dd>
+          </div>
+          <div>
+            <dt>p_future 行数</dt>
+            <dd class="mono">{{ status.partitions.future_rows }}</dd>
+          </div>
+          <div>
+            <dt>最近维护</dt>
+            <dd class="mono">{{ fmtTime(status.partitions.last_run_at) }}</dd>
+          </div>
+          <div>
+            <dt>上次新建</dt>
+            <dd class="mono">{{ status.partitions.created_last_run }} 个</dd>
+          </div>
+        </dl>
+      </section>
+
       <!-- 定时任务 -->
       <section class="app-card wide">
         <h3 class="card-title"><el-icon><Timer /></el-icon>定时任务</h3>
@@ -152,6 +251,14 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.card-title .partition-fix {
+  margin-left: 12px;
+}
+
+.partition-alert {
+  margin-bottom: 12px;
+}
+
 .monitor-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

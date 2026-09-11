@@ -16,24 +16,30 @@ import (
 type MonitorService interface {
 	Status() (*MonitorStatus, error)
 	RunTask(name string) (bool, error)
+	// EnsurePartitions idempotently creates missing click_logs monthly
+	// partitions up to `months` ahead of now, returning how many were created.
+	EnsurePartitions(months int) (int, error)
 }
 
 type MonitorStatus struct {
-	Uptime     string        `json:"uptime"`
-	StartTime  time.Time     `json:"start_time"`
-	Goroutines int           `json:"goroutines"`
-	DB         *DBStatus     `json:"db"`
-	Redis      *RedisStatus  `json:"redis"`
-	Queue      *QueueStatus  `json:"queue"`
-	Cron       []CronStatus  `json:"cron"`
+	Uptime     string       `json:"uptime"`
+	StartTime  time.Time    `json:"start_time"`
+	Goroutines int          `json:"goroutines"`
+	DB         *DBStatus    `json:"db"`
+	Redis      *RedisStatus `json:"redis"`
+	Queue      *QueueStatus `json:"queue"`
+	Cron       []CronStatus `json:"cron"`
+	// Partitions reports click_logs monthly partition coverage so an operator
+	// can see at a glance whether the maintenance task is keeping up.
+	Partitions *PartitionStatus `json:"partitions"`
 }
 
 type DBStatus struct {
-	Healthy    bool   `json:"healthy"`
-	OpenConns  int    `json:"open_conns"`
-	InUse      int    `json:"in_use"`
-	Idle       int    `json:"idle"`
-	Error      string `json:"error,omitempty"`
+	Healthy   bool   `json:"healthy"`
+	OpenConns int    `json:"open_conns"`
+	InUse     int    `json:"in_use"`
+	Idle      int    `json:"idle"`
+	Error     string `json:"error,omitempty"`
 }
 
 type RedisStatus struct {
@@ -51,12 +57,12 @@ type CronStatus struct {
 }
 
 type monitorService struct {
-	db         *gorm.DB
-	rdb        *redis.Client
-	startTime  time.Time
-	queue      ClickQueueStats
-	cron       *CronService
-	logger     *zap.Logger
+	db        *gorm.DB
+	rdb       *redis.Client
+	startTime time.Time
+	queue     ClickQueueStats
+	cron      *CronService
+	logger    *zap.Logger
 }
 
 // ClickQueueStats is the minimal interface the monitor needs from the click
@@ -85,6 +91,15 @@ func (s *monitorService) RunTask(name string) (bool, error) {
 		return false, err
 	}
 	return ok, nil
+}
+
+// EnsurePartitions lets an operator fix a lagging partition horizon on demand
+// instead of waiting for the next daily cron window.
+func (s *monitorService) EnsurePartitions(months int) (int, error) {
+	if s.cron == nil {
+		return 0, fmt.Errorf("cron not available")
+	}
+	return s.cron.EnsurePartitionsAhead(months)
 }
 
 func (s *monitorService) Status() (*MonitorStatus, error) {
@@ -122,6 +137,11 @@ func (s *monitorService) Status() (*MonitorStatus, error) {
 	// Queue
 	if s.queue != nil {
 		status.Queue = &QueueStatus{Pending: s.queue.PendingCount()}
+	}
+
+	// Click-log partition coverage / maintenance health
+	if s.cron != nil {
+		status.Partitions = s.cron.InspectClickLogsPartitions()
 	}
 
 	// Cron
