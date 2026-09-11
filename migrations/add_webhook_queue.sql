@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS `webhook_queue` (
   `id`          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   `webhook_id`  BIGINT UNSIGNED NOT NULL,
   `event`       VARCHAR(32)  NOT NULL,
-  `payload`     JSON         NOT NULL,
+  `payload`     LONGTEXT     NOT NULL COMMENT 'JSON payload (LONGTEXT, not JSON, so MySQL 5.7 / MariaDB accept a DEFAULT-free insert with zero migration risk)',
   `attempts`    INT          NOT NULL DEFAULT 0,
   `max_attempts` INT         NOT NULL DEFAULT 3,
   `next_retry_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
