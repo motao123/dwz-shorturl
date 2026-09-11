@@ -343,7 +343,8 @@
 
     setBusy(singleButton, true, '生成中…', '生成短链接');
     try {
-      var payload = await postForm('api.php', params);
+      // 已登录时后端会校验 CSRF，这里随请求带上当前会话 token（匿名时为空）。
+      var payload = await postForm('api.php', Object.assign({}, params, { csrf: memberState.csrf || '' }));
       if (!isSuccess(payload)) throw new Error(readError(payload, '短链接生成失败'));
       var shortUrl = extractShortUrl(payload);
       if (!shortUrl) throw new Error('服务未返回有效的短链接');
