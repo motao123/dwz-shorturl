@@ -261,9 +261,11 @@ func (h *MemberApiHandler) RenewExpiring(c *gin.Context) {
 }
 
 type MemberUpdateLinkRequest struct {
-	LongURL    string `json:"long_url"`
-	Title      string `json:"title"`
-	ExpireDays *int   `json:"expire_days"`
+	LongURL string `json:"long_url"`
+	// Title is a three-state pointer: omitted keeps the current title, "" clears
+	// it and any other value replaces it.
+	Title      *string `json:"title"`
+	ExpireDays *int    `json:"expire_days"`
 }
 
 func (h *MemberApiHandler) UpdateLink(c *gin.Context) {

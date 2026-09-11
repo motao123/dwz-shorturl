@@ -36,6 +36,10 @@ type ShortUrlRepo interface {
 	FindByIDIncludingDeleted(id uint64) (*model.ShortUrl, error)
 	CreateWithDomainCount(url *model.ShortUrl) error
 	Update(url *model.ShortUrl) error
+	// UpdatesByID applies a partial update (column -> value map) to one row.
+	// Unlike Update it does not write back unrelated columns, which avoids
+	// clobbering concurrent edits from another actor.
+	UpdatesByID(id uint64, updates map[string]interface{}) error
 	UpdateWithDomainCount(url *model.ShortUrl, oldDomainID *uint64) error
 	SoftDeleteWithDomainCount(url *model.ShortUrl) error
 	// RestoreWithDomainCount undeletes a soft-deleted row and restores its
@@ -48,7 +52,7 @@ type ShortUrlRepo interface {
 	CountToday() (int64, error)
 	BatchCreate(urls []model.ShortUrl) error
 	IncrementClicks(id uint64) error
-	FindTopN(n int) ([]model.ShortUrl, error)
+	FindTopN(n int, dateFrom, dateTo *time.Time) ([]model.ShortUrl, error)
 	FindRecent(n int) ([]model.ShortUrl, error)
 }
 
@@ -131,6 +135,14 @@ func (r *shortUrlRepo) CreateWithDomainCount(url *model.ShortUrl) error {
 
 func (r *shortUrlRepo) Update(url *model.ShortUrl) error {
 	return r.db.Save(url).Error
+}
+
+// UpdatesByID applies a partial column update to a single short URL row.
+func (r *shortUrlRepo) UpdatesByID(id uint64, updates map[string]interface{}) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	return r.db.Model(&model.ShortUrl{}).Where("id = ?", id).Updates(updates).Error
 }
 
 // UpdateWithDomainCount atomically moves a short URL between domains and
@@ -359,8 +371,31 @@ func (r *shortUrlRepo) IncrementClicks(id uint64) error {
 		UpdateColumn("clicks", gorm.Expr("clicks + 1")).Error
 }
 
-func (r *shortUrlRepo) FindTopN(n int) ([]model.ShortUrl, error) {
+func (r *shortUrlRepo) FindTopN(n int, dateFrom, dateTo *time.Time) ([]model.ShortUrl, error) {
 	var urls []model.ShortUrl
+
+	// clicks is an all-time counter, so a time window cannot be applied to it
+	// directly. When a window is supplied, rank by the click_logs rows inside
+	// that window instead so the Top N reflects the selected range.
+	if dateFrom != nil || dateTo != nil {
+		logQuery := r.db.Model(&model.ClickLog{}).Select("short_url_id, COUNT(*) AS clicks")
+		if dateFrom != nil {
+			logQuery = logQuery.Where("created_at >= ?", *dateFrom)
+		}
+		if dateTo != nil {
+			logQuery = logQuery.Where("created_at <= ?", *dateTo)
+		}
+		logQuery = logQuery.Group("short_url_id")
+
+		err := r.db.Model(&model.ShortUrl{}).
+			Joins("JOIN (?) AS lc ON lc.short_url_id = short_urls.id", logQuery).
+			Select("short_urls.*, lc.clicks AS clicks").
+			Order("lc.clicks DESC").
+			Limit(n).
+			Find(&urls).Error
+		return urls, err
+	}
+
 	err := r.db.Order("clicks DESC").Limit(n).Find(&urls).Error
 	return urls, err
 }

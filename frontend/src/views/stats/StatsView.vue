@@ -14,9 +14,12 @@ import type { GridComponentOption, TooltipComponentOption } from 'echarts/compon
 import { getTrend, getTop, getRecent, getCountries, getReferrerTypes, type TrendGranularity, type RecentUrl, type TrendPoint } from '@/api/stats'
 import { buildShortUrl, SOURCE_LABELS } from '@/utils/constants'
 import { copyText } from '@/utils/clipboard'
+import { useChartTheme } from '@/composables/useChartTheme'
 
 use([CanvasRenderer, LineChart, BarChart, GridComponent, TooltipComponent])
 type ECOption = ComposeOption<LineSeriesOption | BarSeriesOption | GridComponentOption | TooltipComponentOption>
+
+const chart = useChartTheme()
 
 const loading = ref(false)
 const topLoading = ref(false)
@@ -80,6 +83,14 @@ async function loadGeoDistribution() {
   }
 }
 
+/** #rrggbb → rgba(r,g,b,a)，用于 areaStyle 渐变与主题色保持一致 */
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) return hex
+  const n = parseInt(m[1], 16)
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
+}
+
 function dateParams() {
   return {
     date_from: dateRange.value?.[0] ? dayjs(dateRange.value[0]).format('YYYY-MM-DD') : undefined,
@@ -91,29 +102,41 @@ async function loadTrend() {
   loading.value = true
   try {
     const points = (await getTrend({ granularity: granularity.value, ...dateParams() })) ?? []
+    const c = chart.value
     trendOption.value = {
       tooltip: {
         trigger: 'axis',
-        backgroundColor: 'rgba(12, 42, 48, 0.92)',
+        backgroundColor: c.tooltipBg,
         borderWidth: 0,
-        textStyle: { color: '#e8f4f2', fontSize: 12.5 },
-        axisPointer: { type: 'line', lineStyle: { color: '#f5a623', type: 'dashed' } }
+        textStyle: { color: c.tooltipFg, fontSize: 12.5 },
+        axisPointer: { type: 'line', lineStyle: { color: c.accent, type: 'dashed' } }
       },
       grid: { left: 8, right: 18, top: 24, bottom: 8, containLabel: true },
       xAxis: {
         type: 'category',
         boundaryGap: false,
         data: points.map((p) => p.label),
-        axisLine: { lineStyle: { color: '#dfe7ea' } },
+        axisLine: { lineStyle: { color: c.grid } },
         axisTick: { show: false },
-        axisLabel: { color: '#6b7f86', fontSize: 11, fontFamily: 'JetBrains Mono' }
+        axisLabel: { color: c.axis, fontSize: 11, fontFamily: c.fontMono }
       },
-      yAxis: {
-        type: 'value',
-        minInterval: 1,
-        axisLabel: { color: '#6b7f86', fontSize: 11, fontFamily: 'JetBrains Mono' },
-        splitLine: { lineStyle: { color: '#e8eef0', type: 'dashed' } }
-      },
+      yAxis: [
+        {
+          type: 'value',
+          name: '点击量',
+          minInterval: 1,
+          axisLabel: { color: c.axis, fontSize: 11, fontFamily: c.fontMono },
+          splitLine: { lineStyle: { color: c.grid, type: 'dashed' } }
+        },
+        {
+          // 「新增短链」量级通常远小于点击量，单独用次轴，避免被压成贴底直线
+          type: 'value',
+          name: '新增',
+          minInterval: 1,
+          axisLabel: { color: c.accent, fontSize: 11, fontFamily: c.fontMono },
+          splitLine: { show: false }
+        }
+      ],
       series: [
         {
           name: '点击量',
@@ -122,15 +145,15 @@ async function loadTrend() {
           symbol: 'circle',
           symbolSize: 6,
           data: points.map((p) => p.clicks),
-          lineStyle: { width: 3, color: '#0e6e75' },
-          itemStyle: { color: '#0e6e75', borderColor: '#fff', borderWidth: 2 },
+          lineStyle: { width: 3, color: c.primary },
+          itemStyle: { color: c.primary, borderColor: c.tooltipBg, borderWidth: 2 },
           areaStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: 'rgba(14, 110, 117, 0.22)' },
-                { offset: 1, color: 'rgba(14, 110, 117, 0.01)' }
+                { offset: 0, color: hexToRgba(c.primary, 0.22) },
+                { offset: 1, color: hexToRgba(c.primary, 0.01) }
               ]
             }
           }
@@ -138,12 +161,13 @@ async function loadTrend() {
         {
           name: '新增短链',
           type: 'line',
+          yAxisIndex: 1,
           smooth: true,
           symbol: 'circle',
           symbolSize: 5,
           data: points.map((p) => p.new_urls ?? 0),
-          lineStyle: { width: 2, color: '#f5a623', type: 'dashed' },
-          itemStyle: { color: '#f5a623', borderColor: '#fff', borderWidth: 1.5 }
+          lineStyle: { width: 2, color: c.accent, type: 'dashed' },
+          itemStyle: { color: c.accent, borderColor: c.tooltipBg, borderWidth: 1.5 }
         }
       ]
     }
@@ -159,13 +183,14 @@ async function loadTop() {
   try {
     const tops = (await getTop({ limit: 10, ...dateParams() })) ?? []
     const items = [...tops].reverse()
+    const c = chart.value
     topOption.value = {
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
-        backgroundColor: 'rgba(12, 42, 48, 0.92)',
+        backgroundColor: c.tooltipBg,
         borderWidth: 0,
-        textStyle: { color: '#e8f4f2', fontSize: 12.5 },
+        textStyle: { color: c.tooltipFg, fontSize: 12.5 },
         formatter: (params: unknown) => {
           const p = (params as { dataIndex: number; value: number }[])[0]
           const item = items[p.dataIndex]
@@ -176,8 +201,8 @@ async function loadTop() {
       xAxis: {
         type: 'value',
         minInterval: 1,
-        axisLabel: { color: '#6b7f86', fontSize: 11, fontFamily: 'JetBrains Mono' },
-        splitLine: { lineStyle: { color: '#e8eef0', type: 'dashed' } }
+        axisLabel: { color: c.axis, fontSize: 11, fontFamily: c.fontMono },
+        splitLine: { lineStyle: { color: c.grid, type: 'dashed' } }
       },
       yAxis: {
         type: 'category',
@@ -185,9 +210,9 @@ async function loadTop() {
         axisLine: { show: false },
         axisTick: { show: false },
         axisLabel: {
-          color: '#1f3238',
+          color: c.label,
           fontSize: 11.5,
-          fontFamily: 'JetBrains Mono',
+          fontFamily: c.fontMono,
           width: 110,
           overflow: 'truncate'
         }
@@ -204,17 +229,17 @@ async function loadTop() {
               type: 'linear',
               x: 0, y: 0, x2: 1, y2: 0,
               colorStops: [
-                { offset: 0, color: '#0e6e75' },
-                { offset: 1, color: '#2fa3a8' }
+                { offset: 0, color: c.primary },
+                { offset: 1, color: c.primary2 }
               ]
             }
           },
           label: {
             show: true,
             position: 'right',
-            color: '#6b7f86',
+            color: c.axis,
             fontSize: 11,
-            fontFamily: 'JetBrains Mono',
+            fontFamily: c.fontMono,
             formatter: (p: { value?: unknown }) => Number(p.value ?? 0).toLocaleString()
           }
         }

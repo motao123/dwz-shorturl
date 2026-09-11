@@ -239,14 +239,25 @@ const expirySaving = ref(false)
 
 const editVisible = ref(false)
 const editLink = ref<MemberLink | null>(null)
-const editForm = reactive({ long_url: '', title: '', expire_days: 0 })
+// expire_days 的 -1 表示「保持原有效期不变」，避免用户仅改标题时把有效期清空
+const editForm = reactive({ long_url: '', title: '', expire_days: -1 })
 const editSaving = ref(false)
+
+/** 把链接当前的 expire_at 换算成可选的有效期天数，无法精确匹配时返回 null */
+function daysFromExpireAt(expireAt: string | null): number | null {
+  if (!expireAt) return 0
+  const diff = new Date(expireAt).getTime() - Date.now()
+  if (diff <= 0) return 0
+  const days = Math.round(diff / 86400000)
+  return [1, 7, 30, 365].includes(days) ? days : null
+}
 
 async function openEdit(row: MemberLink) {
   editLink.value = row
   editForm.long_url = row.long_url
   editForm.title = row.title || ''
-  editForm.expire_days = 0
+  // 回填当前有效期，而不是硬编码 0（否则保存会静默清空原有效期）
+  editForm.expire_days = daysFromExpireAt(row.expire_at) ?? -1
   editVisible.value = true
 }
 
@@ -261,7 +272,7 @@ async function saveEdit() {
     await updateLink(editLink.value.id, {
       long_url: editForm.long_url.trim(),
       title: editForm.title.trim(),
-      expire_days: editForm.expire_days
+      expire_days: editForm.expire_days < 0 ? undefined : editForm.expire_days
     })
     ElMessage.success('已更新')
     editVisible.value = false
@@ -686,6 +697,7 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="有效期">
           <el-select v-model="editForm.expire_days" style="width: 100%">
+            <el-option label="保持原有效期不变" :value="-1" />
             <el-option label="永久有效" :value="0" />
             <el-option label="1 天" :value="1" />
             <el-option label="7 天" :value="7" />
