@@ -1,12 +1,12 @@
 -- Fresh-install schema. This file is intentionally non-destructive:
 -- existing tables and rows are never dropped or replaced.
--- Existing installations should run migrations/legacy_schema.php instead.
+-- Existing installations should run `cd backend && go run ./cmd/migrate` instead.
 
 CREATE TABLE IF NOT EXISTS `wjoy_log` (
   `Id` int unsigned NOT NULL AUTO_INCREMENT,
   `uid` varchar(16) NOT NULL,
   `longurl` text NOT NULL,
-  `url_hash` char(32) NOT NULL COMMENT 'MD5(url + 0x1F + owner scope); see migrations/040_scope_url_hash.sql',
+  `url_hash` char(32) NOT NULL COMMENT 'MD5(url + 0x1F + owner scope); see backend/migrations/php/scope_url_hash.sql',
   `clicks` int unsigned NOT NULL DEFAULT 0,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `expire_at` datetime DEFAULT NULL,

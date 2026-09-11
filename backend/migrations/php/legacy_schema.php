@@ -2,10 +2,15 @@
 /**
  * Non-destructive legacy schema migration for dwz-shorturl.
  *
- * Run from the project root:
- *   php migrations/legacy_schema.php
- * Preview without writes:
- *   php migrations/legacy_schema.php --dry-run
+ * -- migrate: after public_schema.sql
+ *
+ * 位置说明：本脚本给老库的 wjoy_log 补齐 url_hash 列 / 索引并清洗历史 URL，
+ * 必须排在 php/scope_url_hash.sql 之前 —— 后者按 MD5(longurl) 匹配重写
+ * 作用域哈希，依赖前者已把 url_hash 列建好、历史值填好。
+ *
+ * 由统一迁移入口（backend/cmd/migrate）通过 php 解释器调用，也可单独手工执行：
+ *   php backend/migrations/php/legacy_schema.php
+ *   php backend/migrations/php/legacy_schema.php --dry-run
  *
  * The script reads the existing config.php, adds missing columns cautiously,
  * normalizes valid legacy base64 URLs to plain URLs, fills url_hash, and adds
@@ -20,8 +25,22 @@ error_reporting(E_ALL);
 ini_set('display_errors', 'stderr');
 mysqli_report(MYSQLI_REPORT_OFF);
 
-$projectRoot = dirname(__DIR__);
+// This file lives in backend/migrations/php/, so the repository root (where
+// config.php sits) is three levels up. Moving the file must not silently stop
+// it from finding the config, so walk up until config.php or the repo root.
+$projectRoot = dirname(dirname(dirname(__DIR__)));
 $configFile = $projectRoot . '/config.php';
+if (!is_file($configFile)) {
+    // Fall back to the CWD (either the repo root or backend/) so the script
+    // still works when invoked by hand from another directory.
+    foreach (array(getcwd(), dirname(getcwd())) as $candidate) {
+        if (is_file($candidate . '/config.php')) {
+            $projectRoot = $candidate;
+            $configFile = $candidate . '/config.php';
+            break;
+        }
+    }
+}
 $argv = isset($_SERVER['argv']) ? $_SERVER['argv'] : array();
 $dryRun = in_array('--dry-run', $argv, true);
 $cliParams = array();

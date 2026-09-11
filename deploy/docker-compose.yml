@@ -63,7 +63,7 @@ services:
     #   - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ../migrations/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - ../backend/migrations/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
       - ./scripts/seed.sql:/docker-entrypoint-initdb.d/seed.sql:ro
       - ./scripts/init_public_db.sql:/docker-entrypoint-initdb.d/init_public_db.sql:ro
     # 内存调优：innodb-buffer-pool-size 建议按实例内存的 50%~70% 设置；

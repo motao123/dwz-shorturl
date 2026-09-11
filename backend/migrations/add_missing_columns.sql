@@ -20,7 +20,8 @@ SET @tbl_exists = (SELECT COUNT(*) FROM information_schema.TABLES
 SET @col_exists = IF(@tbl_exists = 0, 1, (SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = 'short_urls' AND COLUMN_NAME = 'member_id'));
 SET @sql = IF(@col_exists = 0,
-  'ALTER TABLE short_urls ADD COLUMN member_id BIGINT UNSIGNED NULL COMMENT ''public member ID'' AFTER created_by',
+  -- created_by 本身也是后补列，锚点统一用主键 id，避免自依赖。
+  'ALTER TABLE short_urls ADD COLUMN member_id BIGINT UNSIGNED NULL COMMENT ''public member ID'' AFTER id',
   'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
@@ -36,7 +37,8 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @col_exists = IF(@tbl_exists = 0, 1, (SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = 'short_urls' AND COLUMN_NAME = 'reminder_sent_at'));
 SET @sql = IF(@col_exists = 0,
-  'ALTER TABLE short_urls ADD COLUMN reminder_sent_at DATETIME(3) NULL COMMENT ''last expiry reminder sent at'' AFTER ip',
+  -- 老库可能还没有 ip 列，用主键 id 做锚点，保证任意版本都能执行。
+  'ALTER TABLE short_urls ADD COLUMN reminder_sent_at DATETIME(3) NULL COMMENT ''last expiry reminder sent at'' AFTER id',
   'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
@@ -58,7 +60,7 @@ SET @tbl_exists = (SELECT COUNT(*) FROM information_schema.TABLES
 SET @col_exists = IF(@tbl_exists = 0, 1, (SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = 'members' AND COLUMN_NAME = 'token_version'));
 SET @sql = IF(@col_exists = 0,
-  'ALTER TABLE members ADD COLUMN token_version INT NOT NULL DEFAULT 0 COMMENT ''increment to revoke all JWT sessions'' AFTER last_login_ip',
+  'ALTER TABLE members ADD COLUMN token_version INT NOT NULL DEFAULT 0 COMMENT ''increment to revoke all JWT sessions'' AFTER id',
   'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
@@ -66,7 +68,7 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @col_exists = IF(@tbl_exists = 0, 1, (SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = 'members' AND COLUMN_NAME = 'email_verified'));
 SET @sql = IF(@col_exists = 0,
-  'ALTER TABLE members ADD COLUMN email_verified TINYINT NOT NULL DEFAULT 0 COMMENT ''0=unverified 1=verified'' AFTER token_version',
+  'ALTER TABLE members ADD COLUMN email_verified TINYINT NOT NULL DEFAULT 0 COMMENT ''0=unverified 1=verified'' AFTER id',
   'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
