@@ -652,3 +652,134 @@ func TestURLHash_MatchesPHPScopeSeparator(t *testing.T) {
 		t.Fatalf("member scope must take precedence, got %s want %s", got, want)
 	}
 }
+
+// --- mock WjoyLogRepo (public-path mirror) ---
+
+type mockWjoyRepo struct {
+	setStatusFn func(uid string, status int8) error
+	calls       []struct {
+		UID    string
+		Status int8
+	}
+}
+
+func (m *mockWjoyRepo) Create(string, string, string, *time.Time, string) error { return nil }
+func (m *mockWjoyRepo) UpdateExpiry(string, *time.Time) error                   { return nil }
+func (m *mockWjoyRepo) Update(string, string, string, *time.Time, *string) error {
+	return nil
+}
+func (m *mockWjoyRepo) SetStatus(uid string, status int8) error {
+	m.calls = append(m.calls, struct {
+		UID    string
+		Status int8
+	}{uid, status})
+	if m.setStatusFn != nil {
+		return m.setStatusFn(uid, status)
+	}
+	return nil
+}
+
+func buildServiceWithWjoy(sr *mockShortRepo, dr *mockDomainRepo, wj repository.WjoyLogRepo) ShortUrlService {
+	sr.domains = dr
+	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:0"})
+	return NewShortUrlService(sr, rdb, nil, wj, dr, nil)
+}
+
+// FIND-4: when the admin-side soft delete succeeds but the public wjoy_log
+// mirror fails, Delete must surface a PublicSyncError instead of returning nil
+// (which would leave the link reachable via the PHP path while the UI says
+// "deleted").
+func TestDelete_ReportsPublicSyncFailure(t *testing.T) {
+	sr := newMockShortRepo()
+	dr := &mockDomainRepo{}
+	wj := &mockWjoyRepo{setStatusFn: func(string, int8) error { return errors.New("public db down") }}
+	svc := buildServiceWithWjoy(sr, dr, wj)
+
+	rec, err := svc.Create("https://www.example.com", "", 0, nil, nil, "test", "127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	err = svc.Delete(rec.ID)
+	if err == nil {
+		t.Fatal("expected a PublicSyncError when wjoy_log sync fails")
+	}
+	var syncErr *PublicSyncError
+	if !errors.As(err, &syncErr) {
+		t.Fatalf("expected *PublicSyncError, got %T: %v", err, err)
+	}
+	if syncErr.Op != "delete" {
+		t.Fatalf("expected op=delete, got %q", syncErr.Op)
+	}
+	if len(syncErr.UIDs) != 1 || syncErr.UIDs[0] != rec.UID {
+		t.Fatalf("expected failing uid %q, got %v", rec.UID, syncErr.UIDs)
+	}
+	if syncErr.Unwrap() == nil {
+		t.Fatal("PublicSyncError must wrap the underlying error")
+	}
+}
+
+// A healthy delete path must still return nil.
+func TestDelete_NoSyncFailureReturnsNil(t *testing.T) {
+	sr := newMockShortRepo()
+	dr := &mockDomainRepo{}
+	wj := &mockWjoyRepo{}
+	svc := buildServiceWithWjoy(sr, dr, wj)
+
+	rec, err := svc.Create("https://www.example.com", "", 0, nil, nil, "test", "127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	if err := svc.Delete(rec.ID); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(wj.calls) != 1 || wj.calls[0].Status != 0 {
+		t.Fatalf("expected one SetStatus(uid, 0) call, got %v", wj.calls)
+	}
+}
+
+// FIND-4 (batch): failures are collected per row so the operator gets the full
+// list of links still reachable via PHP, rather than aborting on the first.
+func TestBatchDelete_ReportsAllFailedUIDs(t *testing.T) {
+	sr := newMockShortRepo()
+	dr := &mockDomainRepo{}
+	failUID := "failme01"
+	wj := &mockWjoyRepo{setStatusFn: func(uid string, _ int8) error {
+		if uid == failUID {
+			return errors.New("public db down")
+		}
+		return nil
+	}}
+	svc := buildServiceWithWjoy(sr, dr, wj)
+
+	var ids []uint64
+	for _, u := range []string{"https://www.example.com", "https://www.example.org", "https://www.example.net"} {
+		rec, err := svc.Create(u, "", 0, nil, nil, "test", "127.0.0.1", "")
+		if err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+		ids = append(ids, rec.ID)
+	}
+	// Force one record's UID to the value the mock rejects.
+	sr.mu.Lock()
+	sr.records[ids[1]].UID = failUID
+	sr.mu.Unlock()
+
+	err := svc.BatchDelete(ids)
+	if err == nil {
+		t.Fatal("expected a PublicSyncError from batch delete")
+	}
+	var syncErr *PublicSyncError
+	if !errors.As(err, &syncErr) {
+		t.Fatalf("expected *PublicSyncError, got %T: %v", err, err)
+	}
+	if syncErr.Op != "batch_delete" {
+		t.Fatalf("expected op=batch_delete, got %q", syncErr.Op)
+	}
+	if len(syncErr.UIDs) != 1 || syncErr.UIDs[0] != failUID {
+		t.Fatalf("expected only the failing uid %q, got %v", failUID, syncErr.UIDs)
+	}
+	// All three rows must have been attempted despite the failure in the middle.
+	if len(wj.calls) != 3 {
+		t.Fatalf("expected all 3 rows attempted, got %d", len(wj.calls))
+	}
+}

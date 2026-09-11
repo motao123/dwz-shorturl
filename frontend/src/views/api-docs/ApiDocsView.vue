@@ -144,7 +144,7 @@ Authorization: Bearer dwz_xxx    # 兼容</code></pre>
             <h4>cURL</h4>
             <div class="code-wrap">
               <pre class="code-block"><code>{{ curlExample }}</code></pre>
-              <el-button class="copy-btn" :icon="CopyDocument" circle size="small" @click="copy(curlExample)" />
+              <el-button class="copy-btn" :icon="CopyDocument" circle size="small" aria-label="复制示例" title="复制" @click="copy(curlExample)" />
             </div>
             <h4>响应</h4>
             <pre class="code-block"><code>{{ responseExample }}</code></pre>
@@ -188,7 +188,7 @@ Authorization: Bearer dwz_xxx    # 兼容</code></pre>
         <pre class="code-block"><code>POST {{ baseUrl }}/public/api/short-urls/batch</code></pre>
         <div class="code-wrap">
           <pre class="code-block"><code>{{ curlBatchExample }}</code></pre>
-          <el-button class="copy-btn" :icon="CopyDocument" circle size="small" @click="copy(curlBatchExample)" />
+          <el-button class="copy-btn" :icon="CopyDocument" circle size="small" aria-label="复制批量示例" title="复制" @click="copy(curlBatchExample)" />
         </div>
         <h4>响应</h4>
         <pre class="code-block"><code>{{ batchResponseExample }}</code></pre>
