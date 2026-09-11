@@ -262,6 +262,7 @@ php migrations/build_assets.php --check
 | [🎨 后台设计](docs/BACKEND_ADMIN_DESIGN.md) | 管理后台技术设计文档 |
 | [🗺️ 功能路线图](docs/FEATURE_ROADMAP.md) | 5 个 Phase / 10 大模块 / 79.5 人日规划 |
 | [🔬 深度分析报告](docs/ANALYSIS_REPORT_2026-08.md) | 功能/UI/交互/架构四维审计 + 13 批修复记录 |
+| [🧩 分区维护](docs/partition-maintenance.md) | click_logs 月度分区：覆盖目标、告警阈值、幂等补齐与生产注意事项 |
 | [🖥️ 项目官网](https://motao123.github.io/dwz-shorturl/) | GitHub Pages 宣传站（由 Actions 自动构建，Vercel 极简浅色设计语言，见 site/DESIGN.md） |
 
 ---

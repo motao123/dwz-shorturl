@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { Refresh, Cpu, Connection, DataBoard, Timer, Odometer } from '@element-plus/icons-vue'
+import { Refresh, Cpu, Connection, DataBoard, Timer, Odometer, Files } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { ElMessageBox } from 'element-plus/es/components/message-box/index'
-import { getMonitorStatus, ensurePartitions, type MonitorStatus } from '@/api/monitor'
+import {
+  getMonitorStatus,
+  ensurePartitions,
+  type MonitorStatus,
+  type PartitionStatus
+} from '@/api/monitor'
 
 const loading = ref(false)
 const status = ref<MonitorStatus | null>(null)
+const partitionBusy = ref(false)
 
 const CRON_LABELS: Record<string, string> = {
   mark_expired: '过期链接标记',
@@ -38,23 +44,84 @@ function fmtMonth(name: string): string {
   return /^p\d{6}$/.test(name) ? `${name.slice(1, 5)}-${name.slice(5)}` : name
 }
 
-// 手动补齐分区：幂等，已覆盖的月份不会重复创建
+// --- click_logs 分区覆盖 ---
+
+const partitions = computed<PartitionStatus | null>(() => status.value?.partitions ?? null)
+
+/** 分区状态标签：ok 绿 / warning 黄 / critical 红 */
+const partitionTagType = computed(() => {
+  const level = partitions.value?.alert_level
+  if (level === 'critical') return 'danger'
+  if (level === 'warning') return 'warning'
+  return 'success'
+})
+
+const partitionTagText = computed(() => {
+  const level = partitions.value?.alert_level
+  if (level === 'critical') return '异常'
+  if (level === 'warning') return '需关注'
+  return '正常'
+})
+
+/** 已覆盖区间：YYYY-MM ~ YYYY-MM */
+const coverageText = computed(() => {
+  const p = partitions.value
+  if (!p) return '—'
+  if (!p.available) return '未分区'
+  if (!p.earliest_month || !p.latest_month) return '无月度分区'
+  return `${fmtMonth(p.earliest_month)} ~ ${fmtMonth(p.latest_month)}`
+})
+
+/** 距目标月的差距描述 */
+const behindText = computed(() => {
+  const p = partitions.value
+  if (!p) return '—'
+  if (p.behind_months <= 0) return `已达标（目标 ${fmtMonth(p.required_month)}）`
+  return `落后 ${p.behind_months} 个月（目标 ${fmtMonth(p.required_month)}）`
+})
+
+/** p_future 行数占比：兜底分区涨了说明月度分区没跟上 */
+const futureText = computed(() => {
+  const p = partitions.value
+  if (!p) return '—'
+  return `${p.future_rows} / ${p.total_rows}（${(p.future_ratio * 100).toFixed(2)}%）`
+})
+
+/**
+ * 补齐分区：先让用户确认（大表有 DDL 锁风险），再执行幂等补齐。
+ * 连续失败时会额外提示失败次数，避免运维在不了解状态时直接触发。
+ */
 async function handleEnsurePartitions() {
+  const p = partitions.value
+  const failures = p?.consecutive_failures ?? 0
   try {
     await ElMessageBox.confirm(
-      '将按后端默认目标（当前月 + 2 个月）补齐缺失的 click_logs 月度分区，已存在的月份不会重复创建。',
+      failures > 0
+        ? `分区维护任务已连续失败 ${failures} 次。ALTER TABLE 在大表上存在 DDL 锁风险，` +
+          '建议先确认数据库负载与磁盘空间。将按目标月补齐缺失分区（幂等，已存在月份不会重复创建）。'
+        : '将按目标月（当前月 + 2 个月）补齐缺失的 click_logs 月度分区，已存在的月份不会重复创建。',
       '补齐分区',
       { type: 'warning', confirmButtonText: '开始补齐', cancelButtonText: '取消' }
     )
   } catch {
     return
   }
+  partitionBusy.value = true
   try {
     const res = await ensurePartitions()
-    ElMessage.success(res.created > 0 ? `已创建 ${res.created} 个分区` : '分区已覆盖，无需创建')
+    const created = res.created ?? []
+    if (created.length > 0) {
+      ElMessage.success(`已创建 ${created.length} 个分区：${created.map(fmtMonth).join('、')}`)
+    } else {
+      ElMessage.success('分区已覆盖至目标月，无需创建')
+    }
     await load()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '补齐分区失败')
+    // 部分成功也会返回结构化结果：已创建的月份已落库，刷新后展示进度
+    ElMessage.error(err instanceof Error ? err.message : '补齐分区未完成，请查看服务端日志')
+    await load()
+  } finally {
+    partitionBusy.value = false
   }
 }
 
@@ -81,7 +148,7 @@ onBeforeUnmount(() => {
           系统监控
           <small>MONITOR · 服务健康与后台任务</small>
         </h1>
-        <p class="app-page__desc">数据库 · Redis · 点击队列 · 定时任务</p>
+        <p class="app-page__desc">数据库 · Redis · 点击队列 · 定时任务 · 分区覆盖</p>
       </div>
       <el-button
         type="primary"
@@ -156,74 +223,76 @@ onBeforeUnmount(() => {
       </section>
 
       <!-- click_logs 分区覆盖率 -->
-      <section v-if="status.partitions" class="app-card wide">
+      <section class="app-card wide">
         <h3 class="card-title">
-          <el-icon><Timer /></el-icon>点击日志分区
+          <el-icon><Files /></el-icon>点击日志分区
           <el-tag
-            :type="status.partitions.healthy ? 'success' : 'danger'"
+            :type="partitionTagType"
             size="small"
             round
-            :aria-label="`分区状态：${status.partitions.healthy ? '正常' : '异常'}`"
+            :aria-label="`点击日志分区状态：${partitionTagText}`"
           >
-            {{ status.partitions.healthy ? '正常' : '需关注' }}
+            {{ partitionTagText }}
           </el-tag>
           <el-button
             class="partition-fix"
             size="small"
             type="warning"
             plain
-            aria-label="补齐缺失的点击日志分区"
+            :loading="partitionBusy"
+            aria-label="补齐缺失的点击日志分区至目标月"
             @click="handleEnsurePartitions"
           >
             补齐分区
           </el-button>
         </h3>
+
+        <!-- 覆盖不足时给出醒目提示：分区耗尽后新行会全部落入 p_future，
+             click_logs 静默退化为单一大表，查询与清理的性能会持续劣化 -->
         <el-alert
-          v-if="status.partitions.failing"
-          type="error"
+          v-for="(msg, i) in partitions?.alerts ?? []"
+          :key="i"
+          :type="partitions?.alert_level === 'critical' ? 'error' : 'warning'"
           show-icon
           :closable="false"
           class="partition-alert"
-          title="分区维护连续失败"
-          :description="`最近失败：${status.partitions.last_error || '未知错误'}（连续 ${status.partitions.consecutive_failures} 次）`"
+          :title="msg"
         />
-        <el-alert
-          v-else-if="status.partitions.behind_months > 0"
-          type="warning"
-          show-icon
-          :closable="false"
-          class="partition-alert"
-          title="分区覆盖落后于目标"
-          :description="`已落后 ${status.partitions.behind_months} 个月，新数据可能落入 p_future 兜底分区，请点击「补齐分区」。`"
-        />
+
         <dl class="kv">
           <div>
-            <dt>覆盖月份</dt>
-            <dd class="mono">
-              {{ status.partitions.earliest_month ? fmtMonth(status.partitions.earliest_month) : '—' }}
-              ~
-              {{ status.partitions.latest_month ? fmtMonth(status.partitions.latest_month) : '—' }}
-            </dd>
+            <dt>覆盖区间</dt>
+            <dd class="mono">{{ coverageText }}</dd>
           </div>
           <div>
-            <dt>目标月份</dt>
-            <dd class="mono">{{ fmtMonth(status.partitions.required_month) }}</dd>
+            <dt>覆盖目标</dt>
+            <dd class="mono">{{ behindText }}</dd>
           </div>
           <div>
-            <dt>落后月数</dt>
-            <dd class="mono">{{ status.partitions.behind_months }}</dd>
+            <dt>p_future 行数占比</dt>
+            <dd class="mono">{{ futureText }}</dd>
           </div>
-          <div>
-            <dt>p_future 行数</dt>
-            <dd class="mono">{{ status.partitions.future_rows }}</dd>
+          <div v-if="partitions?.pending_months?.length">
+            <dt>待建分区</dt>
+            <dd class="mono">{{ partitions?.pending_months?.map(fmtMonth).join('、') }}</dd>
           </div>
           <div>
             <dt>最近维护</dt>
-            <dd class="mono">{{ fmtTime(status.partitions.last_run_at) }}</dd>
+            <dd class="mono">
+              {{ fmtTime(partitions?.last_run_at) }}
+              <template v-if="partitions?.created_last_run">
+                （新建 {{ partitions?.created_last_run }} 个）
+              </template>
+            </dd>
           </div>
-          <div>
-            <dt>上次新建</dt>
-            <dd class="mono">{{ status.partitions.created_last_run }} 个</dd>
+          <div v-if="partitions?.last_error">
+            <dt>最近失败</dt>
+            <dd>
+              {{ partitions?.last_error }}
+              <template v-if="partitions?.consecutive_failures">
+                （连续 {{ partitions?.consecutive_failures }} 次）
+              </template>
+            </dd>
           </div>
         </dl>
       </section>
@@ -240,6 +309,14 @@ onBeforeUnmount(() => {
           <el-table-column label="上次运行" width="200">
             <template #default="{ row }">
               <span class="mono">{{ fmtTime(row.last_run) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="190">
+            <template #default="{ row }">
+              <el-tag v-if="row.failed" type="danger" size="small" round>
+                失败{{ (row.consecutive_failures ?? 0) > 1 ? ` ×${row.consecutive_failures}` : '' }}
+              </el-tag>
+              <el-tag v-else type="success" size="small" round>正常</el-tag>
             </template>
           </el-table-column>
         </el-table>

@@ -476,7 +476,7 @@
 | 项 | 修复内容 | 验证结果 |
 |---|---|---|
 | 点击数对账 cron | `reconcile_clicks`（每日 04:00）：以 short_urls.clicks 为准同步 wjoy_log.clicks，PHP 统计页不再漏计 Go 路径点击 | 手动触发 ran ✓，任务列表 8 项 ✓ |
-| click_logs 分区维护 cron | `ensure_partitions`（每日 03:15）：按月 REORGANIZE p_future 保证分区超前 2 个月，防止数据落进 p_future 大表 | 手动触发幂等验证 ✓（当前已超前至 2026-12，无需创建） |
+| click_logs 分区维护 cron | `ensure_partitions`（每日 03:15）：按月 REORGANIZE p_future 保证分区超前 2 个月，防止数据落进 p_future 大表 | 覆盖状态已可观测（`/monitor/partitions`）、失败可告警、支持幂等手动补齐，详见 [分区维护](partition-maintenance.md) |
 | goroutine 防护（上一批延续） | cron 全任务 safe() 恢复 + webhook safeDeliver | 单测通过 ✓ |
 
 **清理与加固**
