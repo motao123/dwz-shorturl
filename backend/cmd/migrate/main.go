@@ -13,6 +13,7 @@
 //	./migrate -status                     # list every migration file + state
 //	./migrate -dry-run                    # print what would be applied
 //	./migrate -all                        # apply both DBs + url_hash parity check
+//	./migrate -same-db                    # single-database deployment: one schema, one version table
 //	./migrate -baseline php/add_members.sql   # mark an out-of-band migration done
 //	./migrate -migrations ../backend/migrations
 //
@@ -120,6 +121,16 @@ func resolvePublicDB(cfg *config.Config) {
 	if cfg.PublicDB.Charset == "" {
 		cfg.PublicDB.Charset = cfg.Database.Charset
 	}
+}
+
+// sameDatabase reports whether the admin and public configurations resolve to
+// the same MySQL schema. The host is deliberately not compared: a single
+// database reached through two different hostnames/Docker service names is
+// still one schema, and applying every migration to it is what the operator
+// wants.
+func sameDatabase(cfg *config.Config) bool {
+	return cfg.PublicDB.DBName != "" &&
+		cfg.PublicDB.DBName == cfg.Database.DBName
 }
 
 func openDB(cfg *config.Config, which string) (*gorm.DB, error) {
@@ -372,6 +383,7 @@ func main() {
 	all := flag.Bool("all", false, "apply admin + public migrations and run parity checks")
 	baseline := flag.Bool("baseline", false, "mark every migration in the dir as applied WITHOUT executing it (for databases upgraded by hand)")
 	only := flag.String("only", "", "limit to one database: admin | public")
+	sameDB := flag.Bool("same-db", false, "treat admin and public as one schema: apply every migration to it and record every version there")
 	dir := flag.String("migrations", "migrations", "directory containing the SQL migration files")
 	configPath := flag.String("config", "configs/config.yaml", "path to the config yaml")
 	flag.Parse()
@@ -383,6 +395,13 @@ func main() {
 	cfg := config.Get()
 	applyEnvOverrides(cfg)
 	resolvePublicDB(cfg)
+
+	// Single-database deployments point public_db at the admin schema. Every
+	// migration then targets that one schema and is recorded in one
+	// schema_migrations table, so -status cannot report a version as applied on
+	// one side while pending on the other. Detected as well as opted into:
+	// a config that names the same database is unambiguous.
+	singleDB := *sameDB || sameDatabase(cfg)
 
 	if err := validateDBName(cfg.Database.DBName); err != nil {
 		fmt.Fprintln(os.Stderr, "invalid admin db name:", err)
@@ -417,9 +436,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	public, pubErr := openDB(cfg, "public")
-	if pubErr != nil {
-		fmt.Fprintln(os.Stderr, "public db unavailable:", pubErr)
+	var public *gorm.DB
+	if singleDB {
+		// One schema: reuse the admin connection so both migration groups land
+		// in the same database and share one version table.
+		fmt.Printf("single-database mode: admin and public both resolve to %q\n", cfg.Database.DBName)
+		public = admin
+	} else {
+		var pubErr error
+		public, pubErr = openDB(cfg, "public")
+		if pubErr != nil {
+			fmt.Fprintln(os.Stderr, "public db unavailable:", pubErr)
+		}
 	}
 
 	wantAdmin := *only == "" || *only == "admin"
