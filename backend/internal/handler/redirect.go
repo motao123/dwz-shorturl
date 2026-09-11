@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"fmt"
+	"html"
 	"net/http"
 	"regexp"
 	"runtime"
@@ -308,6 +309,17 @@ func (h *RedirectHandler) Redirect(c *gin.Context) {
 		}
 	}
 
+	// Defensive re-check: never serve a soft-deleted or expired record even if
+	// the cache/DB layer handed one back (mirrors PHP do.php's explicit checks).
+	if record.Status != 1 {
+		c.String(http.StatusNotFound, "Not Found")
+		return
+	}
+	if record.ExpireAt != nil && !record.ExpireAt.After(time.Now()) {
+		c.String(http.StatusGone, "短链已过期")
+		return
+	}
+
 	// Enqueue click event (non-blocking)
 	h.clickQueue.Enqueue(ClickEvent{
 		ShortUrlID: record.ID,
@@ -370,11 +382,15 @@ func passwordUnlocked(c *gin.Context, uid string) bool {
 // renderPasswordPage returns a lightweight, mobile-friendly unlock page. The
 // form posts the password back to the same short URL; no third-party assets.
 func renderPasswordPage(uid, errMsg string) string {
+	// Escape every interpolation: callers may pass arbitrary strings in the
+	// future, so treat them as untrusted (PHP's password_page_html does the same).
+	safeUID := html.EscapeString(uid)
+	safeErr := html.EscapeString(errMsg)
 	title := "请输入访问密码"
 	msg := ""
 	if errMsg != "" {
-		title = errMsg
-		msg = `<p style="color:#c0392b;font-size:13px;margin:0 0 14px;">` + errMsg + `</p>`
+		title = safeErr
+		msg = `<p style="color:#c0392b;font-size:13px;margin:0 0 14px;">` + safeErr + `</p>`
 	}
 	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -389,7 +405,7 @@ input{width:100%;padding:11px 12px;border:1px solid #d3e0e3;border-radius:8px;fo
 input:focus{border-color:#0e6e75;box-shadow:0 0 0 3px rgba(14,110,117,.12)}
 button{width:100%;margin-top:12px;padding:11px;background:#0e6e75;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}
 button:hover{background:#0a5a60}
-</style></head><body><form class="card" method="post" action="/` + uid + `">
+</style></head><body><form class="card" method="post" action="/` + safeUID + `">
 <p class="lock">🔒</p><h1>此链接受密码保护</h1><p class="sub">请输入访问密码以继续</p>
 ` + msg + `<input type="password" name="password" placeholder="访问密码" required autofocus autocomplete="off">
 <button type="submit">解锁访问</button>

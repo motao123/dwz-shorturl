@@ -15,3 +15,6 @@ backend/configs/config.yaml
 backend/configs/config.local.yaml
 deploy/.env
 *.local.yaml
+
+# Database backups produced by ops/one_click_migrate.sh
+backups/

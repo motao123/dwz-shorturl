@@ -29,6 +29,7 @@ var (
 	ErrURLInvalid       = errors.New("url is invalid")
 	ErrURLTooLong       = errors.New("url too long")
 	ErrSSRFBlocked      = errors.New("url host not allowed")
+	ErrDNSResolve       = errors.New("url host cannot be resolved, please retry later")
 	ErrCustomCodeFormat = errors.New("custom code format error, must be 6-8 chars of a-z0-5")
 	ErrCustomCodeTaken  = errors.New("custom code already taken")
 	ErrCodeCollision    = errors.New("short code collision, please retry")
@@ -50,6 +51,9 @@ type ShortUrlService interface {
 	List(page, perPage int, filters repository.ShortUrlFilters) ([]model.ShortUrl, int64, error)
 	Export(filters repository.ShortUrlFilters) ([]byte, error)
 	ResolveByUID(uid string) (*model.ShortUrl, error)
+	// RenewIfExpired reactivates a soft-expired link in place, shared by the
+	// public API and member console paths so semantics stay identical.
+	RenewIfExpired(existing *model.ShortUrl, expireDays int)
 }
 
 type shortUrlService struct {
@@ -143,25 +147,16 @@ func (s *shortUrlService) Create(longURL, custom string, expireDays int, domainI
 		return nil, err
 	}
 
-	hash := md5Hash(longURL)
+	hash := urlHash(longURL, urlScopeKey(nil, createdBy))
 
-	// Check if URL already exists
+	// Check if this URL already has a link inside the same owner scope.
 	existing, err := s.repo.FindByHash(hash)
 	if err == nil && existing != nil {
 		if custom != "" && custom != existing.UID {
 			return nil, errors.New("url already has a short link, cannot use different custom code")
 		}
-		// Renew if expired
-		if existing.ExpireAt != nil && existing.ExpireAt.Before(time.Now()) {
-			if expireDays > 0 {
-				exp := time.Now().Add(time.Duration(expireDays) * 24 * time.Hour)
-				existing.ExpireAt = &exp
-			} else {
-				existing.ExpireAt = nil
-			}
-			existing.Status = 1
-			_ = s.repo.Update(existing)
-		}
+		// Renew if expired (shared semantics with the member console path).
+		s.RenewIfExpired(existing, expireDays)
 		return existing, nil
 	}
 
@@ -192,10 +187,10 @@ func (s *shortUrlService) Create(longURL, custom string, expireDays int, domainI
 		if custom != "" {
 			uid = custom
 		} else if attempt == 0 {
-			uid = pkg.ShortURL(longURL)
+			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy))
 		} else {
 			salt := fmt.Sprintf("|%d|%s", attempt, pkg.GenerateRandomCode(8))
-			uid = pkg.ShortURL(longURL + salt)
+			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy) + salt)
 		}
 
 		record := model.ShortUrl{
@@ -247,10 +242,11 @@ func (s *shortUrlService) CreatePublicAPI(longURL, custom string, expireDays int
 	return s.Create(longURL, custom, expireDays, domainID, nil, "api", ip, password)
 }
 
-// resurrectDeleted revives a soft-deleted row with the same url_hash so the URL
-// can be shortened again. The unique index on url_hash keeps a deleted row in
-// place, so without this a re-creation would fail with a duplicate-key error
-// forever. Returns nil when there is nothing to resurrect.
+// resurrectDeleted revives a soft-deleted row with the same scoped url_hash so
+// the URL can be shortened again. Since the unique index is scoped to
+// (url_hash), a soft-deleted row still occupies it, so without resurrection a
+// re-creation would fail with a duplicate-key error forever. Returns nil when
+// there is nothing to resurrect.
 func (s *shortUrlService) resurrectDeleted(hash string, expireDays int, domainID *uint64, createdBy *uint64, source, ip string) (*model.ShortUrl, error) {
 	deleted, err := s.repo.FindByHashIncludingDeleted(hash)
 	if err != nil || !deleted.DeletedAt.Valid {
@@ -404,7 +400,7 @@ func (s *shortUrlService) createWithTitle(longURL, title, custom string, expireD
 	if custom != "" && !isValidCustomCode(custom) {
 		return nil, ErrCustomCodeFormat
 	}
-	hash := md5Hash(longURL)
+	hash := urlHash(longURL, urlScopeKey(nil, createdBy))
 
 	if existing, err := s.repo.FindByHash(hash); err == nil && existing != nil {
 		if custom != "" && custom != existing.UID {
@@ -439,10 +435,10 @@ func (s *shortUrlService) createWithTitle(longURL, title, custom string, expireD
 		if custom != "" {
 			uid = custom
 		} else if attempt == 0 {
-			uid = pkg.ShortURL(longURL)
+			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy))
 		} else {
 			salt := fmt.Sprintf("|%d|%s", attempt, pkg.GenerateRandomCode(8))
-			uid = pkg.ShortURL(longURL + salt)
+			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy) + salt)
 		}
 		record := model.ShortUrl{
 			UID:          uid,
@@ -532,7 +528,7 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 			return nil, err
 		}
 		record.LongURL = longURL
-		record.URLHash = md5Hash(longURL)
+		record.URLHash = urlHash(longURL, urlScopeKey(record.MemberID, record.CreatedBy))
 	}
 
 	if title != "" {
@@ -881,6 +877,24 @@ func (s *shortUrlService) invalidateCache(uid string) {
 
 // ValidateURL is the exported form of validateURL for handler-side outbound
 // requests (link health checks, title scraping) that need SSRF-safe validation.
+// RenewIfExpired reactivates a soft-expired record in place. When expireDays is
+// 0 the link becomes permanent; otherwise the window restarts from now.
+// Shared by the public API path and the member console path so the same URL
+// behaves identically regardless of entry point.
+func (s *shortUrlService) RenewIfExpired(existing *model.ShortUrl, expireDays int) {
+	if existing == nil || existing.ExpireAt == nil || !existing.ExpireAt.Before(time.Now()) {
+		return
+	}
+	if expireDays > 0 {
+		exp := time.Now().Add(time.Duration(expireDays) * 24 * time.Hour)
+		existing.ExpireAt = &exp
+	} else {
+		existing.ExpireAt = nil
+	}
+	existing.Status = 1
+	_ = s.repo.Update(existing)
+}
+
 func ValidateURL(rawURL string) error { return validateURL(rawURL) }
 
 // validateURL performs SSRF-safe validation of a URL.
@@ -914,7 +928,14 @@ func validateURL(rawURL string) error {
 		// Port is present, it's fine as long as it's valid (url.Parse handles this)
 	}
 
-	if isPrivateHost(parsed.Hostname()) {
+	// Distinguish a genuine private/reserved host (SSRF, permanent) from a
+	// transient DNS resolution failure, so callers can show a "retry later"
+	// hint instead of a misleading "host not allowed".
+	priv, dnsErr := classifyHost(parsed.Hostname())
+	if dnsErr != nil {
+		return ErrDNSResolve
+	}
+	if priv {
 		return ErrSSRFBlocked
 	}
 
@@ -931,55 +952,81 @@ var privateHostCache = struct {
 
 type privateHostEntry struct {
 	private bool
+	err     error
 	expiry  time.Time
 }
 
 const privateHostCacheTTL = 5 * time.Minute
 
+// isPrivateHost reports whether the host is private/reserved. DNS resolution
+// failures are conservatively reported as "private" (fail-closed) — callers
+// that need to distinguish the two cases must use classifyHost.
 func isPrivateHost(host string) bool {
+	priv, _ := classifyHost(host)
+	return priv
+}
+
+type hostClass struct {
+	private bool
+	err     error
+}
+
+// classifyHost returns (isPrivate, dnsErr). dnsErr is non-nil only when the
+// hostname could not be resolved at all — a transient condition, distinct from
+// a host that resolves to a private/reserved address.
+func classifyHost(host string) (bool, error) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" || host == "localhost" || strings.HasSuffix(host, ".local") {
-		return true
+		return true, nil
 	}
 
 	// Literal IP: cheap, no DNS, no caching needed.
 	if ip := net.ParseIP(host); ip != nil {
-		return isPrivateIP(ip)
+		return isPrivateIP(ip), nil
 	}
 
-	// Cached DNS result.
+	// Cached result.
 	privateHostCache.mu.Lock()
 	if e, ok := privateHostCache.items[host]; ok && time.Now().Before(e.expiry) {
 		privateHostCache.mu.Unlock()
-		return e.private
+		return e.private, e.err
 	}
 	privateHostCache.mu.Unlock()
 
-	private := isPrivateHostResolve(host)
+	private, err := isPrivateHostResolve(host)
 
 	privateHostCache.mu.Lock()
 	if len(privateHostCache.items) > 2048 {
 		privateHostCache.items = make(map[string]privateHostEntry)
 	}
-	privateHostCache.items[host] = privateHostEntry{private: private, expiry: time.Now().Add(privateHostCacheTTL)}
+	// Never cache transient DNS failures — only cache definitive verdicts.
+	if err == nil {
+		privateHostCache.items[host] = privateHostEntry{private: private, err: err, expiry: time.Now().Add(privateHostCacheTTL)}
+	}
 	privateHostCache.mu.Unlock()
-	return private
+	return private, err
 }
 
 // isPrivateHostResolve performs the actual DNS lookup; kept separate from the
 // cache wrapper so the resolution logic stays straightforward.
-func isPrivateHostResolve(host string) bool {
+//   - (true, nil)  → resolves to a private/reserved address (SSRF, permanent)
+//   - (false, nil) → resolves to public addresses only
+//   - (_, err)     → hostname did not resolve at all (transient)
+func isPrivateHostResolve(host string) (bool, error) {
 	addrs, err := net.LookupHost(host)
 	if err != nil || len(addrs) == 0 {
-		return true
+		if err == nil {
+			err = errors.New("no address returned for host")
+		}
+		return false, err
 	}
 	for _, addr := range addrs {
 		resolved := net.ParseIP(addr)
 		if resolved == nil || isPrivateIP(resolved) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func isPrivateIP(ip net.IP) bool {
@@ -1004,6 +1051,43 @@ func isValidCustomCode(code string) bool {
 func md5Hash(input string) string {
 	h := md5.Sum([]byte(input))
 	return hex.EncodeToString(h[:])
+}
+
+// urlScopeKey builds the per-owner dedup scope used by urlHash. It mirrors the
+// PHP-side url_scope_key()/url_scope_hash() so the Go and PHP paths land on the
+// same url_hash value for the same (URL, owner) pair.
+//
+// Scope semantics:
+//   - member scope "m:<id>" -> one short link per URL per member. Two different
+//     members shortening the same URL get separate links (each can set its own
+//     expiry/password), and the same member re-submitting gets the existing one.
+//   - everything else -> "w:0", the legacy global semantics (one link per URL).
+//     This covers anonymous submissions, API-key calls AND admin-console
+//     creations.
+//
+// Note: admin-console creations deliberately fall into "w:0" rather than a
+// per-admin "w:<id>" bucket. The PHP front end (api.php / batch.php /
+// do.php) only knows a member id and can therefore never compute "w:<id>"; if
+// the admin console used a per-admin scope, a link created there would get a
+// different url_hash than the same URL submitted through the PHP front, and the
+// two redirect paths would disagree about whether the link already exists.
+// Keeping admins in the global bucket preserves the pre-upgrade behaviour and
+// guarantees the Go and PHP implementations stay interchangeable.
+const urlScopeSeparator = "\x1f"
+
+func urlScopeKey(memberID, createdBy *uint64) string {
+	_ = createdBy // kept for signature parity with the PHP/legacy call sites
+	if memberID != nil && *memberID > 0 {
+		return fmt.Sprintf("m:%d", *memberID)
+	}
+	return "w:0"
+}
+
+// urlHash returns the scoped MD5 of a URL. It replaces the plain MD5(url) that
+// was globally unique, so the same URL can back several links (one per member)
+// while collisions in the dedup key can no longer happen between distinct URLs.
+func urlHash(longURL, scopeKey string) string {
+	return md5Hash(longURL + urlScopeSeparator + scopeKey)
 }
 
 // hashPassword returns the bcrypt hash of an access password, or "" when the

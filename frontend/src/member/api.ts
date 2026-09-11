@@ -2,22 +2,60 @@
 // Auth: PHP member.php (session cookie) issues a member JWT.
 // Data: Go /member/api/* endpoints (X-Member-Token header).
 
+const TOKEN_KEY = 'dwz_member_token'
+const CSRF_KEY = 'dwz_member_csrf'
+
+// Token 持久化到 sessionStorage：F5 刷新后仍可读取，关闭标签页即清除。
+// 读取顺序：内存 → sessionStorage（避免页面刷新后会员接口全部 401）。
 let memberToken = ''
 let memberCsrf = ''
 
+function safeStorage(): Storage | null {
+  try {
+    return typeof sessionStorage === 'undefined' ? null : sessionStorage
+  } catch {
+    return null
+  }
+}
+
 export function setMemberToken(t: string) {
   memberToken = t
+  const storage = safeStorage()
+  if (!storage) return
+  if (t) storage.setItem(TOKEN_KEY, t)
+  else storage.removeItem(TOKEN_KEY)
 }
 
 export function getMemberToken(): string {
+  if (memberToken) return memberToken
+  const storage = safeStorage()
+  if (!storage) return ''
+  memberToken = storage.getItem(TOKEN_KEY) || ''
   return memberToken
+}
+
+function setMemberCsrf(token: string) {
+  memberCsrf = token
+  const storage = safeStorage()
+  if (!storage) return
+  if (token) storage.setItem(CSRF_KEY, token)
+  else storage.removeItem(CSRF_KEY)
+}
+
+function getMemberCsrf(): string {
+  if (memberCsrf) return memberCsrf
+  const storage = safeStorage()
+  if (!storage) return ''
+  memberCsrf = storage.getItem(CSRF_KEY) || ''
+  return memberCsrf
 }
 
 /** 获取 CSRF token；没有则先拉一次会话（member.php 默认 action 会刷新 csrf） */
 async function ensureCsrf(): Promise<string> {
-  if (memberCsrf) return memberCsrf
+  const cached = getMemberCsrf()
+  if (cached) return cached
   await fetchSession()
-  return memberCsrf
+  return getMemberCsrf()
 }
 
 async function phpHtml(action: string, params: Record<string, string> = {}): Promise<any> {
@@ -48,7 +86,7 @@ export async function fetchSession(): Promise<{ member: any; token: string }> {
   const data = await res.json()
   const m = data.data?.member || null
   const token = data.data?.token || ''
-  memberCsrf = data.data?.csrf || memberCsrf
+  if (data.data?.csrf) setMemberCsrf(data.data.csrf)
   setMemberToken(token)
   return { member: m, token }
 }
@@ -111,7 +149,8 @@ async function go(path: string, opts: RequestInit = {}): Promise<any> {
     'Content-Type': 'application/json',
     ...(opts.headers as Record<string, string>)
   }
-  if (memberToken) headers['X-Member-Token'] = memberToken
+  const token = getMemberToken()
+  if (token) headers['X-Member-Token'] = token
   const res = await fetch(path, { ...opts, headers, credentials: 'same-origin' })
   const data = await res.json()
   if (data.code !== 0) throw new Error(data.msg || '请求失败')
@@ -145,8 +184,9 @@ export async function getSummary(): Promise<MemberSummary> {
 
 /** 导出我的短链为 CSV（直接触发浏览器下载） */
 export async function exportLinksCsv(): Promise<void> {
+  const token = getMemberToken()
   const res = await fetch('/member/api/links/export', {
-    headers: memberToken ? { 'X-Member-Token': memberToken } : {},
+    headers: token ? { 'X-Member-Token': token } : {},
     credentials: 'same-origin'
   })
   if (!res.ok) {

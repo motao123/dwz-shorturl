@@ -190,8 +190,15 @@ $config .= '$pwd = ' . var_export($password, true) . ";\n";
 $config .= '$dbname = ' . var_export($database, true) . ";\n";
 $config .= "\n// 对外短链规范地址，可包含子目录。\n";
 $config .= '$public_base_url = ' . var_export($publicBaseUrl, true) . ";\n";
+$config .= "\n// 反向代理 IP 白名单：仅当 REMOTE_ADDR 命中此处才会信任 X-Forwarded-For。\n";
+$config .= "// 直连部署请保持空数组；反向代理（nginx/caddy/负载均衡）部署必须填写代理自身地址。\n";
 $config .= "\$trusted_proxies = array();\n";
 $config .= "\$rate_limit_dir = __DIR__ . '/logs/ratelimit';\n";
+// 链接访问密码与会员 token 的 HMAC 密钥：随机生成并写入配置。
+// 注意：必须与 Go 后端 config.yaml 的 jwt.member_secret 保持一致，
+// 否则 PHP 与 Go 两条跳转路径的密码解锁 cookie 互不认可。
+$config .= "\$member_secret = " . var_export(bin2hex(random_bytes(32)), true) . ";\n";
+$config .= "\n";
 $config .= "\$stats_enabled = false;\n";
 $config .= "\$stats_token = '';\n";
 

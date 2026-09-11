@@ -127,8 +127,8 @@ func main() {
 	memberSvc := service.NewMemberService(memberRepo)
 	violationSvc := service.NewViolationService(violationRepo)
 	monitorSvc := service.NewMonitorService(db, rdb, clickQueue, cronSvc, zapLogger)
-	webhookSvc := service.NewWebhookService(webhookRepo)
-	memberApiSvc := service.NewMemberApiService(shortUrlRepo, wjoyLogRepo, memberRepo, db, emailSvc)
+	webhookSvc := service.NewWebhookService(webhookRepo, zapLogger)
+	memberApiSvc := service.NewMemberApiService(shortUrlRepo, wjoyLogRepo, memberRepo, db, emailSvc, shortUrlSvc)
 
 	// Dispatch link.clicked webhooks when clicks are recorded.
 	clickQueue.SetOnClick(func(uid string) {
@@ -143,20 +143,20 @@ func main() {
 
 	// Initialize handlers
 	handlers := &router.Handlers{
-		Auth:     handler.NewAuthHandler(authSvc, rdb),
-		ShortUrl: handler.NewShortUrlHandler(shortUrlSvc, rateLimiter, cfg.RateLimit, auditSvc, webhookSvc),
-		User:     handler.NewUserHandler(userSvc, auditSvc),
-		Role:     handler.NewRoleHandler(roleSvc, auditSvc),
-		Stats:    handler.NewStatsHandler(statsSvc),
-		Config:   handler.NewConfigHandler(configSvc),
-		Audit:    handler.NewAuditHandler(auditSvc),
-		ApiKey:   handler.NewApiKeyHandler(apiKeySvc),
-		Redirect: handler.NewRedirectHandler(shortUrlSvc, rdb, db, zapLogger, clickQueue),
-		Domain:   handler.NewDomainHandler(domainSvc, auditSvc),
-		Member:   handler.NewMemberHandler(memberSvc, auditSvc),
+		Auth:      handler.NewAuthHandler(authSvc, rdb),
+		ShortUrl:  handler.NewShortUrlHandler(shortUrlSvc, rateLimiter, cfg.RateLimit, auditSvc, webhookSvc),
+		User:      handler.NewUserHandler(userSvc, auditSvc),
+		Role:      handler.NewRoleHandler(roleSvc, auditSvc),
+		Stats:     handler.NewStatsHandler(statsSvc),
+		Config:    handler.NewConfigHandler(configSvc),
+		Audit:     handler.NewAuditHandler(auditSvc),
+		ApiKey:    handler.NewApiKeyHandler(apiKeySvc),
+		Redirect:  handler.NewRedirectHandler(shortUrlSvc, rdb, db, zapLogger, clickQueue),
+		Domain:    handler.NewDomainHandler(domainSvc, auditSvc),
+		Member:    handler.NewMemberHandler(memberSvc, auditSvc),
 		Violation: handler.NewViolationHandler(violationSvc, auditSvc),
-		Monitor:  handler.NewMonitorHandler(monitorSvc),
-		Webhook:  handler.NewWebhookHandler(webhookSvc, auditSvc),
+		Monitor:   handler.NewMonitorHandler(monitorSvc),
+		Webhook:   handler.NewWebhookHandler(webhookSvc, auditSvc),
 		MemberApi: handler.NewMemberApiHandler(memberApiSvc),
 	}
 

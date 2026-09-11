@@ -79,16 +79,22 @@ if ($action === 'my_links') {
             mysqli_stmt_fetch($stmt);
             mysqli_stmt_close($stmt);
         }
-        $stmt = $ADMIN_DB->prepare('SELECT uid, long_url, clicks, expire_at, created_at FROM short_urls WHERE member_id=? AND deleted_at IS NULL ORDER BY id DESC LIMIT ? OFFSET ?');
+        // LIMIT/OFFSET 占位符在部分旧驱动/mysqlnd 未启用时会静默失败，这里直接拼接已强转 int 的值（$per/$offset 均来自 (int) 转换，无注入风险）。
+        $perSql = max(1, (int)$per);
+        $offsetSql = max(0, (int)$offset);
+        $stmt = $ADMIN_DB->prepare('SELECT uid, long_url, clicks, expire_at, created_at FROM short_urls WHERE member_id=? AND deleted_at IS NULL ORDER BY id DESC LIMIT ' . $perSql . ' OFFSET ' . $offsetSql);
         if ($stmt) {
-            mysqli_stmt_bind_param($stmt, 'iii', $mid, $per, $offset);
-            mysqli_stmt_execute($stmt);
-            $res = mysqli_stmt_get_result($stmt);
-            if ($res) {
-                while ($row = mysqli_fetch_assoc($res)) {
-                    $row['short_url'] = public_short_url($row['uid']);
-                    $links[] = $row;
+            mysqli_stmt_bind_param($stmt, 'i', $mid);
+            if (mysqli_stmt_execute($stmt)) {
+                $res = mysqli_stmt_get_result($stmt);
+                if ($res) {
+                    while ($row = mysqli_fetch_assoc($res)) {
+                        $row['short_url'] = public_short_url($row['uid']);
+                        $links[] = $row;
+                    }
                 }
+            } else {
+                error_log('[dwz] my_links query failed: ' . mysqli_stmt_error($stmt));
             }
             mysqli_stmt_close($stmt);
         }
@@ -100,6 +106,9 @@ if ($action === 'my_links') {
 $member = member_current($DB);
 $_SESSION['member_csrf'] = bin2hex(random_bytes(16));
 $token = $member ? member_issue_token($member['id'], $member['username'], (int)($member['token_version'] ?? 0)) : '';
+// 同时写入 HttpOnly cookie：Go 后端 MemberAuth 在请求头缺失时会回退读取它，
+// 这样即使前端 token 未持久化（或页面刷新后），会员接口依然可用。
+member_set_token_cookie($token);
 member_result(1, 'ok', 1, 200, array(
     'member' => $member,
     'csrf' => $_SESSION['member_csrf'],
@@ -114,4 +123,17 @@ function member_result($code, $msg, $result, $status = 200, $data = null) {
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if (isset($DB)) $DB->close();
     exit();
+}
+
+// 同站点 HttpOnly cookie 承载会员 JWT（与 Go 侧 MemberAuth 的 cookie 名保持一致）。
+function member_set_token_cookie($token) {
+    if (headers_sent()) return;
+    $name = 'dwz_member_token';
+    $secure = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+    if ($token === '' || $token === null) {
+        setcookie($name, '', time() - 3600, '/', '', $secure, true);
+        unset($_COOKIE[$name]);
+        return;
+    }
+    setcookie($name, (string)$token, 0, '/', '', $secure, true);
 }

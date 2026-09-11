@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"dwz-admin/internal/config"
 	"dwz-admin/internal/model"
 	"dwz-admin/internal/pkg"
 	"dwz-admin/internal/repository"
@@ -91,10 +92,11 @@ type memberApiService struct {
 	memberRepo   repository.MemberRepo
 	db           *gorm.DB
 	email        *EmailService
+	shortUrlSvc  ShortUrlService
 }
 
-func NewMemberApiService(shortUrlRepo repository.ShortUrlRepo, wjoyLog repository.WjoyLogRepo, memberRepo repository.MemberRepo, db *gorm.DB, email *EmailService) MemberApiService {
-	return &memberApiService{shortUrlRepo: shortUrlRepo, wjoyLog: wjoyLog, memberRepo: memberRepo, db: db, email: email}
+func NewMemberApiService(shortUrlRepo repository.ShortUrlRepo, wjoyLog repository.WjoyLogRepo, memberRepo repository.MemberRepo, db *gorm.DB, email *EmailService, shortUrlSvc ShortUrlService) MemberApiService {
+	return &memberApiService{shortUrlRepo: shortUrlRepo, wjoyLog: wjoyLog, memberRepo: memberRepo, db: db, email: email, shortUrlSvc: shortUrlSvc}
 }
 
 func (s *memberApiService) ListLinks(memberID uint64, page, perPage int, keyword, status string) ([]model.ShortUrl, int64, error) {
@@ -151,11 +153,15 @@ func (s *memberApiService) CreateLink(memberID uint64, url, title, custom string
 	if custom != "" && !isValidCustomCode(custom) {
 		return nil, ErrCustomCodeFormat
 	}
-	hash := md5Hash(url)
+	hash := urlHash(url, urlScopeKey(&memberID, nil))
 
 	if existing, err := s.shortUrlRepo.FindByHash(hash); err == nil && existing != nil {
 		if custom != "" && custom != existing.UID {
 			return nil, errors.New("url already has a short link, cannot use different custom code")
+		}
+		// Same renew semantics as the public API path.
+		if s.shortUrlSvc != nil {
+			s.shortUrlSvc.RenewIfExpired(existing, expireDays)
 		}
 		return existing, nil
 	}
@@ -180,10 +186,10 @@ func (s *memberApiService) CreateLink(memberID uint64, url, title, custom string
 		if custom != "" {
 			uid = custom
 		} else if attempt == 0 {
-			uid = pkg.ShortURL(url)
+			uid = pkg.ShortURL(url + urlScopeSeparator + urlScopeKey(&memberID, nil))
 		} else {
 			salt := pkg.GenerateRandomCode(8)
-			uid = pkg.ShortURL(url + "|" + salt)
+			uid = pkg.ShortURL(url + urlScopeSeparator + urlScopeKey(&memberID, nil) + "|" + salt)
 		}
 		record := model.ShortUrl{
 			UID:          uid,
@@ -206,6 +212,9 @@ func (s *memberApiService) CreateLink(memberID uint64, url, title, custom string
 			return nil, err
 		}
 		if existing, findErr := s.shortUrlRepo.FindByHash(hash); findErr == nil && existing != nil {
+			if s.shortUrlSvc != nil {
+				s.shortUrlSvc.RenewIfExpired(existing, expireDays)
+			}
 			return existing, nil
 		}
 		if custom != "" {
@@ -328,7 +337,7 @@ func (s *memberApiService) UpdateLink(memberID, linkID uint64, longURL, title st
 			return nil, err
 		}
 		record.LongURL = longURL
-		record.URLHash = md5Hash(longURL)
+		record.URLHash = urlHash(longURL, urlScopeKey(record.MemberID, record.CreatedBy))
 	}
 	if title != "" {
 		record.Title = title
@@ -413,7 +422,7 @@ func (s *memberApiService) RequestPasswordReset(email string) error {
 	if s.email == nil || !s.email.Enabled() {
 		return errors.New("邮件服务未配置")
 	}
-	link := "https://1.xk7.cn/member/reset?token=" + token
+	link := emailBaseURL() + "/member/reset?token=" + token
 	body := "您好，\n\n我们收到重置您短链账号密码的请求。请点击以下链接设置新密码（30 分钟内有效）：\n\n" + link + "\n\n如果不是您本人操作，请忽略此邮件。\n—— 陌涛短链"
 	return s.email.Send(m.Email, "重置密码 - 陌涛短链", body)
 }
@@ -462,7 +471,7 @@ func (s *memberApiService) SendVerification(email string) error {
 	if s.email == nil || !s.email.Enabled() {
 		return errors.New("邮件服务未配置")
 	}
-	link := "https://1.xk7.cn/member/verify?token=" + token
+	link := emailBaseURL() + "/member/verify?token=" + token
 	body := "您好，\n\n感谢注册短链账号。请点击以下链接验证您的邮箱（24 小时内有效）：\n\n" + link + "\n\n如果这不是您的操作，请忽略此邮件。\n—— 陌涛短链"
 	return s.email.Send(m.Email, "验证邮箱 - 陌涛短链", body)
 }
@@ -781,4 +790,14 @@ func classifyBrowser(ua string) string {
 
 func trimSpace(s string) string {
 	return strings.TrimSpace(s)
+}
+// emailBaseURL resolves the public base URL used in outbound emails. It follows
+// the public.base_url config (instead of a hardcoded domain) and trims trailing
+// slashes so link concatenation stays consistent.
+func emailBaseURL() string {
+	base := strings.TrimRight(strings.TrimSpace(config.Get().Public.BaseURL), "/")
+	if base == "" {
+		base = "https://1.xk7.cn"
+	}
+	return base
 }

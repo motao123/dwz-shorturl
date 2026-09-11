@@ -17,9 +17,23 @@ $custom = isset($_POST['custom']) && is_string($_POST['custom']) ? trim($_POST['
 $expire_raw = isset($_POST['expire']) ? $_POST['expire'] : 0;
 $password = isset($_POST['password']) && is_string($_POST['password']) ? $_POST['password'] : '';
 $domain_id = isset($_POST['domain']) && is_string($_POST['domain']) ? trim($_POST['domain']) : '';
-$domain_id = $domain_id !== '' ? $domain_id : null;
+// A3：domain 参数必须是纯数字 ID，且仅登录会员可用（匿名传 domain 一律忽略，
+// 避免匿名枚举域名池）。非法值直接忽略。
+if ($domain_id !== '' && !ctype_digit($domain_id)) {
+    $domain_id = null;
+}
+if ($domain_id !== null && $domain_id !== '' && member_id() <= 0) {
+    $domain_id = null;
+}
 
 if (!headers_sent() && $format !== 'txt') header('Content-Type: application/json; charset=utf-8');
+
+// B11：限流必须在任何昂贵的校验（validate_long_url 含 DNS 解析）之前执行，
+// 否则攻击者可用解析开销打满请求，导致限流失效。
+if (!rate_limit(real_ip(), 20, 60)) {
+    if (!headers_sent()) header('Retry-After: 60');
+    api_result(0, '请求过于频繁，请稍后再试', 10005, 429);
+}
 
 $validation = validate_long_url($longurl);
 if (!$validation[0]) api_result(0, $validation[1], $validation[2], 400);
@@ -31,18 +45,37 @@ if ($violation['blocked']) {
 if (!validate_custom_code($custom)) api_result(0, '自定义短码格式错误（需 6-8 位，仅含 a-z 与 0-5）', 10006, 422);
 $expire = validate_expire_days($expire_raw);
 if ($expire === false) api_result(0, '有效期仅支持 0、1、7、30 或 365 天', 10008, 422);
-if (!rate_limit(real_ip(), 20, 60)) {
-    if (!headers_sent()) header('Retry-After: 60');
-    api_result(0, '请求过于频繁，请稍后再试', 10005, 429);
-}
 
-$r = create_short_url($DB, $longurl, $custom, $expire, $domain_id, $password);
+// C 类改造：短链唯一性从「URL 全局唯一」改为「同一会员内唯一」。
+// 会员已登录时，其短链独立于匿名池与其他会员，可复用已有短码而不报冲突；
+// 匿名请求仍走全局池，语义与改造前一致（避免历史匿名短链被重复创建）。
+$owner_member = member_id();
+$owner_scope = url_scope_key($owner_member);
+$owner_hash = url_scope_hash($longurl, $owner_scope);
+$owner_uid = find_uid_by_scope($DB, $owner_hash);
+if ($owner_uid !== '' && ($custom === '' || $custom === $owner_uid)) {
+    // 该作用域下已存在同一目标 URL 的短链：直接复用，不再重复 INSERT。
+    $expire_at = $expire > 0 ? date('Y-m-d H:i:s', time() + $expire * 86400) : null;
+    if ($expire > 0 && isset($DB) && !empty($DB->link)) {
+        $stmt = $DB->prepare('UPDATE wjoy_log SET expire_at=? WHERE url_hash=?');
+        if ($stmt) {
+            mysqli_stmt_bind_param($stmt, 'ss', $expire_at, $owner_hash);
+            mysqli_stmt_execute($stmt);
+            mysqli_stmt_close($stmt);
+        }
+        sync_short_url_to_admin($owner_uid, $longurl, $expire_at, $owner_member, null);
+    }
+    $r = short_url_result($owner_uid, $expire > 0 ? 'renewed' : 'existence', $expire > 0 ? 'renewed' : 'existing', $domain_id);
+} else {
+    $r = create_short_url($DB, $longurl, $custom, $expire, $domain_id, $password, $owner_member, $owner_hash);
+}
 if ($r['result'] == 1) {
     // 关联当前登录会员（未登录时为 0，sync 内部会转为 NULL），使单条生成的短链也能在会员中心“我的短链”看到
     $password_hash = $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : null;
-    sync_short_url_to_admin($r['code'], $longurl, $expire > 0 ? date('Y-m-d H:i:s', time() + $expire * 86400) : null, member_id(), $password_hash);
-    // 新创建的短链派发 link.created 事件（与 Go 公开 API 行为对齐）
+    // 仅在新建时回写 admin 表；复用已有短链时不做无意义的重复提交。
     if ($r['state'] === 'created') {
+        sync_short_url_to_admin($r['code'], $longurl, $expire > 0 ? date('Y-m-d H:i:s', time() + $expire * 86400) : null, $owner_member, $password_hash);
+        // 新创建的短链派发 link.created 事件（与 Go 公开 API 行为对齐）
         dispatch_webhook_event('link.created', array(
             'id' => $r['code'],
             'uid' => $r['code'],

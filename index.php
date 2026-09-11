@@ -5,6 +5,13 @@
  */
 define('SYSTEM_ROOT', __DIR__ . '/includes/');
 
+// 安全响应头（nginx 层通常会再补一遍，这里保证 PHP-FPM 直连场景亦有兜底）
+if (!headers_sent()) {
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: SAMEORIGIN');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+}
+
 if (!file_exists(__DIR__ . '/config.php')) {
     require __DIR__ . '/index.html';
     return;
