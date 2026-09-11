@@ -157,9 +157,18 @@ onMounted(loadConfigs)
         <p class="app-page__desc">修改后点击「保存全部」生效，带 <span class="dirty-dot"></span> 标记的为未保存项</p>
       </div>
       <div class="head-actions">
-        <el-button :icon="Refresh" @click="loadConfigs">刷新</el-button>
-        <el-button :disabled="!dirtyCount" @click="resetAll">还原修改</el-button>
-        <el-button type="primary" :icon="Check" :loading="saving" :disabled="!dirtyCount" @click="handleSave">
+        <el-button :icon="Refresh" aria-label="重新加载系统配置" @click="loadConfigs">刷新</el-button>
+        <el-button :disabled="!dirtyCount" aria-label="放弃未保存的系统配置修改" @click="resetAll">
+          还原修改
+        </el-button>
+        <el-button
+          type="primary"
+          :icon="Check"
+          :loading="saving"
+          :disabled="!dirtyCount"
+          aria-label="保存全部系统配置修改"
+          @click="handleSave"
+        >
           保存全部<span v-if="dirtyCount" class="mono">&nbsp;({{ dirtyCount }})</span>
         </el-button>
       </div>

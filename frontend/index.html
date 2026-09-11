@@ -19,6 +19,24 @@
       rel="stylesheet"
       onerror="this.onerror=null;this.href='https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap'"
     />
+    <script>
+      // 镜像返回 200 但内容异常（CDN 劫持 / 半开连接）时 CSS onerror 不会触发，
+      // 这里用字体就绪探测补一层回退；最终回退系统字体，不阻塞渲染。
+      (function () {
+        if (!document.fonts || !document.fonts.ready) return;
+        var switched = false;
+        setTimeout(function () {
+          document.fonts.ready.then(function () {
+            if (switched || document.fonts.check('16px Manrope')) return;
+            switched = true;
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap';
+            document.head.appendChild(link);
+          });
+        }, 3000);
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

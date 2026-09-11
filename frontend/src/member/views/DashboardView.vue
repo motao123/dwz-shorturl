@@ -319,8 +319,16 @@ async function saveExpiry() {
   if (!expiryLink.value) return
   expirySaving.value = true
   try {
-    await updateLinkExpiry(expiryLink.value.id, expiryDays.value)
-    ElMessage.success('有效期已更新')
+    const res = await updateLinkExpiry(expiryLink.value.id, expiryDays.value)
+    // 本地已保存，但公共跳转库同步失败 → 短码可能仍按旧有效期工作
+    if (res?.public_sync_failed) {
+      ElMessage.warning({
+        message: `有效期已保存，但公共库(wjoy_log)同步失败，短码可能仍按旧有效期访问，系统会在 30 分钟内自动补偿。`,
+        duration: 6000
+      })
+    } else {
+      ElMessage.success('有效期已更新')
+    }
     expiryVisible.value = false
     load()
   } catch (err) {
@@ -449,7 +457,14 @@ async function handleRenewExpiring() {
   if (pick !== 'confirm') return
   try {
     const r = await renewExpiring(30)
-    ElMessage.success(r.renewed > 0 ? `已续期 ${r.renewed} 条短链` : '没有需要续期的短链')
+    if (r.public_sync_failed) {
+      ElMessage.warning({
+        message: `已续期 ${r.renewed} 条，其中 ${r.sync_failed_uids?.length ?? 1} 条公共库(wjoy_log)同步失败，可能仍按旧有效期访问，系统会在 30 分钟内自动补偿。`,
+        duration: 6000
+      })
+    } else {
+      ElMessage.success(r.renewed > 0 ? `已续期 ${r.renewed} 条短链` : '没有需要续期的短链')
+    }
     load()
     loadSummary()
   } catch (err) {

@@ -162,8 +162,10 @@ onMounted(loadData)
           style="width: 250px"
           @change="handleSearch"
         />
-        <el-button type="primary" :icon="Search" @click="handleSearch">查询</el-button>
-        <el-button @click="handleReset">重置</el-button>
+        <el-button type="primary" :icon="Search" aria-label="按筛选条件查询审计日志" @click="handleSearch">
+          查询
+        </el-button>
+        <el-button aria-label="重置筛选条件" @click="handleReset">重置</el-button>
       </div>
 
       <div class="app-table-wrap">
