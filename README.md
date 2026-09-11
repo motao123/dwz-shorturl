@@ -105,7 +105,7 @@ DWZ 短网址平台是一套 **PHP 前台 + Go 核心 + Vue3 管理台** 的三�
 |------|------|
 | 🗃️ **schema_migrations** | 单一迁移入口 `cmd/migrate` + 版本表，覆盖 PHP 侧与 Go 侧全部迁移，幂等可重跑 |
 | ⚖️ **对账 Cron** | `short_urls` ↔ `wjoy_log` 双写对账、点击计数校准 |
-| 📦 **分区维护** | `click_logs` 按月自动分区，防单表膨胀 |
+| 📦 **分区维护** | `click_logs` 按月自动分区、始终超前 2 个月；状态可查（`GET /monitor/partitions`）、失败告警（webhook `system.partition_alert`）、幂等自愈 |
 | 💾 **定时备份** | `deploy/backup.sh` mysqldump + 保留策略 |
 | 📨 **Webhook 异步队列** | PHP 跳转入队（O(1)）+ `migrations/webhook_worker.php` 后台投递，指数退避重试 |
 | 🎨 **静态资源构建** | `php migrations/build_assets.php` 压缩 CSS/JS 并注入内容哈希版本号，零 npm 依赖 |
@@ -121,6 +121,8 @@ DWZ 短网址平台是一套 **PHP 前台 + Go 核心 + Vue3 管理台** 的三�
 | 核心 | Go 1.26 · Gin · GORM · Redis |
 | 管理台 | Vue 3 · TypeScript · Element Plus · Pinia · ECharts |
 | 分析 | 自研 ip2region v1 读取器 + ISO 国家映射 + Referer 分类器 |
+| 测试 | Go `go test ./...` · 前端 `vitest` + Vue Test Utils · 迁移注册表契约测试 |
+| 构建 | Vite 6 双入口分包 · Element Plus 样式按需引入 · 静态资源内容哈希 |
 | 部署 | Nginx · systemd · Docker Compose · GitHub Actions |
 
 ---
@@ -305,6 +307,7 @@ php migrations/build_assets.php --check
 | [🎨 后台设计](docs/BACKEND_ADMIN_DESIGN.md) | 管理后台技术设计文档 |
 | [🗺️ 功能路线图](docs/FEATURE_ROADMAP.md) | 5 个 Phase / 10 大模块 / 79.5 人日规划 |
 | [🔬 深度分析报告](docs/ANALYSIS_REPORT_2026-08.md) | 功能/UI/交互/架构四维审计 + 13 批修复记录 |
+| [🧩 列表页 composable](docs/frontend-list-composables.md) | `useListPage` 等组合式函数：分页/筛选/批量/导出的统一契约与用法 |
 | [🧩 分区维护](docs/partition-maintenance.md) | click_logs 月度分区：覆盖目标、告警阈值、幂等补齐与生产注意事项 |
 | [🛡️ 依赖风险与安全扫描](docs/SECURITY_SCAN.md) | PR 增量门禁 / 仓库级降噪 / 存量告警分类：哪些会阻断、哪些只记录 |
 | [🖥️ 项目官网](https://motao123.github.io/dwz-shorturl/) | GitHub Pages 宣传站（由 Actions 自动构建，Vercel 极简浅色设计语言，见 site/DESIGN.md） |
@@ -329,10 +332,29 @@ php migrations/build_assets.php --check
 
 配套机制：
 
-- **依赖自动升级** `.github/dependabot.yml`：每周对 Go / npm minor+patch 分组提 PR；
+- **依赖自动升级** `.github/dependabot.yml`：每周对 Go / npm minor+patch 分组提 PR（major 需人工评估）；
 - **仓库级扫描降噪** `.scanignore` + `.cnb/security/code_scan_config.yml`：排除第三方代码、构建产物、示例配置等确定无攻击面路径。
 
 > 设计取舍与存量告警分类见 [🛡️ 依赖风险与安全扫描](docs/SECURITY_SCAN.md)。
+> `dependency-risk-check` 对所有分支的 PR 生效（含 `master` 与 `auto/*` 特性分支）。
+
+### 本地自查
+
+提交前先跑一遍，避免 CI 往返：
+
+```bash
+# Go：构建 / 静态检查 / 单测
+cd backend && go build ./... && go vet ./... && go test ./...
+
+# 前端：构建 / 单测 / 依赖漏洞
+cd frontend && npm run build && npm test && npm audit
+
+# PHP：语法检查 + 静态资源产物是否最新
+php -l api.php && php migrations/build_assets.php --check
+```
+
+> 单测覆盖：统计参数与点击计数、短链批量下标对齐、迁移注册表契约、GeoIP/SSRF/限流、分区维护；
+> 前端覆盖列表页 composable（分页筛选/批量操作/竞态防护）。
 
 ---
 
@@ -341,6 +363,8 @@ php migrations/build_assets.php --check
 - 🐛 提 Bug：打开 [Issues](https://github.com/motao123/dwz-shorturl/issues)
 - 💡 提需求：说明业务场景 + 期望效果
 - 🔀 提交代码：Fork → 分支 → PR，遵循既有代码风格
+- ✅ 提交前自检：跑通上面的 [本地自查](#本地自查) 命令，PR 描述里说明验证方式
+- 📚 改动约定：架构/迁移/分区等机制性变更，请同步更新 README 与 `docs/` 对应文档
 
 ---
 
