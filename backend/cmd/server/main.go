@@ -349,9 +349,9 @@ func initDB(cfg *config.Config, zapLogger *zap.Logger) *gorm.DB {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	// NOTE: AutoMigrate is disabled. Use the SQL migration files in the
-	// repository-root migrations/ directory via `go run ./cmd/migrate`
-	// (schema.sql baseline + numbered add_* files).
+	// NOTE: AutoMigrate is disabled. Use the SQL migration files in
+	// backend/migrations/ via `go run ./cmd/migrate`
+	// (schema.sql baseline + add_* backfills + php/ side migrations).
 	// This prevents GORM from altering columns/indexes that were carefully
 	// defined in the hand-written DDL.
 

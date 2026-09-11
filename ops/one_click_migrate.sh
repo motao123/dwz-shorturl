@@ -2,20 +2,12 @@
 # ============================================================
 # DWZ 短网址系统 — 一键上线迁移
 #
-# 把老库升级需要的运维动作收敛成一条命令：
+# 迁移动作本身由统一工具 backend/cmd/migrate 完成（同一份清单、同一张
+# schema_migrations 版本表），本脚本只负责运维外围：
 #   1) 备份两个库中受影响的表
-#   2) SQL 迁移统一交给 backend/cmd/migrate（schema_migrations 版本表全量纳管）
+#   2) 调用统一工具执行全部待应用迁移
+#      （url_hash 作用域化 / webhook_queue / members / violation_reviews ...）
 #   3) 静态资源构建 + 内容哈希版本号注入
-#
-# 关于 SQL 迁移：所有 .sql 迁移（url_hash 作用域化、webhook_queue、members、
-# violation_reviews 等）都由 `go run ./cmd/migrate` 执行并记录到
-# schema_migrations，不再由本脚本手工拼接库名后执行 —— 那样既不记录版本，
-# 也无法回答"哪些迁移已执行"。库名通过 {{PUBLIC_DB}} / {{ADMIN_DB}} 占位符
-# 注入，脚本内不再需要人工替换 USE 库名。
-#
-# 若目标库此前是手工升级的（schema 已到位但没有版本记录），先执行一次
-# `go run ./cmd/migrate -baseline` 补录，避免后续重跑 DDL：
-#   cd backend && go run ./cmd/migrate -baseline -migrations ../migrations -all
 #
 # 用法：
 #   DWZ_PUBLIC_DB=1_xk7_cn DWZ_ADMIN_DB=dwz_admin \
@@ -31,6 +23,7 @@
 #   --skip-backup                           跳过备份（不推荐）
 #   --skip-assets                           跳过静态资源构建
 #   --dry-run                               只打印将要执行的命令，不落库
+#   --baseline                              把目录内全部迁移标记为已应用（不执行 DDL）
 #
 # 脚本是幂等的：中途失败可直接重新执行。执行前会自动备份，
 # 备份文件默认落在 ./backups/migrate-<时间戳>/ 下。
@@ -53,9 +46,10 @@ PHP_BIN="${DWZ_PHP_BIN:-php}"
 
 DO_BACKUP=1
 DO_ASSETS=1
-DO_SQL=1
-BASELINE=0
 DRY_RUN=0
+BASELINE=""
+GO_BIN="${DWZ_GO_BIN:-go}"
+MIGRATE_BIN="${DWZ_MIGRATE_BIN:-}"
 
 for arg in "$@"; do
   case "$arg" in
@@ -69,11 +63,10 @@ for arg in "$@"; do
     --backup-dir=*)  BACKUP_DIR="${arg#*=}" ;;
     --skip-backup)   DO_BACKUP=0 ;;
     --skip-assets)   DO_ASSETS=0 ;;
-    --skip-sql)      DO_SQL=0 ;;
-    --baseline)      BASELINE=1 ;;
     --dry-run)       DRY_RUN=1 ;;
+    --baseline)      BASELINE=1 ;;
     -h|--help)
-      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) echo "[ERR] 未知参数：$arg" >&2; exit 2 ;;
   esac
@@ -114,17 +107,8 @@ export MYSQL_PWD="$DB_PASS"
 MYSQL_OPTS=(-h"$HOST" -P"$PORT" -u"$DB_USER" --default-character-set=utf8mb4)
 DUMP_OPTS=(-h"$HOST" -P"$PORT" -u"$DB_USER" --single-transaction --quick --default-character-set=utf8mb4)
 
-run_sql() {
-  local db="$1" file="$2"
-  if [ "$DRY_RUN" = "1" ]; then
-    echo "  [dry-run] mysql ${DB_USER}@${HOST}:${PORT} ${db} < ${file}"
-    return 0
-  fi
-  "$MYSQL_BIN" "${MYSQL_OPTS[@]}" "$db" < "$file"
-}
-
 # --- 0. 连接自检 ----------------------------------------------------------
-log "0/4 检查数据库连通性"
+log "0/3 检查数据库连通性"
 if ! "$MYSQL_BIN" "${MYSQL_OPTS[@]}" -e 'SELECT 1' >/dev/null 2>&1; then
   die "无法连接 MySQL ${HOST}:${PORT}（用户 ${DB_USER}）"
 fi
@@ -141,95 +125,93 @@ echo "  公共库=${PUBLIC_DB}  管理库=${ADMIN_DB}  主机=${HOST}:${PORT}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 TARGET_DIR="$BACKUP_DIR/migrate-$STAMP"
 if [ "$DO_BACKUP" = "1" ]; then
-  log "1/4 备份受影响表 → $TARGET_DIR"
+  log "1/3 备份受影响表 → $TARGET_DIR"
   if [ "$DRY_RUN" = "1" ]; then
     echo "  [dry-run] mysqldump wjoy_log / short_urls"
   else
     command -v "$MYSQLDUMP_BIN" >/dev/null 2>&1 || die "找不到 mysqldump（$MYSQLDUMP_BIN），或用 --skip-backup 跳过备份"
     mkdir -p "$TARGET_DIR"
-    "$MYSQLDUMP_BIN" "${DUMP_OPTS[@]}" "$PUBLIC_DB" wjoy_log   > "$TARGET_DIR/${PUBLIC_DB}.wjoy_log.sql"
-    "$MYSQLDUMP_BIN" "${DUMP_OPTS[@]}" "$ADMIN_DB"  short_urls > "$TARGET_DIR/${ADMIN_DB}.short_urls.sql"
-    chmod 600 "$TARGET_DIR"/*.sql
-    echo "  已备份：$TARGET_DIR"
+
+    # 表名 => 所属库。首次安装时表还不存在，此时没有数据可丢，
+    # 备份缺失即可（记录为 skipped），不应因此中断迁移。
+    backup_table() {
+      local db="$1" table="$2"
+      local out="$TARGET_DIR/${db}.${table}.sql"
+      if ! "$MYSQLDUMP_BIN" "${DUMP_OPTS[@]}" "$db" "$table" > "$out" 2>/dev/null; then
+        rm -f "$out"
+        warn "  表 ${db}.${table} 不存在或不可读，跳过备份（首次安装属正常）"
+        return 0
+      fi
+      echo "  已备份 ${db}.${table}"
+    }
+
+    backup_table "$PUBLIC_DB" wjoy_log
+    backup_table "$ADMIN_DB"  short_urls
+    # 备份成功才收紧权限；目录可能为空（全新安装）。
+    [ -n "$(ls -A "$TARGET_DIR" 2>/dev/null)" ] && chmod 600 "$TARGET_DIR"/*.sql || true
+    echo "  备份目录：$TARGET_DIR"
   fi
 else
   warn "已跳过备份（--skip-backup）"
 fi
 
-# --- 2~4. SQL 迁移（统一入口） -------------------------------------------
-# 所有迁移由 backend/cmd/migrate 执行：目录扫描确定清单、schema_migrations
-# 记录版本、{{PUBLIC_DB}}/{{ADMIN_DB}} 占位符注入库名。
-GO_BIN="${DWZ_GO_BIN:-go}"
-if [ "$DO_SQL" = "1" ]; then
-  if ! command -v "$GO_BIN" >/dev/null 2>&1; then
-    warn "找不到 go（$GO_BIN），跳过 SQL 迁移。可在有 Go 的机器执行："
-    warn "  cd backend && go run ./cmd/migrate -all -migrations ../migrations"
-    warn "或设置 DWZ_GO_BIN 指向 go 可执行文件。"
-  else
-    MIGRATE_ARGS=(-all -migrations ../migrations)
-    # 迁移工具默认读 backend/configs/config.yaml；不存在时回退到 example，
-    # 由下面透传的 DWZ_DB_* 环境变量覆盖真实连接信息。
-    MIGRATE_CONFIG="${DWZ_MIGRATE_CONFIG:-}"
-    if [ -z "$MIGRATE_CONFIG" ]; then
-      if [ -f "$ROOT/backend/configs/config.yaml" ]; then
-        MIGRATE_CONFIG="configs/config.yaml"
-      else
-        MIGRATE_CONFIG="configs/config.example.yaml"
-      fi
-    fi
-    MIGRATE_ARGS+=(-config "$MIGRATE_CONFIG")
+# --- 2. 调用统一迁移工具 ----------------------------------------------
+# 迁移清单、执行顺序与版本记录全部由 backend/cmd/migrate 决定，
+# 这里不再手工 mysql < xxx.sql，也不再对 SQL 做库名 sed 替换。
+log "2/3 统一迁移工具：应用全部待执行迁移"
 
-    # 迁移工具从 backend/configs/config.yaml 读凭据，这里把命令行/环境变量的
-    # 值透传过去，避免运维必须写两遍配置。
-    export DWZ_DB_HOST="$HOST" DWZ_DB_PORT="$PORT"
-    export DWZ_DB_USER_OVERRIDE="$DB_USER" DWZ_DB_PASS_OVERRIDE="$DB_PASS"
-    export DWZ_ADMIN_DB_OVERRIDE="$ADMIN_DB" DWZ_PUBLIC_DB_OVERRIDE="$PUBLIC_DB"
-
-    if [ "$BASELINE" = "1" ]; then
-      log "2/4 补录迁移版本（-baseline，不执行 DDL）"
-      MIGRATE_ARGS=(-baseline -migrations ../migrations)
-    else
-      log "2/4 执行 SQL 迁移（schema_migrations 记录版本）"
-    fi
-
-    if [ "$DRY_RUN" = "1" ]; then
-      echo "  [dry-run] (cd backend && $GO_BIN run ./cmd/migrate -dry-run ${MIGRATE_ARGS[*]})"
-    else
-      ( cd "$ROOT/backend" && "$GO_BIN" run ./cmd/migrate "${MIGRATE_ARGS[@]}" ) \
-        || die "SQL 迁移失败，已执行的迁移均已记录在 schema_migrations，可修正后重跑"
-    fi
-
-    if [ "$BASELINE" = "1" ]; then
-      log "3/4 已补录版本，跳过校验（未执行 DDL）"
-    else
-      log "3/4 校验两库 url_hash 口径"
-      if [ "$DRY_RUN" = "1" ]; then
-        echo "  [dry-run] 跳过校验"
-      else
-        LEGACY_PUBLIC="$("$MYSQL_BIN" "${MYSQL_OPTS[@]}" -N -B "$PUBLIC_DB" \
-          -e 'SELECT COUNT(*) FROM `wjoy_log` WHERE `url_hash` = MD5(`longurl`)' 2>/dev/null || echo 'skip')"
-        LEGACY_ADMIN="$("$MYSQL_BIN" "${MYSQL_OPTS[@]}" -N -B "$ADMIN_DB" \
-          -e 'SELECT COUNT(*) FROM `short_urls` WHERE `url_hash` = MD5(`long_url`)' 2>/dev/null || echo 'skip')"
-        echo "  公共库剩余未作用域化行：$LEGACY_PUBLIC"
-        echo "  管理库剩余未作用域化行：$LEGACY_ADMIN"
-        if [ "$LEGACY_PUBLIC" != "skip" ] && [ "$LEGACY_PUBLIC" != "0" ]; then
-          die "公共库仍有 $LEGACY_PUBLIC 行未作用域化，迁移未完成"
-        fi
-        if [ "$LEGACY_ADMIN" != "skip" ] && [ "$LEGACY_ADMIN" != "0" ]; then
-          die "管理库仍有 $LEGACY_ADMIN 行未作用域化，迁移未完成"
-        fi
-        echo "  两个库的 url_hash 口径一致 ✅"
-      fi
-    fi
+# 统一工具读取 Go 的 config.yaml；为了让命令行传入的库名生效，
+# 优先走环境变量覆盖（viper 的 DWZ_* 前缀），并临时写一份 config 副本。
+run_migrate() {
+  local args=("$@")
+  if [ -n "$MIGRATE_BIN" ] && [ -x "$MIGRATE_BIN" ]; then
+    "$MIGRATE_BIN" "${args[@]}"
+    return
   fi
+  command -v "$GO_BIN" >/dev/null 2>&1 \
+    || die "找不到 go（\$DWZ_GO_BIN）也找不到已编译的 migrate 二进制（\$DWZ_MIGRATE_BIN）"
+  ( cd "$ROOT/backend" && "$GO_BIN" run ./cmd/migrate -migrations ../backend/migrations -config "$MIGRATE_CONFIG" "${args[@]}" )
+}
+
+MIGRATE_CONFIG="$ROOT/backend/configs/config.yaml"
+TMP_CONFIG=""
+if [ ! -f "$MIGRATE_CONFIG" ]; then
+  TMP_CONFIG="$(mktemp -t dwz_migrate_config.XXXXXX.yaml)"
+  trap 'rm -f "$TMP_CONFIG"' EXIT
+  cat > "$TMP_CONFIG" <<YAML
+database:
+  host: "${HOST}"
+  port: ${PORT}
+  user: "${DB_USER}"
+  password: "${DB_PASS}"
+  dbname: "${ADMIN_DB}"
+  charset: utf8mb4
+public_db:
+  host: "${HOST}"
+  port: ${PORT}
+  user: "${DB_USER}"
+  password: "${DB_PASS}"
+  dbname: "${PUBLIC_DB}"
+  charset: utf8mb4
+YAML
+  chmod 600 "$TMP_CONFIG"
+  MIGRATE_CONFIG="$TMP_CONFIG"
+fi
+
+if [ "$BASELINE" = "1" ]; then
+  log "2a/3 补录基线（把目录内全部迁移标记为已应用，不执行 DDL）"
+  run_migrate -baseline
+fi
+
+if [ "$DRY_RUN" = "1" ]; then
+  run_migrate -dry-run
 else
-  log "2/4 已跳过 SQL 迁移（--skip-sql）"
-  log "3/4 已跳过校验"
+  run_migrate -all
 fi
 
 # --- 5. 静态资源 ----------------------------------------------------------
 if [ "$DO_ASSETS" = "1" ]; then
-  log "4/4 构建静态资源（压缩 + 内容哈希版本号注入）"
+  log "3/3 构建静态资源（压缩 + 内容哈希版本号注入）"
   if [ "$DRY_RUN" = "1" ]; then
     echo "  [dry-run] php migrations/build_assets.php"
   elif command -v "$PHP_BIN" >/dev/null 2>&1; then
@@ -238,7 +220,7 @@ if [ "$DO_ASSETS" = "1" ]; then
     warn "找不到 php，跳过静态资源构建"
   fi
 else
-  log "4/4 已跳过静态资源构建（--skip-assets）"
+  log "3/3 已跳过静态资源构建（--skip-assets）"
 fi
 
 echo

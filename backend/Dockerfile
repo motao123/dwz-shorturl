@@ -12,8 +12,11 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /app/server ./cmd/server
+# Build the server and the migration tool. The migration binary is shipped so a
+# deployment can migrate a database without a Go toolchain (and without the
+# repo checked out next to it).
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /app/server ./cmd/server \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /app/migrate ./cmd/migrate
 
 # Runtime stage
 FROM alpine:3.20
@@ -25,9 +28,15 @@ RUN apk add --no-cache ca-certificates tzdata \
 
 WORKDIR /app
 
-# Copy binary and configs
+# Copy binary, configs and the migration set. The migrations are copied so a
+# running container can be upgraded in place with the bundled tool:
+#   ./migrate -status            # list applied / pending migrations
+#   ./migrate -all               # apply every pending migration
+# The directory is read relative to WORKDIR, matching the -migrations default.
 COPY --from=builder /app/server .
+COPY --from=builder /app/migrate .
 COPY configs/ ./configs/
+COPY migrations/ ./migrations/
 
 # Drop privileges: run as an unprivileged user so a container escape is not root.
 USER app

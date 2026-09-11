@@ -220,7 +220,7 @@
 | D5 | **软删除 + 唯一索引冲突**：`uk_url_hash`/`uk_uid` 唯一索引在软删后仍占位 → 已删短链永远无法重建（重试 12 次后报 ErrCodeCollision） | **高** | schema.sql:77-103 / short_url.go:746-753 | 正常业务受阻 |
 | D6 | **click_logs 分区无自动扩展**：预建到 p202612 + p_future，2027-01 起全进 p_future 单分区，分区表退化为大表 | 中 | schema.sql:129-137 / cron.go:132-146 | 查询/清理变慢 |
 | D7 | **seed.sql 与 schema.sql 冲突**：两文件都 INSERT admin 用户（schema.sql:224 admin123；seed.sql:65 REPLACE_WITH…），docker-entrypoint 按序执行时 seed 撞 uk_username 中断 → system_configs 等后续语句永不执行 | 中 | schema.sql:224 / seed.sql:61-66 | 配置初始化失效 |
-| D8 | **无 schema 版本管理**：migrate_wjoy_log.sql 与 legacy_schema.php 双套体系、库名硬编码 `USE dwz_admin`、幂等性不足 | 中 | migrate_wjoy_log.sql:5 / migrations/legacy_schema.php | 部署人员无法判断迁移状态 |
+| D8 | ~~**无 schema 版本管理**~~ **已修复**：统一迁移入口 `backend/cmd/migrate` + 目录扫描清单 + `schema_migrations` 版本表，PHP 侧迁移（`backend/migrations/php/*`）与 Go 侧同表登记，库名改由 `{{ADMIN_DB}}` / `{{PUBLIC_DB}}` 占位符注入 | 低 | backend/cmd/migrate / backend/internal/migration | 部署人员可用 `-status` 判断迁移状态 |
 | D9 | api_keys 无盐 SHA-256；webhook.secret 明文；时间类型公共库 TIMESTAMP（2038 限制）vs 管理库 DATETIME(3) | 低 | schema.sql:170-179 / add_webhooks.sql:7 | 安全/一致性隐患 |
 
 **整改方向（按序）**：
@@ -231,8 +231,8 @@
    > 已落地（后续批次）：保留单列唯一索引，改为在命中已软删行时 **原地复活**
    > （`resurrectDeleted`）。同时 `url_hash` 由裸 `MD5(url)` 改为
    > `MD5(url + 0x1F + owner scope)`，唯一性从「URL 全局唯一」收敛为
-   > 「同一 owner 内唯一」，见 `migrations/scope_url_hash.sql`。
-5. 建立 `schema_migrations` 版本表 + click_logs 月度分区维护任务 + seed 改 `ON DUPLICATE KEY UPDATE`。
+   > 「同一 owner 内唯一」，见 `backend/migrations/php/scope_url_hash.sql`。
+5. ~~建立 `schema_migrations` 版本表~~ **已落地**（统一迁移入口 `backend/cmd/migrate`，见 §15.6）+ click_logs 月度分区维护任务 + seed 改 `ON DUPLICATE KEY UPDATE`。
 
 ### 5.2 跳转链路与统计（三套入口并存）
 
@@ -675,8 +675,23 @@
 
 ### 15.5 剩余待办（下一批）
 
-- P2：schema_migrations 版本表、批量创建事务化（CreateInBatches）、统计弹窗重构去重（member/admin 两处复制）
+- P2：批量创建事务化（CreateInBatches）、统计弹窗重构去重（member/admin 两处复制）
 - 说明：前端经 browser-use 实测，后续 UI 变更可用同样方式回归，替代盲改盲发
+
+### 15.6 迁移体系收敛（Issue #15）
+
+迁移从「四套互不感知的入口」收敛为**单一事实来源**：`backend/cmd/migrate` +
+`schema_migrations` 版本表。
+
+- 迁移文件全部集中在 `backend/migrations/`（PHP 侧在 `backend/migrations/php/`），
+  清单由**目录扫描**产出，新增迁移零 Go 代码改动；
+- 执行顺序由文件内的 `-- migrate: after <版本号>` 声明，未声明的文件排在最后并在
+  `-status` 中标记 `unclassified`，不会被静默忽略；
+- 库名占位符化（`{{PUBLIC_DB}}` / `{{ADMIN_DB}}`），移除人工替换 `USE` 库名；
+- `-baseline` 为手工升级过的库补录版本（不执行 DDL）；`ops/one_click_migrate.sh`
+  改为调用同一工具，不再自己拼 `mysql < xxx.sql`；
+- 为兼容历史 `schema_migrations` 记录，旧文件名（如 `040_scope_url_hash.sql`）
+  被识别为同一迁移的别名，升级不会重复执行或误报待应用。
 
 ---
 

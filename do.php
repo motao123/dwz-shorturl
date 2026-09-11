@@ -44,7 +44,7 @@ if (!empty($password_hash)) {
 }
 
 // A5：已移除遗留的 base64 兼容分支。历史上被 base64 编码的旧数据应通过
-// migrations/legacy_schema.php 一次性清洗；在热路径上静默改写 302 目标会
+// backend/migrations/php/legacy_schema.php 一次性清洗；在热路径上静默改写 302 目标会
 // 导致跳转结果与库中记录不符（审计困难），且可绕过创建时的 SSRF 规则。
 // 跳转不抓取目标，创建时已完成 SSRF/DNS 校验；此处跳过 DNS 解析以避免每次跳转的解析开销，
 // 但始终拒绝云元数据地址（isPrivateHost 内部已在 skip_dns 下保留该分支）。

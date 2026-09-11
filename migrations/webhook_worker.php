@@ -36,7 +36,7 @@ if (!$ADMIN_DB || empty($ADMIN_DB->link)) {
 }
 
 if (webhook_queue_missing()) {
-    fwrite(STDERR, "webhook_queue table missing, run migrations/public__030_add_webhook_queue.sql first\n");
+    fwrite(STDERR, "webhook_queue table missing, run `cd backend && go run ./cmd/migrate` first\n");
     exit(1);
 }
 

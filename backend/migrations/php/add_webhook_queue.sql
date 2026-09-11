@@ -1,3 +1,6 @@
+-- migrate: after php/add_violation_reviews.sql
+--
+-- 由统一迁移入口执行（连接默认库 = 公共库），不再包含 `USE <库名>`。
 -- 异步 webhook 投递队列。
 --
 -- 背景：PHP 跳转热路径（do.php）原先同步 curl 所有订阅者，最坏阻塞约 11s

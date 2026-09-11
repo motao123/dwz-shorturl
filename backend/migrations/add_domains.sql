@@ -26,8 +26,11 @@ CREATE TABLE IF NOT EXISTS `domains` (
 SET @schema = DATABASE();
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = @schema AND TABLE_NAME = 'short_urls' AND COLUMN_NAME = 'domain_id');
+-- AFTER 需要一个必然存在的列：老库的 short_urls 可能还没有 category_id
+-- （由 add_missing_columns.sql 后补），拿它做锚点会让本文件在老库上失败。
+-- id 是主键，任何版本都存在。
 SET @sql = IF(@col_exists = 0,
-  'ALTER TABLE short_urls ADD COLUMN domain_id BIGINT UNSIGNED NULL COMMENT ''domain pool entry this link belongs to'' AFTER category_id',
+  'ALTER TABLE short_urls ADD COLUMN domain_id BIGINT UNSIGNED NULL COMMENT ''domain pool entry this link belongs to'' AFTER id',
   'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
