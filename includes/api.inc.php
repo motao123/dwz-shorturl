@@ -23,7 +23,12 @@ if (!isset($admin_db_port)) $admin_db_port = 3306;
 if (!isset($admin_db_user)) $admin_db_user = '';
 if (!isset($admin_db_pwd)) $admin_db_pwd = '';
 if (!isset($admin_db_name)) $admin_db_name = '';
-if (!isset($member_secret)) $member_secret = '';
+if (!isset($member_secret) || !is_string($member_secret)) $member_secret = '';
+// 启动自检：member_secret 缺失时密码保护短链与会员鉴权会静默失效。
+// 设置 DWZ_ALLOW_EMPTY_SECRET=1 可显式跳过（仅限不含密码短链的纯跳转部署）。
+if ($member_secret === '' && getenv('DWZ_ALLOW_EMPTY_SECRET') !== '1') {
+    error_log('[dwz] member_secret 未配置：密码保护短链与会员鉴权将不可用，请在 config.php 中设置随机密钥');
+}
 
 require SYSTEM_ROOT . 'db.class.php';
 $DB = new DB($host, $user, $pwd, $dbname, $port);

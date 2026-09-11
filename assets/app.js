@@ -19,6 +19,11 @@
   var batchList = document.getElementById('batch-list');
   var batchSummary = document.getElementById('batch-summary');
   var statusBox = document.getElementById('status');
+  var statusAlert = document.getElementById('status-alert');
+  var statusText = document.getElementById('status-text');
+  var statusAlertText = document.getElementById('status-alert-text');
+  var statusClose = document.getElementById('status-close');
+  var statusAlertClose = document.getElementById('status-alert-close');
   var domainSelect = document.getElementById('domainSelect');
   var domainField = document.getElementById('domain-field');
   var dialogBackdrop = document.getElementById('result-wrap');
@@ -51,18 +56,33 @@
       : button.textContent = busy ? busyText : idleText;
   }
 
+  // 关闭全部 toast 并清掉待执行定时器
+  function hideToast() {
+    window.clearTimeout(statusTimer);
+    statusBox.hidden = true;
+    statusAlert.hidden = true;
+  }
+
+  // 两个 live region 常驻 DOM（role 不切换），仅切换内容与可见性，
+  // 避免 hidden 移除瞬间才注册 role 导致公告丢失。
   function announce(message, isError) {
     window.clearTimeout(statusTimer);
-    statusBox.textContent = message;
-    statusBox.classList.toggle('is-error', Boolean(isError));
-    statusBox.hidden = false;
-    statusBox.setAttribute('role', isError ? 'alert' : 'status');
-    if (!isError) {
-      statusTimer = window.setTimeout(function () {
-        statusBox.hidden = true;
-      }, 3000);
+    if (isError) {
+      statusBox.hidden = true;
+      statusAlertText.textContent = message;
+      statusAlert.hidden = false;
+      // 错误提示 8s 后自动消失，且提供手动关闭按钮
+      statusTimer = window.setTimeout(hideToast, 8000);
+    } else {
+      statusAlert.hidden = true;
+      statusText.textContent = message;
+      statusBox.hidden = false;
+      statusTimer = window.setTimeout(hideToast, 3000);
     }
   }
+
+  statusClose.addEventListener('click', hideToast);
+  statusAlertClose.addEventListener('click', hideToast);
 
   function normalizeUrl(value) {
     var trimmed = value.trim();
@@ -229,6 +249,24 @@
     return [];
   }
 
+  // 与 PHP stats.php 的 redactUrl() 行为对齐：隐藏 userinfo、query、fragment，
+  // 避免把长链中的 access_token / 签名等敏感参数渲染到页面（会进入浏览器
+  // tooltip、截图与分享）。
+  function redactUrl(value) {
+    var raw = String(value || '').trim();
+    if (raw === '') return '';
+    var parsed;
+    try {
+      parsed = new URL(raw);
+    } catch (e) {
+      return raw.length > 8 ? raw.slice(0, 8) + '…' : raw;
+    }
+    var out = parsed.origin + (parsed.pathname || '/');
+    if (parsed.search) out += '?[已隐藏]';
+    if (parsed.hash) out += '#[已隐藏]';
+    return out;
+  }
+
   function createBatchItem(item) {
     var row = document.createElement('li');
     var source = document.createElement('div');
@@ -238,8 +276,8 @@
 
     row.className = 'result-item' + (success ? '' : ' is-error');
     source.className = 'result-source';
-    source.textContent = String(item.url || item.long_url || item.longUrl || '网址');
-    source.title = source.textContent;
+    // 只显示脱敏后的地址；不写 title，避免悬停时泄露完整长链。
+    source.textContent = redactUrl(item.url || item.long_url || item.longUrl) || '网址';
     output.className = 'result-output';
 
     if (success) {
@@ -518,17 +556,19 @@
   function checkHealth() {
     var note = document.querySelector('.header-note');
     if (!note) return;
-    // 结构：<span class="status-dot"></span>在线 —— 文本节点是最后一个子节点
-    var label = note.lastChild;
+    // 用显式 .status-label 定位，取代依赖「最后一个是文本节点」的脆弱契约
+    var label = note.querySelector('.status-label');
     fetch('./health', { method: 'GET', cache: 'no-store' })
       .then(function (r) { return r.ok; })
       .then(function (ok) {
         note.classList.toggle('is-down', !ok);
-        if (label && label.nodeType === 3) label.textContent = ok ? '在线' : '维护中';
+        note.dataset.state = ok ? 'up' : 'down';
+        if (label) label.textContent = ok ? '在线' : '维护中';
       })
       .catch(function () {
         note.classList.add('is-down');
-        if (label && label.nodeType === 3) label.textContent = '维护中';
+        note.dataset.state = 'down';
+        if (label) label.textContent = '维护中';
       });
   }
 

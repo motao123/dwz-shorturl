@@ -57,7 +57,8 @@
   <!-- Bing Webmaster 验证 -->
   <meta name="msvalidate.01" content="PLACEHOLDER">
 
-  <link rel="stylesheet" href="./assets/app.css?v=2.6.0">
+  <link rel="stylesheet" href="./assets/tokens.min.css?v=7f6f23aa">
+  <link rel="stylesheet" href="./assets/app.min.css?v=60046ba9">
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
@@ -76,7 +77,7 @@
       </nav>
     </div>
     <div class="header-right">
-      <span class="header-note"><span class="status-dot" aria-hidden="true"></span>在线</span>
+      <span class="header-note" data-state="up"><span class="status-dot" aria-hidden="true"></span><span class="status-label">在线</span></span>
       <div class="member-bar" id="memberBar">
         <a class="member-link" href="/member/login" id="memberLoginBtn" hidden>登录 / 注册</a>
         <a class="member-user" href="/member/" id="memberUser" hidden title="进入用户中心"></a>
@@ -204,7 +205,16 @@
     <p>© 2020–2026 <a href="https://imotao.com/">陌涛</a> · <a href="https://github.com/motao123/dwz-shorturl">获取源码</a></p>
   </footer>
 
-  <div id="status" class="status-toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+  <!-- 常驻 live region：屏幕阅读器在页面加载时即注册 role，避免 hidden 切换导致公告丢失 -->
+  <div id="status" class="status-toast" role="status" aria-live="polite" aria-atomic="true" hidden>
+    <span class="status-toast-text" id="status-text"></span>
+    <button class="status-toast-close" type="button" id="status-close" aria-label="关闭提示">×</button>
+  </div>
+  <!-- 错误态独立 live region（assertive） -->
+  <div id="status-alert" class="status-toast is-error" role="alert" aria-live="assertive" aria-atomic="true" hidden>
+    <span class="status-toast-text" id="status-alert-text"></span>
+    <button class="status-toast-close" type="button" id="status-alert-close" aria-label="关闭提示">×</button>
+  </div>
 
   <div id="result-wrap" class="dialog-backdrop" hidden>
     <section class="result-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" aria-describedby="dialog-description" tabindex="-1">
@@ -230,7 +240,7 @@
   </div>
 
   <script src="./assets/qrcode.min.js?v=2.6.0"></script>
-  <script src="./assets/app.js?v=2.9.0"></script>
+  <script src="./assets/app.min.js?v=1e4c131c"></script>
 
   <!-- 百度统计 -->
   <script>

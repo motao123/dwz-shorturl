@@ -43,10 +43,11 @@ if (!empty($password_hash)) {
     }
 }
 
-// Compatibility with older rows that stored the target as base64.
-$decoded = base64_decode($t_url, true);
-if ($decoded !== false && base64_encode($decoded) === $t_url && filter_var($decoded, FILTER_VALIDATE_URL)) $t_url = $decoded;
-// 跳转不抓取目标，创建时已完成 SSRF/DNS 校验；此处跳过 DNS 解析以避免每次跳转的解析开销。
+// A5：已移除遗留的 base64 兼容分支。历史上被 base64 编码的旧数据应通过
+// migrations/legacy_schema.php 一次性清洗；在热路径上静默改写 302 目标会
+// 导致跳转结果与库中记录不符（审计困难），且可绕过创建时的 SSRF 规则。
+// 跳转不抓取目标，创建时已完成 SSRF/DNS 校验；此处跳过 DNS 解析以避免每次跳转的解析开销，
+// 但始终拒绝云元数据地址（isPrivateHost 内部已在 skip_dns 下保留该分支）。
 $validation = validate_long_url($t_url, true);
 if (!$validation[0]) redirect_error(410, '短链目标无效');
 
@@ -56,21 +57,21 @@ if (!$validation[0]) redirect_error(410, '短链目标无效');
 header('Cache-Control: no-store, private, max-age=0');
 header('Pragma: no-cache');
 header('Expires: 0');
+// 短链跳转不向目标站点泄露来源页 Referer
+header('Referrer-Policy: no-referrer');
 header('Location: ' . $t_url, true, 302);
 
 if (function_exists('fastcgi_finish_request')) {
     fastcgi_finish_request();
 }
 
-$click = $DB->prepare('UPDATE wjoy_log SET clicks = clicks + 1 WHERE uid=?');
-if ($click) {
-    mysqli_stmt_bind_param($click, 's', $uid);
-    mysqli_stmt_execute($click);
-    mysqli_stmt_close($click);
-}
-
-// Persist the click on the admin side (click_logs + counter) so admin stats
-// reflect the primary PHP path. Best-effort.
+// A6：点击计数收敛为单一来源。
+// 原先热路径同时直写 wjoy_log.clicks 与（通过 record_click_analytics）写
+// short_urls.clicks，再叠加 Go ClickQueue，同一访问可能被计多次、
+// 且 clicks 与 click_logs 行数无法对账。
+// 现在只调用 record_click_analytics()：它写入权威的 click_logs 明细并递增
+// short_urls.clicks；wjoy_log.clicks 由 cron reconcileClicks 从
+// short_urls.clicks 单向回填，不再由跳转路径直接自增。
 record_click_analytics($uid);
 
 // Fire link.clicked webhook (best-effort).

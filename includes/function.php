@@ -119,9 +119,13 @@ function validate_expire_days($value) {
 function public_short_url($uid, $domain_id = null) {
     global $public_base_url, $DB;
 
-    // If a domain_id is specified, try to look up the domain from the domains table
-    if ($domain_id !== null && $domain_id !== '' && isset($DB) && !empty($DB->link)) {
-        $stmt = $DB->prepare('SELECT domain, scheme FROM domains WHERE id=? AND status=1 LIMIT 1');
+    // A3：仅登录会员才允许按 domain_id 选择域名池中的域名。
+    // 匿名调用一律忽略外部传入的 domain_id，只用服务端 $public_base_url，
+    // 避免匿名用户枚举 domains 表探测未公开的备用短链域名。
+    // domain_id 还必须是纯数字，防止非预期类型进入查询。
+    $is_numeric_domain = $domain_id !== null && $domain_id !== '' && ctype_digit((string)$domain_id);
+    if ($is_numeric_domain && function_exists('member_id') && member_id() > 0 && isset($DB) && !empty($DB->link)) {
+        $stmt = $DB->prepare('SELECT domain, scheme FROM domains WHERE id=? AND status=1 AND deleted_at IS NULL LIMIT 1');
         if ($stmt) {
             mysqli_stmt_bind_param($stmt, 's', $domain_id);
             mysqli_stmt_execute($stmt);
@@ -129,9 +133,13 @@ function public_short_url($uid, $domain_id = null) {
             if (mysqli_stmt_fetch($stmt)) {
                 mysqli_stmt_close($stmt);
                 $scheme = !empty($d_scheme) ? $d_scheme : 'https';
-                return $scheme . '://' . $d_domain . '/' . rawurlencode($uid);
+                // 域名必须形如合法主机名，避免库中脏数据拼出非预期 URL
+                if (preg_match('/^[a-z0-9.-]+$/i', (string)$d_domain) && strpos((string)$d_domain, '.') !== false) {
+                    return $scheme . '://' . $d_domain . '/' . rawurlencode($uid);
+                }
+            } else {
+                mysqli_stmt_close($stmt);
             }
-            mysqli_stmt_close($stmt);
         }
     }
 
@@ -151,6 +159,9 @@ function rate_limit($ip, $max = 20, $window = 60, $cost = 1) {
     if (!$fp) return false;
     if (!flock($fp, LOCK_EX)) { fclose($fp); return false; }
     $now = time();
+    // 机会式清理：每约 1/200 次调用扫一次目录，删除 24h 未修改的过期桶文件，
+    // 避免每个 IP 一个文件在 IPv6/代理场景下无限膨胀耗尽 inode。
+    if (function_exists('rate_limit_gc')) rate_limit_gc($dir, $now);
     $data = json_decode(stream_get_contents($fp), true);
     if (!is_array($data) || !isset($data['start'], $data['count']) || ($now - (int)$data['start']) >= $window) $data = array('start' => $now, 'count' => 0);
     $cost = max(1, (int)$cost);
@@ -159,6 +170,23 @@ function rate_limit($ip, $max = 20, $window = 60, $cost = 1) {
     ftruncate($fp, 0); rewind($fp); fwrite($fp, json_encode($data)); fflush($fp);
     flock($fp, LOCK_UN); fclose($fp);
     return $allowed;
+}
+
+// Best-effort GC for the file-based rate limiter. Kept cheap: only runs on a
+// small random fraction of calls and deletes buckets untouched for $ttl seconds.
+function rate_limit_gc($dir, $now = null, $ttl = 86400) {
+    if (random_int(1, 200) !== 1) return;
+    $now = $now === null ? time() : (int)$now;
+    $handle = @opendir($dir);
+    if (!$handle) return;
+    while (($entry = readdir($handle)) !== false) {
+        if ($entry === '.' || $entry === '..') continue;
+        if (substr($entry, -3) !== '.rl') continue;
+        $path = rtrim($dir, '/\\') . '/' . $entry;
+        $mtime = @filemtime($path);
+        if ($mtime !== false && ($now - $mtime) > $ttl) @unlink($path);
+    }
+    closedir($handle);
 }
 
 // Reset a rate-limit key (e.g. after a successful login clears the failure count).
@@ -178,6 +206,45 @@ function short_url_result($uid, $msg, $state = 'existing', $domain_id = null) {
         'state' => $state,
         'created' => $state === 'created'
     );
+}
+
+// C 类改造：url_hash 的唯一索引由「URL 全局唯一」改为「同一 owner 作用域内唯一」。
+// 哈希输入 = longurl + 0x1F + scope_key，与数据库端
+//   MD5(CONCAT(longurl, 0x1F, scope_key))
+// 完全一致，scope_key 取值：
+//   'w:0'           -> 匿名 / 历史数据，保留改造前的全局去重语义
+//   'm:<member_id>' -> 会员短链，同一会员内去重，不同会员可各建一条
+// 这样既避免 MD5 碰撞导致「完全不同 URL 无法创建」，也让同一 URL 可按会员/有效期分别建链。
+//
+// ⚠️ 与 Go 侧 backend/internal/service/short_url.go 的 urlScopeKey() 必须保持
+//    完全一致：Go 的后台管理台创建（createdBy 非空）同样落在 'w:0'，而不是
+//    'w:<user_id>'。PHP 前台只持有 member_id，永远算不出 'w:<n>'；若 Go 用
+//    管理员维度隔离，同一条 URL 经后台创建后，PHP 前台就再也匹配不到同一
+//    url_hash，两条跳转路径会各自建链、互相不可见。
+function url_scope_key($member_id = null) {
+    $mid = $member_id === null ? 0 : (int)$member_id;
+    return $mid > 0 ? 'm:' . $mid : 'w:' . 0;
+}
+
+// 计算作用域 MD5。与数据库端表达式
+//   MD5(CONCAT(longurl, 0x1F, scope_key)) / MD5(CONCAT(long_url, 0x1F, scopeKey))
+// 完全一致（utf8mb4 下 MD5(CONCAT(...)) 结果不受字符集影响）。
+function url_scope_hash($longurl, $scope_key) {
+    return md5((string)$longurl . "\x1f" . (string)$scope_key);
+}
+
+// 按作用域哈希查短码（返回 '' 表示不存在）。用于「同一会员/匿名池内同一 URL」
+// 的幂等复用：先查再复用，避免重复 INSERT 触发唯一索引冲突。
+function find_uid_by_scope($DB, $hash) {
+    if (!isset($DB) || empty($DB->link) || !is_string($hash) || $hash === '') return '';
+    $stmt = $DB->prepare('SELECT uid FROM wjoy_log WHERE url_hash=? AND status=1 LIMIT 1');
+    if (!$stmt) return '';
+    mysqli_stmt_bind_param($stmt, 's', $hash);
+    if (!mysqli_stmt_execute($stmt)) { mysqli_stmt_close($stmt); return ''; }
+    mysqli_stmt_bind_result($stmt, $uid);
+    $uid = mysqli_stmt_fetch($stmt) ? (string)$uid : '';
+    mysqli_stmt_close($stmt);
+    return $uid;
 }
 
 function find_short_by_hash($DB, $hash) {
@@ -201,7 +268,7 @@ function renew_short_expiry($DB, $hash, $expire_at) {
 }
 
 // Create or renew a short URL. Generated-code collisions are retried with the existing alphabet.
-function create_short_url($DB, $longurl, $custom = null, $expire_days = 0, $domain_id = null, $password = '') {
+function create_short_url($DB, $longurl, $custom = null, $expire_days = 0, $domain_id = null, $password = '', $member_id = null, $known_hash = null) {
     $custom = $custom === null ? '' : trim((string)$custom);
     if (!validate_custom_code($custom)) return array('code' => 0, 'short_url' => '', 'msg' => '自定义短码格式错误（需 6-8 位，仅含 a-z 与 0-5）', 'result' => 10006);
     $expire_days = validate_expire_days($expire_days);
@@ -210,7 +277,9 @@ function create_short_url($DB, $longurl, $custom = null, $expire_days = 0, $doma
     if (strlen($password) > 72) return array('code' => 0, 'short_url' => '', 'msg' => '访问密码过长（最多 72 字节）', 'result' => 10008);
     $password_hash = $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : null;
 
-    $hash = md5($longurl);
+    // $known_hash：由调用方（api.php / batch.php）预计算并传入的作用域哈希，
+    // 避免同一请求内对同一 URL 重复计算，也保证「查重」与「写入」用的是同一个值。
+    $hash = $known_hash !== null ? (string)$known_hash : url_scope_hash($longurl, url_scope_key($member_id));
     $expire_at = $expire_days > 0 ? date('Y-m-d H:i:s', time() + $expire_days * 86400) : null;
     $existing = find_short_by_hash($DB, $hash);
     if (is_array($existing) && !empty($existing['uid'])) {
@@ -344,11 +413,17 @@ function log_violation($DB, $url, $reason, $source = 'api') {
 function sync_short_url_to_admin($uid, $longurl, $expire_at = null, $member_id = null, $password_hash = null) {
     global $ADMIN_DB;
     if (!$ADMIN_DB || empty($ADMIN_DB->link)) return;
-    $hash = md5($longurl);
+    $hash = url_scope_hash($longurl, url_scope_key($member_id));
     $source = 'web';
     $member_id = $member_id > 0 ? (int)$member_id : null;
     $password_hash = $password_hash === null || $password_hash === '' ? null : (string)$password_hash;
-    $stmt = $ADMIN_DB->prepare('INSERT INTO short_urls (uid, long_url, url_hash, expire_at, member_id, source, status, password_hash) VALUES (?,?,?,?,?,?,1,?) ON DUPLICATE KEY UPDATE expire_at=IFNULL(short_urls.expire_at, VALUES(expire_at))');
+    // A4：冲突时同步鉴权/可见性字段，避免 wjoy_log 与 short_urls 对同一条短链
+    // 给出不同的鉴权结果（Go 路径 vs PHP 路径）。
+    //   - long_url / password_hash：直接同步为本次提交的值。
+    //   - expire_at：IFNULL 保留已有有效期，不覆盖永久/更长有效期。
+    //   - status：仅当已过期（2）时复活为 1；管理员主动禁用（0）不被覆盖，
+    //     避免 API 重复提交把人工下线的短链重新启用。
+    $stmt = $ADMIN_DB->prepare('INSERT INTO short_urls (uid, long_url, url_hash, expire_at, member_id, source, status, password_hash) VALUES (?,?,?,?,?,?,1,?) ON DUPLICATE KEY UPDATE long_url=VALUES(long_url), password_hash=VALUES(password_hash), status=IF(short_urls.status=2, VALUES(status), short_urls.status), expire_at=IFNULL(short_urls.expire_at, VALUES(expire_at))');
     if (!$stmt) return;
     mysqli_stmt_bind_param($stmt, 'ssssiss', $uid, $longurl, $hash, $expire_at, $member_id, $source, $password_hash);
     mysqli_stmt_execute($stmt);
@@ -404,14 +479,20 @@ function record_click_analytics($uid) {
     }
 }
 
-// Dispatch an event to subscribed webhooks (admin DB).
-// Records every attempt in webhook_deliveries and retries up to 3 times with
-// backoff so a temporarily down receiver doesn't silently lose the event.
-// Does nothing when the admin DB is unavailable or there are no matching webhooks.
+// ---------------------------------------------------------------------------
+// Webhook 异步队列（P2）
+// ---------------------------------------------------------------------------
+// 背景：do.php 跳转热路径原先同步投递所有 webhook（最坏 3 次重试 ≈ 每秒级阻塞）。
+// 现在派发方只做一次 O(1) 的 INSERT 入队，实际投递由
+// migrations/webhook_worker.php 在后台完成（cron 或常驻循环），
+// 用户跳转不再依赖任何外发 HTTP 的成功与否。
+
+// 把事件写入 webhook_queue（按订阅者展开，入队时即完成订阅匹配与 SSRF 预检）。
+// 热路径唯一开销：1 次 SELECT + N 次 INSERT，无网络 IO。
 function dispatch_webhook_event($event, $payload) {
-    global $ADMIN_DB;
+    global $ADMIN_DB, $webhook_dispatch_inline;
     if (!$ADMIN_DB || empty($ADMIN_DB->link)) return;
-    $stmt = $ADMIN_DB->prepare('SELECT id, url, secret, events FROM webhooks WHERE status=1 AND deleted_at IS NULL');
+    $stmt = $ADMIN_DB->prepare('SELECT id, url, events FROM webhooks WHERE status=1 AND deleted_at IS NULL');
     if (!$stmt) return;
     mysqli_stmt_execute($stmt);
     $res = mysqli_stmt_get_result($stmt);
@@ -422,46 +503,119 @@ function dispatch_webhook_event($event, $payload) {
         'timestamp' => time(),
         'data' => $payload,
     ), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $rows = array();
     while ($row = mysqli_fetch_assoc($res)) {
         $events = json_decode($row['events'], true);
         if (!is_array($events) || !in_array($event, $events, true)) continue;
-        $headers = array('Content-Type: application/json', 'User-Agent: dwz-shorturl-webhook/1.0');
-        if (!empty($row['secret'])) {
-            $headers[] = 'X-Webhook-Signature: sha256=' . hash_hmac('sha256', $body, $row['secret']);
+        // SSRF 预检（热路径低成本版）：只做协议/语法与字面 IP 校验，不做 DNS。
+        // 完整 DNS/重绑定校验由 worker 投递前再用 validate_long_url(..., false)
+        // 执行，避免在跳转热路径引入 DNS 解析开销。
+        $target_check = validate_long_url((string)$row['url'], true);
+        if (!$target_check[0]) {
+            error_log('[dwz] webhook skipped (unsafe target): ' . (string)$row['url']);
+            continue;
         }
-        $max_attempts = 3;
-        for ($attempt = 1; $attempt <= $max_attempts; $attempt++) {
-            $status = 0;
-            $success = 0;
-            $resp_body = '';
-            $ch = curl_init($row['url']);
-            curl_setopt_array($ch, array(
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => $body,
-                CURLOPT_HTTPHEADER => $headers,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 3,
-                CURLOPT_CONNECTTIMEOUT => 2,
-            ));
-            $resp = curl_exec($ch);
-            $http_code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            if ($resp !== false) {
-                $status = $http_code;
-                $resp_body = substr($resp, 0, 512);
-                if ($http_code >= 200 && $http_code < 300) $success = 1;
-            }
-            $ins = $ADMIN_DB->prepare('INSERT INTO webhook_deliveries (webhook_id, event, payload, response_status, response_body, attempt, success, created_at) VALUES (?,?,?,?,?,?,?,NOW())');
-            if ($ins) {
-                mysqli_stmt_bind_param($ins, 'issisii', $row['id'], $event, $body, $status, $resp_body, $attempt, $success);
-                mysqli_stmt_execute($ins);
-                mysqli_stmt_close($ins);
-            }
-            if ($success === 1) break;
-            if ($attempt < $max_attempts) usleep($attempt * 1000000); // 1s, 2s backoff
-        }
+        $rows[] = $row;
     }
     mysqli_stmt_close($stmt);
+
+    $ins = $ADMIN_DB->prepare('INSERT INTO webhook_queue (webhook_id, event, payload, max_attempts, next_retry_at, status, created_at) VALUES (?,?,?,3,NOW(3),0,NOW(3))');
+    if (!$ins) return;
+    foreach ($rows as $row) {
+        mysqli_stmt_bind_param($ins, 'iss', $row['id'], $event, $body);
+        mysqli_stmt_execute($ins);
+    }
+    mysqli_stmt_close($ins);
+
+    // 兼容/兜底：队列表尚未迁移（webhook_queue 不存在）时，退化为同步投递，
+    // 保证功能不中断。可用 $webhook_dispatch_inline = false 显式关闭该兜底。
+    if (webhook_queue_missing()) {
+        if (!isset($webhook_dispatch_inline) || $webhook_dispatch_inline !== false) {
+            foreach ($rows as $row) {
+                webhook_deliver_now($row, $event, $body, 1);
+            }
+        }
+    }
+}
+
+// webhook_queue 表是否存在（结果进程内缓存，避免热路径反复查 information_schema）。
+function webhook_queue_missing() {
+    static $missing = null;
+    global $ADMIN_DB;
+    if ($missing !== null) return $missing;
+    if (!$ADMIN_DB || empty($ADMIN_DB->link)) return $missing = true;
+    $res = @mysqli_query($ADMIN_DB->link, "SHOW TABLES LIKE 'webhook_queue'");
+    $missing = !($res && mysqli_num_rows($res) > 0);
+    if ($res) mysqli_free_result($res);
+    if ($missing) error_log('[dwz] webhook_queue 表缺失，已退化为同步投递；请执行 migrations/add_webhook_queue.sql');
+    return $missing;
+}
+
+// 单次投递 + 落库 webhook_deliveries。返回 true 表示 2xx 成功。
+// 供 worker 与同步兜底共用；超时为毫秒级，即使同步兜底也不会长阻塞。
+function webhook_deliver_now($webhook, $event, $body, $attempt = 1) {
+    global $ADMIN_DB;
+    // curl 扩展缺失时不应致命中断（历史上直接 curl_init() 会 Fatal Error）。
+    if (!function_exists('curl_init')) {
+        return array(false, 'curl extension not available');
+    }
+    $headers = array('Content-Type: application/json', 'User-Agent: dwz-shorturl-webhook/1.0');
+    if (!empty($webhook['secret'])) {
+        $headers[] = 'X-Webhook-Signature: sha256=' . hash_hmac('sha256', $body, (string)$webhook['secret']);
+    }
+    $status = 0;
+    $resp_body = '';
+    $ch = curl_init((string)$webhook['url']);
+    curl_setopt_array($ch, array(
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $body,
+        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_TIMEOUT_MS => 800,
+        CURLOPT_CONNECTTIMEOUT_MS => 400,
+    ));
+    $resp = curl_exec($ch);
+    $http_code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $success = 0;
+    $err = null;
+    if ($resp !== false) {
+        $status = $http_code;
+        $resp_body = substr((string)$resp, 0, 512);
+        if ($http_code >= 200 && $http_code < 300) $success = 1;
+        else $err = 'HTTP ' . $http_code;
+    } else {
+        $err = 'curl error';
+    }
+    if ($ADMIN_DB && !empty($ADMIN_DB->link)) {
+        $ins = $ADMIN_DB->prepare('INSERT INTO webhook_deliveries (webhook_id, event, payload, response_status, response_body, attempt, success, created_at) VALUES (?,?,?,?,?,?,?,NOW())');
+        if ($ins) {
+            mysqli_stmt_bind_param($ins, 'issisii', $webhook['id'], $event, $body, $status, $resp_body, $attempt, $success);
+            mysqli_stmt_execute($ins);
+            mysqli_stmt_close($ins);
+        }
+    }
+    return array($success === 1, $err);
+}
+
+// 供 worker 使用：取一批到期的待投递任务（带行锁，避免多 worker 重复消费）。
+function webhook_queue_fetch($limit = 20) {
+    global $ADMIN_DB;
+    if (!$ADMIN_DB || empty($ADMIN_DB->link)) return array();
+    $limit = max(1, (int)$limit);
+    $ADMIN_DB->query('BEGIN');
+    $res = mysqli_query($ADMIN_DB->link, 'SELECT id, webhook_id, event, payload, attempts, max_attempts FROM webhook_queue '
+        . 'WHERE status=0 AND next_retry_at <= NOW(3) ORDER BY id ASC LIMIT ' . $limit . ' FOR UPDATE SKIP LOCKED');
+    if (!$res) { $ADMIN_DB->query('ROLLBACK'); return array(); }
+    $rows = array();
+    while ($r = mysqli_fetch_assoc($res)) $rows[] = $r;
+    mysqli_free_result($res);
+    foreach ($rows as $r) {
+        mysqli_query($ADMIN_DB->link, 'UPDATE webhook_queue SET locked_at=NOW(3) WHERE id=' . (int)$r['id']);
+    }
+    $ADMIN_DB->query('COMMIT');
+    return $rows;
 }
 
 // ---- 链接访问密码（与 Go 后端共用同一 HMAC cookie 算法） ----

@@ -29,7 +29,10 @@ if ($csrf === '' || !hash_equals($_SESSION['member_csrf'] ?? '', $csrf)) {
 
 $raw = isset($_POST['urls']) && is_string($_POST['urls']) ? $_POST['urls'] : '';
 $domain_id = isset($_POST['domain']) && is_string($_POST['domain']) ? trim($_POST['domain']) : '';
-$domain_id = $domain_id !== '' ? $domain_id : null;
+// A3：批量接口同样要求 domain 必须是纯数字 ID 且调用方已登录（本接口已强制 CSRF+登录）。
+if ($domain_id !== '' && (!ctype_digit($domain_id) || member_id() <= 0)) {
+    $domain_id = null;
+}
 $password = isset($_POST['password']) && is_string($_POST['password']) ? $_POST['password'] : '';
 if (strlen($password) > 72) batch_error('访问密码过长（最多 72 字节）', 10008, 422);
 if (strlen($raw) > 210000) batch_error('request too large', 10011, 413);
@@ -55,12 +58,22 @@ foreach ($lines as $u) {
         $results[] = array('url' => $u, 'code' => null, 'short_url' => '', 'msg' => '目标网址包含违规内容，已拦截', 'result' => 10014);
         continue;
     }
-    $r = create_short_url($DB, $u, null, 0, $domain_id, $password);
+    // C 类改造：批量接口作用于当前会员作用域，重复 URL 直接复用同一短链，
+    // 同一会员内的重复提交不再产生冲突码。
+    $owner_member = member_id();
+    $owner_hash = url_scope_hash($u, url_scope_key($owner_member));
+    $owner_uid = find_uid_by_scope($DB, $owner_hash);
+    if ($owner_uid !== '') {
+        $r = short_url_result($owner_uid, 'existence', 'existing', $domain_id);
+    } else {
+        $r = create_short_url($DB, $u, null, 0, $domain_id, $password, $owner_member, $owner_hash);
+    }
     if ($r['result'] == 1) {
         $password_hash = $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : null;
-        sync_short_url_to_admin($r['code'], $u, null, member_id(), $password_hash);
-        // 新创建的短链派发 link.created 事件（与 Go 公开 API 行为对齐）
+        // 仅在新建时回写 admin 表并派发事件；复用已有短链时整体跳过，
+        // 避免重复提交同一行、重复触发 webhook。
         if ($r['state'] === 'created') {
+            sync_short_url_to_admin($r['code'], $u, null, $owner_member, $password_hash);
             dispatch_webhook_event('link.created', array(
                 'id' => $r['code'],
                 'uid' => $r['code'],

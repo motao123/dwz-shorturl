@@ -1,19 +1,9 @@
+# 说明：robots.txt 仅约束合规爬虫，对攻击者无约束力；因此这里不再罗列
+# stats.php / includes/ / migrations/ 等敏感路径（罗列本身会泄露路径存在性，
+# 反而形成信息收集入口）。敏感路径应由服务端返回 404/403 处理，
+# 详见 nginx.example.conf 的 deny 段。
 User-agent: *
 Allow: /
 Disallow: /admin/
-Disallow: /admin/api/
-Disallow: /api.php
-Disallow: /batch.php
-Disallow: /do.php
-Disallow: /stats.php
-Disallow: /config.php
-Disallow: /config.sample.php
-Disallow: /setup.php
-Disallow: /install.sql
-Disallow: /includes/
-Disallow: /migrations/
-Disallow: /logs/
-Disallow: /docs/
-Disallow: /assets/app.js
 
 Sitemap: https://1.xk7.cn/sitemap.xml

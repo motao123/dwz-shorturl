@@ -70,7 +70,7 @@ DWZ 短网址平台是一套 **PHP 前台 + Go 核心 + Vue3 管理台** 的三�
 | ⚡ 单条/批量生成 | 单条秒出，批量最多 100 条/次，实时计数 |
 | 🎨 自定义短码 | 6–8 位 `a-z0-5`，可续期、可回收 |
 | 📱 本地二维码 | 不依赖第三方服务，隐私无忧 |
-| 🔁 原子去重 | `url_hash` 唯一索引，同 URL 复用短码 |
+| 🔁 原子去重 | `url_hash` 唯一索引，**同一会员内**同 URL 复用短码（不同会员各建一条，互不影响） |
 | ⏰ 有效期管理 | 永久/1/7/30/365 天，过期返回 410 |
 | 📊 点击统计 | 独立 Token 统计页，总量/Top10/最近 20 |
 
@@ -107,6 +107,8 @@ DWZ 短网址平台是一套 **PHP 前台 + Go 核心 + Vue3 管理台** 的三�
 | ⚖️ **对账 Cron** | `short_urls` ↔ `wjoy_log` 双写对账、点击计数校准 |
 | 📦 **分区维护** | `click_logs` 按月自动分区，防单表膨胀 |
 | 💾 **定时备份** | `deploy/backup.sh` mysqldump + 保留策略 |
+| 📨 **Webhook 异步队列** | PHP 跳转入队（O(1)）+ `migrations/webhook_worker.php` 后台投递，指数退避重试 |
+| 🎨 **静态资源构建** | `php migrations/build_assets.php` 压缩 CSS/JS 并注入内容哈希版本号，零 npm 依赖 |
 | 📋 **迁移工具** | `-status` / `-dry-run` / `-migrations` / `-config` 全参数 |
 
 ---
@@ -152,6 +154,18 @@ cd backend
 go run ./cmd/migrate -status          # 查看待执行迁移
 go run ./cmd/migrate                  # 执行全部幂等迁移
 
+# 老库升级（推荐）：一条命令完成全部上线迁移
+#   备份 → url_hash 作用域化 → webhook_queue 建表 → 静态资源构建
+#   幂等，可重复执行；库名留空时会自动从 config.php / config.yaml 读取
+DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh --public-db=<公共库> --admin-db=<管理库>
+
+# 只想看会执行什么、不落库：
+DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh --public-db=<公共库> --admin-db=<管理库> --dry-run
+
+# 等价的手工做法（脚本内部就是执行这些；库名需自行替换）
+# mysql <公共库> < migrations/scope_url_hash.sql   # 需先把脚本内 USE 的库名改对
+# go run ./cmd/migrate -all                        # 管理库 + 公共库结构对齐与口径校验
+
 # 4. PHP 前台（需 PHP 8 + mysqli）
 php setup.php --host=127.0.0.1 --port=3306 \
   --user=dwz --pwd='密码' --db=dwz_admin \
@@ -165,6 +179,78 @@ DWZ_SERVER=your.host DWZ_USER=root DWZ_PASS='密码' ./deploy.sh
 ```
 
 一键完成：交叉编译 Go 二进制 → 构建 Vue → 上传 PHP/前端 dist → 重启服务。
+
+> `deploy.sh` 只负责发布代码，**不碰数据库**。数据库侧的上线动作由
+> `ops/one_click_migrate.sh` 一条命令完成（见上），两者互不依赖。
+
+### 一条命令完成上线迁移
+
+`ops/one_click_migrate.sh` 把老库升级需要的全部运维动作收敛成一条命令：
+
+| 步骤 | 动作 |
+|---|---|
+| 0 | 检查两库连通性、确认库名存在 |
+| 1 | 备份 `wjoy_log` 与 `short_urls` 到 `backups/migrate-<时间戳>/` |
+| 2 | 重写 `url_hash`（URL 全局唯一 → 同一 owner 作用域内唯一），自动替换脚本内库名 |
+| 3 | 建 `webhook_queue` 异步投递队列表 |
+| 4 | 校验两库 `url_hash` 口径一致（残留未迁移行直接报错退出） |
+| 5 | 构建静态资源并注入内容哈希版本号 |
+
+特点：
+
+- **幂等**：中途失败可直接重跑，不会因索引已存在而报 1061/1091；
+- **零手工替换**：库名从 `config.php` / `backend/configs/config.yaml` 自动读取，也可 `--public-db=` / `--admin-db=` 显式指定；
+- **密码不落命令行**：通过 `MYSQL_PWD` 环境变量传给 mysql/mysqldump，`ps` 与 shell history 不可见；
+- **有 `--dry-run`**：先看清要执行什么，再决定是否落库。
+
+```bash
+# 先干跑一遍确认
+DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh \
+  --public-db=1_xk7_cn --admin-db=dwz_admin --dry-run
+
+# 确认无误后正式执行
+DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh \
+  --public-db=1_xk7_cn --admin-db=dwz_admin
+```
+
+> ⚠️ 第 2 步会重写哈希并重建唯一索引。脚本已自动备份，但仍建议挑流量低谷执行，
+> 并确保跑的时候没有其他进程在写库。
+
+### 后台任务（cron）
+
+PHP 前台的 webhook 投递、静态资源构建均为可选增强，按需启用：
+
+```bash
+# 1) Webhook 异步投递队列（每分钟消费一批；也可 --loop 常驻）
+php migrations/webhook_worker.php
+
+# 2) 构建静态资源（压缩 + 内容哈希版本注入 index.html/api.html/stats.php）
+php migrations/build_assets.php
+
+# 3) CI/发布前校验产物是否最新（不写文件，过期则非零退出）
+php migrations/build_assets.php --check
+```
+
+> 💡 `webhook_queue` 表由 `migrations/add_webhook_queue.sql` 创建；未建表时程序会自动退化为同步投递并在 `logs/php_error.log` 告警，功能不中断。
+
+---
+
+## 🔐 短链去重作用域（url_hash）
+
+`url_hash` 存的是 `MD5(long_url + 0x1F + scope_key)`，唯一索引语义为「**同一 owner 作用域内唯一**」，而非「URL 全局唯一」：
+
+| scope_key | 含义 | 去重行为 |
+|---|---|---|
+| `w:0` | 匿名请求 / 历史遗留数据 | 沿用旧的全局语义，同一 URL 只保留一条 |
+| `m:<member_id>` | 会员创建的短链 | 同一会员内同一 URL 复用一条；**不同会员各自独立**，可分别设置有效期与访问密码 |
+
+对比改造前（裸 `MD5(url)` 全局唯一）：
+
+- ✅ 同一 URL 可以按会员分别建链，会员各自管自己的有效期/密码；
+- ✅ 业务键带上作用域后，哈希空间被区分，不同 URL 不会再因 MD5 碰撞而互相阻塞；
+- ✅ 匿名路径行为不变，线上已有数据语义平滑。
+
+> ⚠️ PHP (`includes/function.php` 的 `url_scope_hash()`)、Go (`urlHash()`) 与 SQL (`MD5(CONCAT(url, 0x1F, scope))`) 三处实现必须保持一致，否则同一条短链在两条跳转路径上会落到不同行。迁移脚本 `migrations/scope_url_hash.sql` 负责把历史行重写为同一口径。
 
 ---
 

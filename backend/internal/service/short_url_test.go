@@ -470,3 +470,128 @@ func TestBatchCreate_ReportsErrorsByInputIndex(t *testing.T) {
 
 // helper: ensure errors.Is still works for sentinel comparison if needed later
 var _ = errors.Is
+
+// C 类改造回归：url_hash 由「URL 全局唯一」改为「owner 作用域内唯一」。
+// 同一会员重复提交同一 URL 必须复用同一条短链（不新建、不重复计数）。
+func TestCreate_Dedup_SameScopeReusesExisting(t *testing.T) {
+	sr := newMockShortRepo()
+	dr := &mockDomainRepo{}
+	svc := buildService(sr, dr)
+
+	createdBy := uint64(1)
+	first, err := svc.Create("https://www.example.com/a", "", 0, nil, &createdBy, "test", "127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("first Create failed: %v", err)
+	}
+	second, err := svc.Create("https://www.example.com/a", "", 0, nil, &createdBy, "test", "127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("second Create failed: %v", err)
+	}
+	if first.UID != second.UID {
+		t.Fatalf("same owner + same URL must reuse the link, got %s vs %s", first.UID, second.UID)
+	}
+	if len(sr.records) != 1 {
+		t.Fatalf("expected a single stored record, got %d", len(sr.records))
+	}
+}
+
+// C 类改造回归：后台管理员创建与 PHP 前台/API Key 必须落到同一作用域 "w:0"。
+// 否则同一条 URL 经后台创建后，PHP 前台再也算不出同一个 url_hash，
+// 两条跳转路径会各自建链、互相看不见（改造前的全局去重语义被破坏）。
+//
+// 说明：会员维度（m:<id>）的隔离由 TestCreate_DifferentScopesGetSeparateLinks
+// 之外的方式覆盖 —— 见 TestCreate_MemberScopeIsolation。
+func TestCreate_AdminScopeMatchesPHPFrontend(t *testing.T) {
+	sr := newMockShortRepo()
+	dr := &mockDomainRepo{}
+	svc := buildService(sr, dr)
+
+	adminA := uint64(1)
+	adminB := uint64(2)
+	a, err := svc.Create("https://www.example.com/same", "", 0, nil, &adminA, "admin", "127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("Create adminA failed: %v", err)
+	}
+	// 另一个管理员提交同一 URL：全局池内复用同一条，与 PHP 前台口径一致。
+	b, err := svc.Create("https://www.example.com/same", "", 0, nil, &adminB, "admin", "127.0.0.1", "")
+	if err != nil {
+		t.Fatalf("Create adminB failed: %v", err)
+	}
+	if a.UID != b.UID {
+		t.Fatalf("admin-created links must share the global pool, got %s vs %s", a.UID, b.UID)
+	}
+	if a.URLHash != urlHash("https://www.example.com/same", "w:0") {
+		t.Fatalf("admin link must use the w:0 scope, got %s", a.URLHash)
+	}
+	if len(sr.records) != 1 {
+		t.Fatalf("expected a single global-pool record, got %d", len(sr.records))
+	}
+}
+
+// 会员维度仍然按会员隔离：不同会员各自建链，互不复用。
+// 直接以会员作用域调用底层 Create，等价于 member_api.CreateLink 的调用方式。
+func TestCreate_MemberScopeIsolation(t *testing.T) {
+	sr := newMockShortRepo()
+
+	url := "https://www.example.com/member-scoped"
+	memberA := uint64(1)
+	memberB := uint64(2)
+
+	hashA := urlHash(url, urlScopeKey(&memberA, nil))
+	hashB := urlHash(url, urlScopeKey(&memberB, nil))
+	if hashA == hashB {
+		t.Fatalf("member scopes must produce different hashes: %s", hashA)
+	}
+	if hashA != urlHash(url, "m:1") || hashB != urlHash(url, "m:2") {
+		t.Fatalf("unexpected member scope hashes: %s / %s", hashA, hashB)
+	}
+	// 两个会员的行可以共存：写入两条不同的 url_hash 不冲突。
+	sr.records[1] = &model.ShortUrl{ID: 1, UID: "aaa111", URLHash: hashA, LongURL: url, Status: 1}
+	sr.records[2] = &model.ShortUrl{ID: 2, UID: "bbb222", URLHash: hashB, LongURL: url, Status: 1}
+	sr.byHash[hashA] = 1
+	sr.byHash[hashB] = 2
+	if len(sr.records) != 2 {
+		t.Fatalf("expected two member records, got %d", len(sr.records))
+	}
+	// 同一会员重复提交同一 URL 仍然复用同一条。
+	if got := urlHash(url, urlScopeKey(&memberA, nil)); got != hashA {
+		t.Fatalf("same member + same URL must reuse, got %s want %s", got, hashA)
+	}
+}
+
+// C 类改造回归：作用域哈希必须与 PHP 侧 url_scope_hash() 的拼接口径一致
+// （longurl + 0x1F + scopeKey），否则两条跳转路径会各查到不同的行。
+func TestURLHash_MatchesPHPScopeSeparator(t *testing.T) {
+	if got, want := urlHash("https://example.com", "w:0"),
+		md5Hash("https://example.com\x1fw:0"); got != want {
+		t.Fatalf("urlHash mismatch: got %s want %s", got, want)
+	}
+	if got, want := urlHash("https://example.com", "m:42"),
+		md5Hash("https://example.com\x1fm:42"); got != want {
+		t.Fatalf("urlHash mismatch: got %s want %s", got, want)
+	}
+	// 作用域不同 -> 哈希必须不同，且不能退化为裸 MD5(url)
+	if urlHash("https://example.com", "w:0") == md5Hash("https://example.com") {
+		t.Fatal("scoped hash must not equal the legacy global hash")
+	}
+	if urlScopeKey(nil, nil) != "w:0" {
+		t.Fatalf("anonymous links must keep the legacy global scope, got %s", urlScopeKey(nil, nil))
+	}
+
+	// Admin-console creations (createdBy set) must ALSO land on "w:0", the same
+	// bucket the PHP front uses for anonymous/API submissions. If they used a
+	// per-admin scope, the PHP front could never compute the matching url_hash
+	// and the two redirect paths would disagree about link existence.
+	adminID := uint64(42)
+	if got, want := urlScopeKey(nil, &adminID), "w:0"; got != want {
+		t.Fatalf("admin-created links must use the global scope, got %s want %s", got, want)
+	}
+	memberID := uint64(42)
+	if got, want := urlScopeKey(&memberID, nil), "m:42"; got != want {
+		t.Fatalf("member links must use the member scope, got %s want %s", got, want)
+	}
+	// A member id wins over createdBy so member and admin paths never collide.
+	if got, want := urlScopeKey(&memberID, &adminID), "m:42"; got != want {
+		t.Fatalf("member scope must take precedence, got %s want %s", got, want)
+	}
+}
