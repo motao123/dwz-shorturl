@@ -10,20 +10,30 @@ Options -Indexes
     RewriteRule ^sitemap\.xml$ sitemap.php [L]
 </IfModule>
 
-# ── Go 后端反代（非 Docker 部署必配）────────────────────────────────
+# ── Go 后端接口转发（非 Docker 部署必配）───────────────────────────
 # 管理台 /admin/api、会员中心 /member/api、对外 /public/api 与 /health 都由
-# Go 后端提供。纯 PHP 部署（不起 Go）时不需要这些规则，但管理台的「域名池」
-# 与会员中心的接口会不可用。
+# Go 后端提供。不转发时这些接口会 404，且前端不会有任何提示，表现为
+# 「域名池选不中、短链永远落在主域名」。
 #
-# ⚠️ 在 .htaccess 里做反代依赖 mod_proxy，且 Apache 必须允许
-#    AllowOverride All（含 Proxy 指令）。共享虚拟主机通常禁用了 mod_proxy，
-#    这种情况下请改为在站点根目录建一个 PHP 代理入口，或直接用 nginx。
-#    完整说明见 docs/deploy-baota.md。
+# 两种方案，按主机能力二选一：
 #
+# 方案 A（性能优先）：主机启用 mod_proxy 时，取消下面注释即可原生反代。
 # <IfModule mod_proxy.c>
 #     ProxyPreserveHost On
 #     RewriteRule ^(admin/api|member/api|public/api|health)(/.*)?$ http://127.0.0.1:8080/$1$2 [P,L,QSA]
 # </IfModule>
+#
+# 方案 B（兜底，共享虚拟主机默认启用）：走同目录的 api_proxy.php 用 curl
+# 转发到本机 Go 后端。仅多一次 PHP 往返，功能与 nginx 反代一致。
+# 若 Go 后端不在 127.0.0.1:8080，请设置环境变量 DWZ_BACKEND（见 api_proxy.php）。
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(admin/api|member/api|public/api|health)(/.*)?$ api_proxy.php [L,QSA]
+</IfModule>
+#
+# 未使用 Go 后端（纯 PHP 形态，前台 do.php/api.php/batch.php/member.php 自足）
+# 时，把上面「方案 B」整段注释掉即可；此时管理台「域名池」与会员中心接口不可用。
+# 完整说明见 docs/deploy-baota.md。
 
 <IfModule mod_rewrite.c>
     RewriteEngine On

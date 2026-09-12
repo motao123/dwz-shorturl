@@ -666,11 +666,15 @@ function password_page_html($uid, $err = '') {
         . 'input:focus{border-color:var(--pw-brand);box-shadow:0 0 0 3px rgba(14,110,117,.12)}'
         . 'button{width:100%;margin-top:12px;padding:11px;background:var(--pw-brand);color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}'
         . 'button:hover{background:var(--pw-brand-hover)}'
+        // 与 Go 侧 renderPasswordPage 保持同一品牌入口，避免两条跳转路径观感不一致。
+        . '.brand{display:block;margin-top:16px;text-align:center;font-size:12.5px;color:var(--pw-dim);text-decoration:none}'
+        . '.brand:hover{color:var(--pw-brand)}'
         . '</style></head><body><form class="card" method="post" action="/' . $uid . '">'
         . '<p class="lock">🔒</p><h1>此链接受密码保护</h1><p class="sub">请输入访问密码以继续</p>'
         . $msg
         . '<input type="password" name="password" placeholder="访问密码" required autofocus autocomplete="off">'
         . '<button type="submit">解锁访问</button>'
+        . '<a class="brand" href="/">← 返回短网址首页</a>'
         . '</form></body></html>';
 }
 ?>

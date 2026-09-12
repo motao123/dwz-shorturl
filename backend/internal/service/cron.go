@@ -335,7 +335,7 @@ func (s *CronService) remindExpiring() {
 			fmt.Fprintf(&b, "· %s（%s）到期时间：%s\n", l.LongURL, l.UID, exp)
 		}
 		b.WriteString("\n登录会员中心可一键续期：https://1.xk7.cn/member/\n")
-		b.WriteString("—— 陌涛短链")
+		b.WriteString("—— 短网址")
 
 		if err := s.email.Send(g.Email, subject, b.String()); err != nil {
 			s.logger.Error("expiry reminder email failed",

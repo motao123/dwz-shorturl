@@ -484,8 +484,8 @@ func (s *memberApiService) RequestPasswordReset(email string) error {
 		return errors.New("邮件服务未配置，暂无法发送重置邮件，请联系管理员")
 	}
 	link := emailBaseURL() + "/member/reset?token=" + token
-	body := "您好，\n\n我们收到重置您短链账号密码的请求。请点击以下链接设置新密码（30 分钟内有效）：\n\n" + link + "\n\n如果不是您本人操作，请忽略此邮件。\n—— 陌涛短链"
-	return s.email.Send(m.Email, "重置密码 - 陌涛短链", body)
+	body := "您好，\n\n我们收到重置您短链账号密码的请求。请点击以下链接设置新密码（30 分钟内有效）：\n\n" + link + "\n\n如果不是您本人操作，请忽略此邮件。\n—— 短网址"
+	return s.email.Send(m.Email, "重置密码 - 短网址", body)
 }
 
 // ResetPassword validates a reset token and sets a new password. Also bumps
@@ -533,8 +533,8 @@ func (s *memberApiService) SendVerification(email string) error {
 		return errors.New("邮件服务未配置，验证邮件无法发送，请联系管理员")
 	}
 	link := emailBaseURL() + "/member/verify?token=" + token
-	body := "您好，\n\n感谢注册短链账号。请点击以下链接验证您的邮箱（24 小时内有效）：\n\n" + link + "\n\n如果这不是您的操作，请忽略此邮件。\n—— 陌涛短链"
-	return s.email.Send(m.Email, "验证邮箱 - 陌涛短链", body)
+	body := "您好，\n\n感谢注册短链账号。请点击以下链接验证您的邮箱（24 小时内有效）：\n\n" + link + "\n\n如果这不是您的操作，请忽略此邮件。\n—— 短网址"
+	return s.email.Send(m.Email, "验证邮箱 - 短网址", body)
 }
 
 // VerifyEmail marks a member's email as verified using their token.
