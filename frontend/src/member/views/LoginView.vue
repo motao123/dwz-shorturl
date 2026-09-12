@@ -24,7 +24,7 @@ const formRef = ref<FormInstance>()
 const forgotEmail = ref('')
 const forgotLoading = ref(false)
 
-const form = reactive({ username: '', email: '', password: '' })
+const form = reactive({ username: '', email: '', password: '', agreed: false })
 
 const rules: FormRules = {
   username: [
@@ -32,6 +32,16 @@ const rules: FormRules = {
     { min: 2, max: 32, message: '用户名 2-32 位', trigger: 'blur' }
   ],
   email: [{ required: true, message: '请输入邮箱', trigger: 'blur' }],
+  agreed: [
+    {
+      validator: (_r, v, cb) => {
+        if (mode.value !== 'register') return cb()
+        if (!v) return cb(new Error('请先阅读并同意《用户协议》与《隐私政策》'))
+        cb()
+      },
+      trigger: 'change'
+    }
+  ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
     { min: 8, max: 64, message: '密码 8-64 位', trigger: 'blur' },
@@ -137,6 +147,13 @@ async function handleForgot() {
         </el-form-item>
         <el-form-item prop="password">
           <el-input v-model="form.password" type="password" show-password placeholder="密码" size="large" @keyup.enter="submit" />
+        </el-form-item>
+        <el-form-item v-if="mode === 'register'" prop="agreed">
+          <el-checkbox v-model="form.agreed">
+            我已阅读并同意
+            <a href="/terms.html" target="_blank" rel="noopener">《用户协议》</a>与
+            <a href="/privacy.html" target="_blank" rel="noopener">《隐私政策》</a>
+          </el-checkbox>
         </el-form-item>
         <el-button type="primary" size="large" class="submit" :loading="loading" @click="submit">
           {{ mode === 'login' ? '登 录' : '注 册' }}

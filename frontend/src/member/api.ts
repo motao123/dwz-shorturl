@@ -130,7 +130,8 @@ export async function verifyEmail(token: string): Promise<void> {
 }
 
 export async function register(username: string, email: string, password: string): Promise<any> {
-  const data = await phpHtml('register', { username, email, password })
+  // agree=1：后端强制要求明示同意协议与隐私政策
+  const data = await phpHtml('register', { username, email, password, agree: '1' })
   setMemberToken(data.data?.token || '')
   return data.data?.member
 }
