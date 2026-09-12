@@ -27,6 +27,7 @@ type ConfigItem struct {
 	ConfigKey   string `json:"config_key" binding:"required"`
 	ConfigValue string `json:"config_value" binding:"required"`
 	ValueType   string `json:"value_type"`
+	Description string `json:"description"`
 }
 
 func (h *ConfigHandler) GetAll(c *gin.Context) {
@@ -66,17 +67,40 @@ func (h *ConfigHandler) BatchUpdate(c *gin.Context) {
 
 	userID := c.GetUint64("user_id")
 
+	// 部分更新语义：后台 UI 保存时通常只提交 key+value，未提交的
+	// value_type / description / is_public 必须保留库中原值，
+	// 否则一次保存就会把类型抹成 string、把描述抹空。
+	existing, err := h.svc.GetAll()
+	if err != nil {
+		pkg.Fail(c, http.StatusInternalServerError, pkg.CodeInternalError, "failed to load existing configs")
+		return
+	}
+	cur := make(map[string]model.SystemConfig, len(existing))
+	for _, e := range existing {
+		cur[e.ConfigKey] = e
+	}
+
 	configs := make([]model.SystemConfig, 0, len(req.Configs))
 	for _, item := range req.Configs {
-		vt := item.ValueType
-		if vt == "" {
-			vt = "string"
-		}
-		configs = append(configs, model.SystemConfig{
+		merged := model.SystemConfig{
 			ConfigKey:   item.ConfigKey,
 			ConfigValue: item.ConfigValue,
-			ValueType:   vt,
-		})
+			ValueType:   item.ValueType,
+			Description: item.Description,
+		}
+		if prev, ok := cur[item.ConfigKey]; ok {
+			if merged.ValueType == "" {
+				merged.ValueType = prev.ValueType
+			}
+			if merged.Description == "" {
+				merged.Description = prev.Description
+			}
+			merged.IsPublic = prev.IsPublic
+		}
+		if merged.ValueType == "" {
+			merged.ValueType = "string"
+		}
+		configs = append(configs, merged)
 	}
 
 	if err := h.svc.BatchUpdate(configs, userID); err != nil {
