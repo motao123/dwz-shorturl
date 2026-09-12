@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>API 文档 - 短网址</title>
   <meta name="robots" content="noindex, nofollow">
+  <meta property="og:title" content="API 文档 - 短网址">
+  <meta property="og:description" content="短网址服务 RESTful 接口：单条/批量生成、API 密钥调用、跳转与统计。">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://1.xk7.cn/assets/og-cover.png">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%23111827'/><text x='50' y='68' font-size='46' font-weight='600' text-anchor='middle' fill='white' font-family='monospace'>/</text></svg>">
   <link rel="stylesheet" href="./assets/tokens.min.css?v=3366f25a">
   <style>
 /* 令牌见 assets/tokens.css（统一数据源） */
@@ -50,6 +55,30 @@ li{margin:6px 0}
   <h1>API 文档</h1>
   <p class="intro">短网址服务提供 RESTful 风格的 HTTP 接口，支持单条生成、批量生成、短链跳转与统计查询。</p>
 
+  <h2>选哪种接入方式</h2>
+
+  <table>
+    <thead><tr><th>方式</th><th>接口</th><th>鉴权</th><th>限流口径</th><th>适用</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>匿名（PHP）</strong></td>
+        <td><code>POST /api.php</code><br><code>POST /batch.php</code></td>
+        <td>无（可选 <code>csrf</code>）</td>
+        <td>按客户端 IP：单条 20 次/分钟；批量 100 次/分钟（cost = URL 条数）</td>
+        <td>临时试用、轻量脚本</td>
+      </tr>
+      <tr>
+        <td><strong>API 密钥（Go）</strong></td>
+        <td><code>POST /public/api/short-urls</code><br><code>POST /public/api/short-urls/batch</code></td>
+        <td><code>X-API-Key: dwz_xxx</code></td>
+        <td>按密钥配额（管理台「API 密钥」里可设置 <code>rate_limit</code> 次/分钟）</td>
+        <td>生产集成、需要更高配额与用量统计</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note"><strong>建议：</strong>正式集成请使用 <strong>API 密钥 + <code>/public/api/*</code></strong>。密钥在管理台「API 密钥」页创建（明文仅创建时展示一次），支持权限范围、到期时间与用量统计。</div>
+
   <h2>概述</h2>
   <ul>
     <li>所有生成接口均为 <code>application/x-www-form-urlencoded</code> 的 <strong>POST-only</strong> 接口。GET 或其他方法返回 HTTP 405 和 <code>Allow: POST</code> 头。</li>
@@ -67,7 +96,9 @@ li{margin:6px 0}
       <tr><td><code>url</code></td><td>是</td><td>目标网址。仅接受 http/https，最长 2048 字节，不可含控制字符或 URL 凭据</td></tr>
       <tr><td><code>custom</code></td><td>否</td><td>自定义短码，6–8 位 <code>[a-z0-5]</code>。留空则自动生成</td></tr>
       <tr><td><code>expire</code></td><td>否</td><td>有效天数：<code>0</code>(永久) / <code>1</code> / <code>7</code> / <code>30</code> / <code>365</code>，默认 <code>0</code></td></tr>
-      <tr><td><code>format</code></td><td>否</td><td>设为 <code>txt</code> 时返回纯文本短链（成功）或错误文本（失败）</td></tr>
+      <tr><td><code>password</code></td><td>否</td><td>访问密码。设置后访客打开短链需先输入密码解锁（解锁状态通过 HMAC Cookie 记忆 30 天）</td></tr>
+      <tr><td><code>domain</code></td><td>否</td><td>指定域名池中的域名 ID。<strong>仅登录会员生效</strong>，匿名传入会被忽略并使用默认域名</td></tr>
+      <tr><td><code>format</code></td><td>否</td><td>设为 <code>txt</code> 时返回纯文本短链（成功，仅短链本身）或错误文本（失败，HTTP 状态码仍为非 200）</td></tr>
     </tbody>
   </table>
 
@@ -135,6 +166,73 @@ https://example.com/c"</code></pre>
 
   <div class="note"><strong>请求级错误</strong>（空列表、超 100 条、body 过大、限流、方法错误）返回单个 JSON 对象而非数组，HTTP 状态码非 200。</div>
 
+  <h2>方式二：API 密钥调用 <span class="method method-post">POST</span> /public/api/short-urls</h2>
+
+  <p>使用管理台创建的 API 密钥调用，走 Go 后端，配额与用量可在后台按密钥查看。</p>
+
+  <h3>鉴权</h3>
+  <table>
+    <thead><tr><th>Header</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>X-API-Key: dwz_xxxxxxxx</code></td><td>推荐。管理台「API 密钥」页创建，明文仅创建时展示一次</td></tr>
+      <tr><td><code>Authorization: Bearer dwz_xxxxxxxx</code></td><td>备选，与 <code>X-API-Key</code> 等价</td></tr>
+    </tbody>
+  </table>
+
+  <h3>请求参数（JSON body）</h3>
+  <table>
+    <thead><tr><th>参数</th><th>必填</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td><code>url</code></td><td>是</td><td>目标网址，仅接受 http/https</td></tr>
+      <tr><td><code>custom</code></td><td>否</td><td>自定义短码，6–8 位 <code>[a-z0-5]</code></td></tr>
+      <tr><td><code>expire_days</code></td><td>否</td><td><strong>数字天数</strong>（与 PHP 版 <code>expire</code> 的枚举语义不同），<code>0</code> 表示永久</td></tr>
+      <tr><td><code>domain_id</code></td><td>否</td><td>域名池中的域名 ID，不传则用默认域名</td></tr>
+      <tr><td><code>password</code></td><td>否</td><td>访问密码</td></tr>
+    </tbody>
+  </table>
+
+  <h3>curl 示例</h3>
+  <pre><code>curl -X POST https://1.xk7.cn/public/api/short-urls \
+  -H "X-API-Key: dwz_xxxxxxxxxxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/long-page","custom":"mylink","expire_days":30}'</code></pre>
+
+  <h3>成功响应 (HTTP 200)</h3>
+  <pre><code>{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "uid": "mylink",
+    "short_url": "https://1.xk7.cn/mylink",
+    "long_url": "https://example.com/long-page",
+    "expire_at": "2026-10-12T00:00:00Z",
+    "created_at": "2026-09-12T02:00:00Z"
+  }
+}</code></pre>
+
+  <h3>批量：<span class="method method-post">POST</span> /public/api/short-urls/batch</h3>
+  <p>请求体 <code>{"urls":["https://a.com","https://b.com"],"domain_id":1}</code>（1–100 条）。响应含成功列表与 <code>error_items</code>（携带输入下标与原因）：</p>
+  <pre><code>{
+  "code": 0,
+  "msg": "success",
+  "data": {
+    "results": [ { "index": 0, "uid": "abc123", "short_url": "https://1.xk7.cn/abc123" } ],
+    "error_items": [ { "index": 1, "message": "url host not allowed" } ]
+  }
+}</code></pre>
+
+  <h3>错误码对照</h3>
+  <table>
+    <thead><tr><th>HTTP</th><th>含义</th><th>处理建议</th></tr></thead>
+    <tbody>
+      <tr><td>401</td><td>缺少或无法识别的 API 密钥</td><td>检查 <code>X-API-Key</code> 是否完整、是否已吊销</td></tr>
+      <tr><td>403</td><td>密钥已过期或无该操作权限</td><td>在管理台续期或调整密钥权限</td></tr>
+      <tr><td>429</td><td>超出该密钥的配额</td><td>按 <code>Retry-After</code> 退避，或提高密钥 <code>rate_limit</code></td></tr>
+      <tr><td>400</td><td>参数校验失败（URL 非法、短码格式错等）</td><td>读取 <code>msg</code>；批量场景按 <code>error_items[].index</code> 定位行号</td></tr>
+      <tr><td>500</td><td>服务内部错误</td><td>稍后重试；持续失败请查看后端日志</td></tr>
+    </tbody>
+  </table>
+
   <h2>短链跳转：<span class="method method-get">GET</span> /{code}</h2>
 
   <p>通过 Web 服务器重写规则，<code>/{6-8位短码}</code> 映射到 <code>do.php?uid={code}</code>。</p>
@@ -149,10 +247,16 @@ https://example.com/c"</code></pre>
     </tbody>
   </table>
 
-  <p>所有跳转响应携带缓存控制头：</p>
+  <p>密码保护短链会先返回解锁页（HTTP 200），输入正确密码后才 302 跳转；密码错误返回 200 并展示错误提示。</p>
+
+  <p>所有跳转响应携带缓存与索引控制头：</p>
   <pre><code>Cache-Control: no-store, private, max-age=0
 Pragma: no-cache
-Expires: 0</code></pre>
+Expires: 0
+Referrer-Policy: no-referrer
+X-Robots-Tag: noindex, nofollow</code></pre>
+
+  <div class="note"><strong>说明：</strong>短码是 302 跳板而非落地页，因此响应带 <code>X-Robots-Tag: noindex</code>，且不会出现在 <code>sitemap.xml</code> 中。</div>
 
   <h2>统计页：<span class="method method-get">GET</span> stats.php</h2>
 

@@ -42,6 +42,11 @@
   var memberUser = document.getElementById('memberUser');
   var memberLogoutBtn = document.getElementById('memberLogoutBtn');
 
+  var navToggle = document.getElementById('navToggle');
+  var headerNav = document.getElementById('headerNav');
+  var batchGate = document.getElementById('batch-gate');
+  var qrDownloadButton = document.getElementById('qrDownloadBtn');
+
   var memberState = { loggedIn: false, csrf: '' };
 
   function endpoint(file) {
@@ -192,9 +197,17 @@
     renderQr();
     qrButton.textContent = '隐藏二维码';
     qrButton.setAttribute('aria-expanded', 'true');
+    if (qrDownloadButton) qrDownloadButton.hidden = false;
     dialogBackdrop.hidden = false;
     document.body.classList.add('dialog-open');
-    dialogClose.focus();
+    // 焦点落在刚生成的短链输入框上（并选中），键盘用户一次 Tab 即可复制；
+    // 关闭按钮仍在 tab 序列内，用 Esc / Shift+Tab 依然可达。
+    if (resultInput && typeof resultInput.focus === 'function') {
+      resultInput.focus();
+      if (typeof resultInput.select === 'function') resultInput.select();
+    } else {
+      dialogClose.focus();
+    }
   }
 
   function closeDialog() {
@@ -359,6 +372,8 @@
   batchForm.addEventListener('submit', async function (event) {
     event.preventDefault();
     if (!memberState.loggedIn) {
+      // 输入内容先落 sessionStorage，登录回来自动回填，避免整页跳转丢失粘贴的列表
+      saveBatchDraft();
       announce('批量生成需要登录，正在跳转…', true);
       window.location.href = '/member/login?redirect=' + encodeURIComponent('/#batch');
       return;
@@ -392,12 +407,58 @@
     }
   });
 
-  batchInput.addEventListener('input', updateBatchCount);
+  batchInput.addEventListener('input', function () {
+    updateBatchCount();
+    saveBatchDraft();
+  });
   urlInput.addEventListener('input', function () { urlInput.removeAttribute('aria-invalid'); });
   customInput.addEventListener('input', function () {
     customInput.value = customInput.value.toLowerCase().replace(/[^a-z0-5]/g, '').slice(0, 8);
     customInput.removeAttribute('aria-invalid');
   });
+
+  if (navToggle) {
+    navToggle.addEventListener('click', function () {
+      setNavOpen(!headerNav.classList.contains('is-open'));
+    });
+    // 点击菜单内链接后收起面板；点击面板外区域同样收起
+    headerNav.addEventListener('click', function (event) {
+      if (event.target.closest('a')) setNavOpen(false);
+    });
+    document.addEventListener('click', function (event) {
+      if (!headerNav.classList.contains('is-open')) return;
+      if (headerNav.contains(event.target) || navToggle.contains(event.target)) return;
+      setNavOpen(false);
+    });
+  }
+
+  // 二维码下载：canvas → PNG（本地生成，不依赖第三方服务）
+  if (qrDownloadButton) {
+    qrDownloadButton.addEventListener('click', function () {
+      var canvas = qrBox.querySelector('canvas');
+      if (!canvas) {
+        var img = qrBox.querySelector('img');
+        if (img) {
+          var link = document.createElement('a');
+          link.href = img.src;
+          link.download = 'short-url-qrcode.png';
+          link.click();
+          return;
+        }
+        announce('二维码尚未生成，请稍后重试', true);
+        return;
+      }
+      try {
+        var a = document.createElement('a');
+        a.href = canvas.toDataURL('image/png');
+        a.download = 'short-url-qrcode.png';
+        a.click();
+        announce('二维码已下载');
+      } catch (e) {
+        announce('二维码下载失败，请长按图片保存', true);
+      }
+    });
+  }
 
   dialogClose.addEventListener('click', closeDialog);
   dialogBackdrop.addEventListener('click', function (event) {
@@ -485,6 +546,49 @@
       memberUser.hidden = true;
       memberUser.textContent = '';
     }
+    setBatchGate();
+  }
+
+  // 批量区未登录时的引导态：直接显示「登录后可用」而不是等提交才整页跳走，
+  // 用户已粘贴的内容用 sessionStorage 暂存，登录回来可自动回填。
+  function setBatchGate() {
+    if (!batchGate) return;
+    var gated = !memberState.loggedIn;
+    batchGate.hidden = !gated;
+    if (batchInput) batchInput.setAttribute('aria-describedby', gated ? 'batch-help batch-gate' : 'batch-help');
+    if (batchButton) {
+      batchButton.dataset.gated = gated ? '1' : '';
+      batchButton.title = gated ? '批量生成需要登录' : '';
+    }
+  }
+
+  var BATCH_DRAFT_KEY = 'dwz:batch-draft';
+
+  function saveBatchDraft() {
+    if (!batchInput) return;
+    try {
+      if (batchInput.value.trim() === '') window.sessionStorage.removeItem(BATCH_DRAFT_KEY);
+      else window.sessionStorage.setItem(BATCH_DRAFT_KEY, batchInput.value);
+    } catch (e) { /* 隐私模式下不可用，忽略 */ }
+  }
+
+  function restoreBatchDraft() {
+    if (!batchInput) return;
+    try {
+      var draft = window.sessionStorage.getItem(BATCH_DRAFT_KEY);
+      if (draft && batchInput.value === '') {
+        batchInput.value = draft;
+        updateBatchCount();
+      }
+    } catch (e) { /* 忽略 */ }
+  }
+
+  // 移动端折叠菜单（会员入口在移动端唯一可达路径）
+  function setNavOpen(open) {
+    if (!headerNav || !navToggle) return;
+    headerNav.classList.toggle('is-open', open);
+    navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    navToggle.setAttribute('aria-label', open ? '收起导航菜单' : '展开导航菜单');
   }
 
   // 获取当前登录态 + CSRF token（用于批量接口）
@@ -503,6 +607,8 @@
       }
     } catch (e) {
       setMemberUI(null);
+    } finally {
+      setBatchGate();
     }
   }
 
@@ -535,7 +641,12 @@
         credentials: 'same-origin',
         signal: AbortSignal.timeout ? AbortSignal.timeout(5000) : undefined
       });
-      if (!response.ok) return;
+      if (!response.ok) {
+        // 非 Docker 部署若未配置 /admin/api 反代，这里会 404：
+        // 显式告知而不是静默隐藏下拉框，避免「域名池选不中」无任何反馈。
+        announce('域名列表加载失败（将使用默认域名）', true);
+        return;
+      }
       var domains = await response.json();
       var list = Array.isArray(domains) ? domains : (domains && domains.data ? domains.data : []);
       if (!list.length) return;
@@ -549,7 +660,8 @@
       domainField.hidden = false;
       domainField.classList.add('fade-in');
     } catch (e) {
-      // Domains API unavailable, keep selector hidden
+      // 网络异常同样显式提示：多域名用户需要知道短链会落到默认域名
+      announce('域名列表加载失败（将使用默认域名）', true);
     }
   }
 
@@ -573,6 +685,8 @@
       });
   }
 
+  restoreBatchDraft();
+  setBatchGate();
   loadDomains();
   loadMemberState();
   checkHealth();

@@ -98,6 +98,15 @@ logLine("数据库就绪：{$dbName}（单库模式：管理表与公共表同�
 // 迁移二进制由镜像内置（backend/cmd/migrate）。它按目录扫描执行全部迁移，
 // 并把版本写入 schema_migrations；单库模式下两个角色解析到同一个库，
 // 因此版本表只有一张、不会出现「一边已应用一边待应用」。
+// 邮件配置：全部来自环境变量（见 .env.example「邮件（SMTP）」段）。
+$smtpHost = env('SMTP_HOST', '');
+$smtpPort = env('SMTP_PORT', '465');
+$smtpUser = env('SMTP_USER', '');
+$smtpPassword = env('SMTP_PASSWORD', '');
+$smtpFrom = env('SMTP_FROM', '') !== '' ? env('SMTP_FROM', '') : $smtpUser;
+$smtpFromName = env('SMTP_FROM_NAME', '陌涛短链');
+$smtpSSL = !in_array(strtolower((string) env('SMTP_SSL', 'true')), array('0', 'false', 'no'), true);
+
 $configDir = '/app/configs';
 if (!is_dir($configDir) && !@mkdir($configDir, 0700, true)) {
     fatal("无法创建配置目录 {$configDir}");
@@ -135,12 +144,28 @@ $yaml = "server:\n"
     . "  batch_max: 100\n"
     . "  batch_window: 60\n"
     . "log:\n"
-    . "  level: info\n";
+    . "  level: info\n"
+    // 邮件（可选）：不填 host/user/password 时后端会明确提示「邮件服务未配置」，
+    // 而不是泛化的发送失败，方便自助部署者定位。
+    . "smtp:\n"
+    . "  host: " . yamlQuote($smtpHost) . "\n"
+    . "  port: " . (int) $smtpPort . "\n"
+    . "  user: " . yamlQuote($smtpUser) . "\n"
+    . "  password: " . yamlQuote($smtpPassword) . "\n"
+    . "  from: " . yamlQuote($smtpFrom) . "\n"
+    . "  from_name: " . yamlQuote($smtpFromName) . "\n"
+    . "  ssl: " . ($smtpSSL ? 'true' : 'false') . "\n";
 if (file_put_contents($yamlPath, $yaml, LOCK_EX) === false) {
     fatal("写入 {$yamlPath} 失败");
 }
 @chmod($yamlPath, 0600);
 logLine('已生成迁移用 config.yaml（0700 目录 / 0600 文件）');
+if ($smtpHost === '' || $smtpUser === '' || $smtpPassword === '') {
+    logLine('⚠️ 未配置 SMTP：会员「忘记密码」与邮箱验证不可用（批量生成需邮箱已验证）。');
+    logLine('   如需启用，请在 .env 填写 SMTP_HOST / SMTP_USER / SMTP_PASSWORD 后重启 init 容器。');
+} else {
+    logLine("📧 SMTP 已配置：{$smtpHost}:{$smtpPort}（发件人 {$smtpFrom}）");
+}
 
 function yamlQuote(string $v): string
 {

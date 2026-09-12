@@ -124,7 +124,7 @@ a:hover { color: var(--link-deep); }
   transition: background 0.12s, border-color 0.12s, color 0.12s, opacity 0.12s;
 }
 /* 营销尺度：墨黑 / 白 pill（100px 圆角，约 48px 高） */
-.btn-primary, .btn-secondary {
+.btn-primary, .btn-secondary, .btn-ghost {
   font-size: 16px; font-weight: 500; line-height: 1.2;
   min-height: 48px; padding: 0 24px;
   border-radius: var(--r-pill);
@@ -133,6 +133,9 @@ a:hover { color: var(--link-deep); }
 .btn-primary:hover { background: #000; color: var(--on-primary); text-decoration: none; }
 .btn-secondary { background: var(--canvas); color: var(--ink); border: 1px solid var(--hairline); }
 .btn-secondary:hover { background: var(--canvas-soft-2); color: var(--ink); text-decoration: none; }
+/* 次级中的次级：用于「查看源码」这类弱引导 */
+.btn-ghost { background: transparent; color: var(--ink-soft, var(--ink)); border: 1px solid transparent; }
+.btn-ghost:hover { background: var(--canvas-soft-2); color: var(--ink); text-decoration: none; }
 /* 导航尺度：6px 方角（nav-cta） */
 .btn-nav, .btn-nav-primary {
   font-size: 14px; font-weight: 500; line-height: 1.2;

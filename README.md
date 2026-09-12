@@ -156,6 +156,29 @@ docker compose logs init  # 看初始化结果，会打印管理台地址与登�
 
 > 进阶：需要单独拆分数据库/Redis/前后端时，用 `deploy/docker-compose.yml`（分库部署，行为与旧版一致）。
 
+##### 邮件配置（可选，但强烈建议）
+
+不配置 SMTP 的后果是**功能静默不可用**：
+
+- 会员「忘记密码」发不出重置邮件 → 等于死路；
+- 注册验证邮件发不出去 → 而批量生成要求邮箱已验证 → **批量功能对自助部署者永久不可用**。
+
+在 `.env` 里补上这几项（其余按需）：
+
+```ini
+SMTP_HOST=smtp.qq.com          # 任意 SMTP 服务商
+SMTP_PORT=465                  # 465=隐式 TLS，587=STARTTLS
+SMTP_USER=noreply@example.com  # 完整邮箱地址
+SMTP_PASSWORD=你的SMTP授权码    # 注意是授权码，不是邮箱登录密码
+SMTP_FROM=noreply@example.com  # 留空则复用 SMTP_USER
+SMTP_FROM_NAME=陌涛短链
+SMTP_SSL=true
+```
+
+改完执行 `docker compose up -d --force-recreate init` 让 init 重新生成 `config.yaml`（会打印 `📧 SMTP 已配置` 或未配置提醒）。
+
+源码部署则在 `backend/configs/config.yaml` 里填写同名的 `smtp:` 段（见 `config.example.yaml`）。未配置时接口会返回「邮件服务未配置，请联系管理员」，而不是笼统的发送失败。
+
 ##### 单库 vs 分库
 
 | | 单库（`docker-compose.yml`） | 分库（`deploy/docker-compose.yml`） |
@@ -369,6 +392,8 @@ php migrations/build_assets.php --check
 | [🔬 深度分析报告](docs/ANALYSIS_REPORT_2026-08.md) | 功能/UI/交互/架构四维审计 + 13 批修复记录 |
 | [🧩 列表页 composable](docs/frontend-list-composables.md) | `useListPage` 等组合式函数：分页/筛选/批量/导出的统一契约与用法 |
 | [🧩 分区维护](docs/partition-maintenance.md) | click_logs 月度分区：覆盖目标、告警阈值、幂等补齐与生产注意事项 |
+| [🖥️ 管理台使用手册](docs/admin-guide.md) | 面向运营：登录与 2FA、RBAC 角色矩阵、域名池、API 密钥、Webhook、违规复核、审计与监控 |
+| [🧰 宝塔 / 单机部署](docs/deploy-baota.md) | 非 Docker 部署：nginx 反代四条规则、Go 后端启动、一键迁移与上线自查清单 |
 | [🛡️ 依赖风险与安全扫描](docs/SECURITY_SCAN.md) | PR 增量门禁 / 仓库级降噪 / 存量告警分类：哪些会阻断、哪些只记录 |
 | [🖥️ 项目官网](https://motao123.github.io/dwz-shorturl/) | GitHub Pages 宣传站（由 Actions 自动构建，Vercel 极简浅色设计语言，见 site/DESIGN.md） |
 
@@ -410,7 +435,10 @@ cd backend && go build ./... && go vet ./... && go test ./...
 cd frontend && npm run build && npm test && npm audit
 
 # PHP：语法检查 + 静态资源产物是否最新
-php -l api.php && php migrations/build_assets.php --check
+# ⚠️ 顺序很重要：首次需先 build 生成 assets/*.min.css|min.js 与版本号，再 check；
+#    只跑 --check 会因为没有产物而失败（这不是代码问题）。
+php migrations/build_assets.php          # 首次 / 改动 assets 下的源文件后
+php -l api.php && php migrations/build_assets.php --check   # 提交前校验
 ```
 
 > 单测覆盖：统计参数与点击计数、短链批量下标对齐、迁移注册表契约、GeoIP/SSRF/限流、分区维护；
@@ -432,7 +460,7 @@ php -l api.php && php migrations/build_assets.php --check
 
 [MIT License](LICENSE) · 作者：**陌涛**
 
-使用与转载请保留署名与项目说明。生产部署请务必修改默认密码（`admin123`）并妥善保管数据库凭据。
+使用与转载请保留署名与项目说明。生产部署请使用强密码并妥善保管数据库凭据：管理台密码由 `ADMIN_PASSWORD`（Docker）或 `setup.php` 交互输入设置，**基线 schema 不预置任何默认口令**；忘记时用 `RESET_ADMIN_PASSWORD=1` 重启 init 容器，或运行 `go run ./cmd/createadmin -reset` 重置。
 
 <div align="center">
 

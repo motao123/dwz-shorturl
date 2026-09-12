@@ -53,7 +53,7 @@ type MemberDevice struct {
 
 type MemberApiService interface {
 	ListLinks(memberID uint64, page, perPage int, keyword, status string) ([]model.ShortUrl, int64, error)
-	CreateLink(memberID uint64, url, title, custom string, expireDays int, ip, password string) (*model.ShortUrl, error)
+	CreateLink(memberID uint64, url, title, custom string, expireDays int, ip, password string, domainID *uint64) (*model.ShortUrl, error)
 	BatchCreateLinks(memberID uint64, urls []string, ip string) ([]MemberBatchResult, error)
 	DeleteLink(memberID, linkID uint64) error
 	Me(memberID uint64) (*model.Member, error)
@@ -157,7 +157,7 @@ func (s *memberApiService) listByStatus(memberID uint64, page, perPage int, keyw
 	return list, total, err
 }
 
-func (s *memberApiService) CreateLink(memberID uint64, url, title, custom string, expireDays int, ip, password string) (*model.ShortUrl, error) {
+func (s *memberApiService) CreateLink(memberID uint64, url, title, custom string, expireDays int, ip, password string, domainID *uint64) (*model.ShortUrl, error) {
 	url = trimSpace(url)
 	if err := validateURL(url); err != nil {
 		return nil, err
@@ -210,6 +210,7 @@ func (s *memberApiService) CreateLink(memberID uint64, url, title, custom string
 			Title:        strings.TrimSpace(title),
 			URLHash:      hash,
 			MemberID:     &memberID,
+			DomainID:     domainID,
 			Status:       1,
 			ExpireAt:     expireAt,
 			PasswordHash: passwordHash,
@@ -479,7 +480,8 @@ func (s *memberApiService) RequestPasswordReset(email string) error {
 		return err
 	}
 	if s.email == nil || !s.email.Enabled() {
-		return errors.New("邮件服务未配置")
+		// 面向用户的引导型文案：说清「不可用」以及「找谁」，避免用户以为是自己邮箱的问题。
+		return errors.New("邮件服务未配置，暂无法发送重置邮件，请联系管理员")
 	}
 	link := emailBaseURL() + "/member/reset?token=" + token
 	body := "您好，\n\n我们收到重置您短链账号密码的请求。请点击以下链接设置新密码（30 分钟内有效）：\n\n" + link + "\n\n如果不是您本人操作，请忽略此邮件。\n—— 陌涛短链"
@@ -528,7 +530,7 @@ func (s *memberApiService) SendVerification(email string) error {
 		return err
 	}
 	if s.email == nil || !s.email.Enabled() {
-		return errors.New("邮件服务未配置")
+		return errors.New("邮件服务未配置，验证邮件无法发送，请联系管理员")
 	}
 	link := emailBaseURL() + "/member/verify?token=" + token
 	body := "您好，\n\n感谢注册短链账号。请点击以下链接验证您的邮箱（24 小时内有效）：\n\n" + link + "\n\n如果这不是您的操作，请忽略此邮件。\n—— 陌涛短链"
@@ -592,7 +594,7 @@ func (s *memberApiService) ImportLinks(memberID uint64, content string, ip strin
 			expireDays, _ = strconv.Atoi(strings.TrimSpace(parts[3]))
 		}
 		row := MemberBatchResult{URL: url}
-		record, err := s.CreateLink(memberID, url, title, custom, expireDays, ip, "")
+		record, err := s.CreateLink(memberID, url, title, custom, expireDays, ip, "", nil)
 		if err != nil {
 			row.Error = err.Error()
 		} else {
@@ -631,7 +633,7 @@ func (s *memberApiService) BatchCreateLinks(memberID uint64, urls []string, ip s
 			continue
 		}
 		row := MemberBatchResult{URL: u}
-		record, err := s.CreateLink(memberID, u, "", "", 0, ip, "")
+		record, err := s.CreateLink(memberID, u, "", "", 0, ip, "", nil)
 		if err != nil {
 			row.Error = err.Error()
 		} else {
