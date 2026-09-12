@@ -56,7 +56,7 @@ smtp:
   user: ""              # full mailbox address, e.g. noreply@example.com
   password: ""          # SMTP authorization code (NOT the mailbox login password)
   from: ""              # sender address shown to recipients
-  from_name: "陌涛短链"  # sender display name
+  from_name: "短网址"  # sender display name
   ssl: true
 
 # GeoIP country resolution for click analytics. Set db_path to an ip2region v1

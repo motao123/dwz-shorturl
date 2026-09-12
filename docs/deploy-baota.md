@@ -83,7 +83,19 @@ location = /health { proxy_pass http://dwz_backend/health; }
 
 ### Apache 用户
 
-`.htaccess` 里已给出 `mod_proxy` 版本的反代规则（默认注释）。共享虚拟主机通常禁用 `mod_proxy`，此时管理台/会员中心不可用，只能走纯 PHP 形态。
+`.htaccess` 已内置两套方案，**默认启用方案 B**，共享虚拟主机开箱可用：
+
+- **方案 A（原生反代，性能优先）**：主机启用 `mod_proxy` 时，取消 `.htaccess` 里 `mod_proxy` 段的注释即可。
+- **方案 B（PHP 兜底，默认启用）**：把 `/admin/api`、`/member/api`、`/public/api`、`/health` 重写到同目录的 `api_proxy.php`，由它用 curl 转发到 `127.0.0.1:8080`。**不依赖 `mod_proxy`**，功能与 nginx 反代一致，代价是多一次 PHP 往返。
+
+要求与排查：
+
+1. Apache 开启 `AllowOverride All`（至少 `FileInfo`）与 `mod_rewrite`；
+2. PHP ≥ 8.0，启用 `mysqli` 与 `curl` 扩展（缺 `curl` 时 `api_proxy.php` 会返回明确的 502 提示，而不是静默 404）；
+3. Go 后端需监听 `127.0.0.1:8080`；地址不同时设置环境变量 `DWZ_BACKEND`；
+4. 若站点为**纯 PHP 形态**（不起 Go 后端），把 `.htaccess` 中方案 B 整段注释掉：前台 `do.php` / `api.php` / `batch.php` / `member.php` 完全可用，仅管理台「域名池」与会员中心接口不可用。
+
+**症状自查**：管理台「域名池」为空、短链总落在主域名、会员中心登录后接口 404 —— 都说明接口未转发，请检查上面第 1–3 点。
 
 ### 短链跳转路径
 

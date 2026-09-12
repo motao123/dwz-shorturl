@@ -24,6 +24,7 @@ $targets = array(
     'tokens.css' => 'tokens.min.css',
     'app.css'    => 'app.min.css',
     'app.js'     => 'app.min.js',
+    'api.css'    => 'api.min.css',
 );
 
 $checkOnly = in_array('--check', $argv, true);
@@ -172,6 +173,7 @@ foreach ($htmlFiles as $htmlFile) {
     $html = preg_replace('~\./assets/tokens(?:\.min)?\.css(?:\?v=[^"\']*)?~', './assets/tokens.min.css?v=' . $options['tokens.css'], $html);
     $html = preg_replace('~\./assets/app\.min\.css(?:\?v=[^"\']*)?|\./assets/app\.css(?:\?v=[^"\']*)?~', './assets/app.min.css?v=' . $options['app.css'], $html);
     $html = preg_replace('~\./assets/app\.min\.js(?:\?v=[^"\']*)?|\./assets/app\.js(?:\?v=[^"\']*)?~', './assets/app.min.js?v=' . $options['app.js'], $html);
+    $html = preg_replace('~\./assets/api\.min\.css(?:\?v=[^"\']*)?|\./assets/api\.css(?:\?v=[^"\']*)?~', './assets/api.min.css?v=' . $options['api.css'], $html);
     if ($html !== $original) {
         file_put_contents($htmlPath, $html);
         fwrite(STDOUT, "versioned: {$htmlFile}\n");

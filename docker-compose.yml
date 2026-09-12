@@ -89,7 +89,7 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
-      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-陌涛短链}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-短网址}
       SMTP_SSL: ${SMTP_SSL:-true}
     volumes:
       # 迁移工具生成的 config.yaml 与前台 config.php 都落在共享卷：
