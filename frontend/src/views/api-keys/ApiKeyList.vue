@@ -89,8 +89,16 @@ async function handleCreate() {
       rate_limit: Number(form.rate_limit),
       expires_days: form.expires_days
     })
-    createdKey.value = res.api_key
-    createdName.value = res.name
+    // 契约已统一到扁平结构（api_key/name）；兼容旧的 key/plain_text 嵌套返回，
+    // 避免后端版本不一致时弹窗渲染 undefined、用户永远拿不到明文密钥。
+    const legacy = res as unknown as { key?: { name?: string }; plain_text?: string }
+    const plain = res.api_key || legacy.plain_text || ''
+    if (!plain) {
+      ElMessage.error('服务未返回密钥明文，请刷新页面后在「密钥列表」中重新创建')
+      return
+    }
+    createdKey.value = plain
+    createdName.value = res.name || legacy.key?.name || ''
     createVisible.value = false
     resultVisible.value = true
     loadData()

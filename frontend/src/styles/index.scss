@@ -150,6 +150,14 @@ body {
   padding: 8px 16px 6px;
 }
 
+/* P2-7：窄屏（<900px）隐藏次要列，避免表格只能靠横向滚动浏览。
+   保留短码、目标 URL、点击数、状态与固定操作列。 */
+@media (max-width: 900px) {
+  .el-table .col-secondary {
+    display: none;
+  }
+}
+
 .app-pager {
   display: flex;
   justify-content: flex-end;

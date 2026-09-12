@@ -44,6 +44,21 @@ log:
   level: info
   file: ""
 
+# Outgoing mail (SMTP). OPTIONAL, but without it:
+#   - "forgot password" cannot send the reset link (users are locked out);
+#   - member email verification never arrives, and batch creation requires a
+#     verified email -> batch stays unusable for self-hosted instances.
+# Leave host/user/password empty to disable mail (endpoints then return an
+# explicit "mail service not configured" error instead of silently failing).
+smtp:
+  host: ""              # e.g. smtp.qq.com / smtp.aliyun.com
+  port: 465             # 465 = implicit TLS, 587 = STARTTLS
+  user: ""              # full mailbox address, e.g. noreply@example.com
+  password: ""          # SMTP authorization code (NOT the mailbox login password)
+  from: ""              # sender address shown to recipients
+  from_name: "陌涛短链"  # sender display name
+  ssl: true
+
 # GeoIP country resolution for click analytics. Set db_path to an ip2region v1
 # database file (e.g. /www/server/dwz-admin/data/ip2region.db). Empty disables
 # country resolution (click_logs.country stays blank).

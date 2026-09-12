@@ -83,6 +83,14 @@ services:
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@localhost}
       APP_SECRET_KEY: ${APP_SECRET_KEY:-}
       RESET_ADMIN_PASSWORD: ${RESET_ADMIN_PASSWORD:-0}
+      # 邮件（可选）：不配置时忘记密码/邮箱验证不可用，init 会打印提醒
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-陌涛短链}
+      SMTP_SSL: ${SMTP_SSL:-true}
     volumes:
       # 迁移工具生成的 config.yaml 与前台 config.php 都落在共享卷：
       # backend 复用前者，frontend 软链后者，保证「初始化生成的配置」与

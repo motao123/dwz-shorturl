@@ -7,6 +7,15 @@ sourceLanguage: en
 sourceUrl: "https://baizhi.cloud/landing/design-prompt/detail/vercel"
 ---
 
+> ⚠️ **本文是设计语言参考稿，不是宣传站的验收标准。**
+>
+> 宣传站 `site/index.html` 借鉴了这套极简浅色体系（近白底、墨黑文字、200 阶灰度、
+> 多段 mesh gradient），但**未完全照搬**：例如 token 命名走 `--ink` / `--canvas` /
+> `--hairline` 的自有前缀，组件尺度、导航结构与海报式 hero 也按本项目调整过。
+>
+> 遇到「文档写了但页面没这么做」时，**以 `site/index.html` + `site/assets/site.css`
+> 的实际实现为准**，本文件仅作为改版时的参考下限。
+
 ## 概览
 Vercel 是开发者平台品牌；页面像 deployment dashboard 的营销表面，面向已经熟悉语法的工程师。它用网页上最克制、最干净的 stark system 之一建立这种姿态：近白 `{colors.canvas-soft}` 作为 body background，墨黑 `{colors.ink}` 作为文本，200 阶灰度让每条 divider、border、disabled state 都有明确层级。品牌唯一在 marketing scale 引入色彩的地方，是多段 mesh gradient（`{colors.gradient-develop-start}` → `{colors.gradient-preview-end}` → `{colors.gradient-ship-start}` → cyan / magenta / amber），它漂浮在氛围背景里，从不缩小成普通色块。这个 gradient 就是完整的装饰系统。
 

@@ -28,6 +28,13 @@ if (!empty($expire_at)) {
 if (!empty($password_hash)) {
     if (!password_unlock_ok($uid)) {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            // 尝试限流：每个 IP + 短码 60 秒内最多 5 次，避免密码被离线暴力穷举。
+            // 复用前台限流器（Redis/文件双实现），限流不可用时放行以保证跳转可用。
+            if (function_exists('rate_limit') && !rate_limit('pwtry:' . $uid, 5, 60)) {
+                if (!headers_sent()) header('Retry-After: 60');
+                echo password_page_html($uid, '尝试次数过多，请稍后再试');
+                exit;
+            }
             $pw = isset($_POST['password']) && is_string($_POST['password']) ? $_POST['password'] : '';
             if (password_verify($pw, (string)$password_hash)) {
                 set_password_unlock_cookie($uid);
@@ -59,6 +66,8 @@ header('Pragma: no-cache');
 header('Expires: 0');
 // 短链跳转不向目标站点泄露来源页 Referer
 header('Referrer-Policy: no-referrer');
+// 短码是 302 跳板而非落地页，不应被搜索引擎索引（sitemap 也已移除短码）
+header('X-Robots-Tag: noindex, nofollow');
 header('Location: ' . $t_url, true, 302);
 
 if (function_exists('fastcgi_finish_request')) {
@@ -84,10 +93,53 @@ function redirect_error($status, $message) {
     global $DB;
     if (!headers_sent()) {
         http_response_code($status);
-        header('Content-Type: text/plain; charset=utf-8');
+        // 与 Go 侧 renderErrorPage 使用同一套 CSS 变量 + prefers-color-scheme，
+        // 保证两条跳转路径的品牌化错误页观感一致（含暗色适配）。
+        header('Content-Type: text/html; charset=utf-8');
         header('Cache-Control: no-store');
+        header('Referrer-Policy: no-referrer');
+        header('X-Robots-Tag: noindex, nofollow');
     }
-    echo $message;
+
+    // 按语义映射到访客可读的文案；「目标无效」面向站长，与「已过期」区分开。
+    $map = array(
+        410 => array('⏳', '这个短链已过期', '链接的有效期已结束。请联系分享者重新生成一条。'),
+        404 => array('🔍', '短链不存在', '这个短码没有对应的链接，可能输入有误或已被删除。'),
+        500 => array('🛠️', '服务暂时不可用', '服务器出了点问题，请稍后重试。'),
+    );
+    $page = isset($map[$status]) ? $map[$status] : array('⚠️', '链接暂时无法访问', '该链接当前不可访问。');
+    if ($message === '短链已禁用') {
+        $page = array('🚫', '这个短链已被停用', '分享者或平台已停用该链接。如有疑问请联系分享者。');
+    } elseif ($message === '短链目标无效') {
+        $page = array('⚠️', '这个短链暂时无法访问', '目标地址未通过安全检查（可能指向内网或非法站点）。如果这是你自己的链接，请重新创建。');
+    }
+    $title = htmlspecialchars($page[1], ENT_QUOTES, 'UTF-8');
+    $desc = htmlspecialchars($page[2], ENT_QUOTES, 'UTF-8');
+    echo '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+        . '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        . '<title>' . $title . ' - 短网址</title>'
+        . '<meta name="robots" content="noindex">'
+        . '<meta name="referrer" content="no-referrer">'
+        . '<style>'
+        . ':root{--ep-page:#f2f5f7;--ep-card:#fff;--ep-line:#e4ecee;--ep-text:#16292b;--ep-dim:#6b7f86;--ep-brand:#0e6e75;--ep-brand-hover:#0a5a60}'
+        . '@media (prefers-color-scheme:dark){:root{--ep-page:#0d1b20;--ep-card:#122027;--ep-line:#23343b;--ep-text:#e6edf0;--ep-dim:#9aa9ae;--ep-brand:#12909a;--ep-brand-hover:#0e6e75}}'
+        . '*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--ep-page);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ep-text)}'
+        . '.card{width:min(92vw,400px);background:var(--ep-card);border:1px solid var(--ep-line);border-radius:14px;padding:32px 26px;text-align:center;box-shadow:0 8px 30px rgba(14,110,117,.08)}'
+        . '.icon{font-size:36px;margin:0 0 10px}h1{font-size:18px;margin:0 0 10px;font-weight:700}'
+        . 'p{font-size:13.5px;line-height:1.7;color:var(--ep-dim);margin:0 0 22px}'
+        . '.actions{display:flex;gap:10px;flex-direction:column}'
+        . 'a.btn{display:block;padding:11px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;background:var(--ep-brand);color:#fff}'
+        . 'a.btn:hover{background:var(--ep-brand-hover)}'
+        . 'a.btn.ghost{background:transparent;color:var(--ep-brand);border:1px solid var(--ep-line)}'
+        . '.slogan{margin-top:18px;font-size:12px;color:var(--ep-dim)}'
+        . '</style></head><body><div class="card">'
+        . '<p class="icon">' . $page[0] . '</p>'
+        . '<h1>' . $title . '</h1>'
+        . '<p>' . $desc . '</p>'
+        . '<div class="actions"><a class="btn" href="./">返回首页</a>'
+        . '<a class="btn ghost" href="./#single">重新生成短链</a></div>'
+        . '<p class="slogan">短网址 · 一次生成，随处链接</p>'
+        . '</div></body></html>';
     if (isset($DB)) $DB->close();
     exit();
 }

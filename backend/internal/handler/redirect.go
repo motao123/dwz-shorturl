@@ -16,6 +16,7 @@ import (
 
 	"dwz-admin/internal/config"
 	"dwz-admin/internal/model"
+	"dwz-admin/internal/pkg"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -249,12 +250,22 @@ func countClicksPerURL(events []ClickEvent) map[uint64]uint32 {
 var shortCodeRegex = regexp.MustCompile(`^[a-z0-5]{6,8}$`)
 
 type RedirectHandler struct {
-	svc       ShortUrlResolver
-	rdb       *redis.Client
-	db        *gorm.DB
-	logger    *zap.Logger
+	svc        ShortUrlResolver
+	rdb        *redis.Client
+	db         *gorm.DB
+	logger     *zap.Logger
 	clickQueue *ClickQueue
+	// 密码保护短链的尝试限流（P2-12）：此前可无限次尝试，没有任何节流。
+	// 复用限流器实现（Redis 计数），Redis 不可用时退化为不限流（保证跳转可用）。
+	pwLimiter *pkg.RateLimiter
 }
+
+// passwordAttemptMax / passwordAttemptWindow：每个 IP + 短码 60 秒内最多 5 次。
+// 阈值取「够正常人手误」且「远低于暴力破解成本」。
+const (
+	passwordAttemptMax    = 5
+	passwordAttemptWindow = time.Minute
+)
 
 // ShortUrlResolver is the minimal interface the redirect handler needs
 // (decoupled from the full ShortUrlService to keep redirect.go testable).
@@ -263,13 +274,35 @@ type ShortUrlResolver interface {
 }
 
 func NewRedirectHandler(svc ShortUrlResolver, rdb *redis.Client, db *gorm.DB, logger *zap.Logger, clickQueue *ClickQueue) *RedirectHandler {
-	return &RedirectHandler{
+	h := &RedirectHandler{
 		svc:        svc,
 		rdb:        rdb,
 		db:         db,
 		logger:     logger,
 		clickQueue: clickQueue,
 	}
+	if rdb != nil {
+		h.pwLimiter = pkg.NewRateLimiter(rdb)
+	}
+	return h
+}
+
+// passwordAttemptAllowed consumes one attempt for (client IP, short code).
+// A nil limiter (no Redis) means "unlimited" so the redirect path never breaks.
+func (h *RedirectHandler) passwordAttemptAllowed(c *gin.Context, uid string) bool {
+	if h.pwLimiter == nil {
+		return true
+	}
+	key := "pwtry:" + c.ClientIP() + ":" + uid
+	ok, err := h.pwLimiter.Allow(c.Request.Context(), key, passwordAttemptMax, passwordAttemptWindow)
+	if err != nil {
+		// 限流器故障不应把访客挡在门外（可用性优先），记录后放行
+		if h.logger != nil {
+			h.logger.Warn("password attempt limiter failed", zap.Error(err))
+		}
+		return true
+	}
+	return ok
 }
 
 func (h *RedirectHandler) Redirect(c *gin.Context) {
@@ -277,7 +310,7 @@ func (h *RedirectHandler) Redirect(c *gin.Context) {
 
 	// Strict short-code format validation (matches PHP's do.php)
 	if !shortCodeRegex.MatchString(code) {
-		c.String(http.StatusNotFound, "Not Found")
+		renderErrorPage(c, http.StatusNotFound, errorPageNotFound)
 		return
 	}
 
@@ -286,16 +319,17 @@ func (h *RedirectHandler) Redirect(c *gin.Context) {
 		msg := err.Error()
 		switch {
 		case contains(msg, "expired"):
-			c.String(http.StatusGone, "短链已过期")
+			renderErrorPage(c, http.StatusGone, errorPageExpired)
 			return
 		case contains(msg, "disabled"):
-			c.String(http.StatusGone, "短链已禁用")
+			renderErrorPage(c, http.StatusGone, errorPageDisabled)
 			return
 		case contains(msg, "invalid"), contains(msg, "not allowed"):
-			c.String(http.StatusGone, "短链目标无效")
+			// 面向站长：目标 URL 未通过安全校验，与「已过期」区分文案
+			renderErrorPage(c, http.StatusGone, errorPageInvalidTarget)
 			return
 		default:
-			c.String(http.StatusNotFound, "Not Found")
+			renderErrorPage(c, http.StatusNotFound, errorPageNotFound)
 			return
 		}
 	}
@@ -306,6 +340,12 @@ func (h *RedirectHandler) Redirect(c *gin.Context) {
 	if record.PasswordHash != "" {
 		if !passwordUnlocked(c, record.UID) {
 			if c.Request.Method == http.MethodPost {
+				if !h.passwordAttemptAllowed(c, record.UID) {
+					c.Header("Retry-After", strconv.Itoa(int(passwordAttemptWindow.Seconds())))
+					c.Data(http.StatusTooManyRequests, "text/html; charset=utf-8",
+						[]byte(renderPasswordPage(record.UID, "尝试次数过多，请稍后再试")))
+					return
+				}
 				pw := c.PostForm("password")
 				if bcrypt.CompareHashAndPassword([]byte(record.PasswordHash), []byte(pw)) == nil {
 					setPasswordUnlockCookie(c, record.UID)
@@ -324,11 +364,11 @@ func (h *RedirectHandler) Redirect(c *gin.Context) {
 	// Defensive re-check: never serve a soft-deleted or expired record even if
 	// the cache/DB layer handed one back (mirrors PHP do.php's explicit checks).
 	if record.Status != 1 {
-		c.String(http.StatusNotFound, "Not Found")
+		renderErrorPage(c, http.StatusNotFound, errorPageNotFound)
 		return
 	}
 	if record.ExpireAt != nil && !record.ExpireAt.After(time.Now()) {
-		c.String(http.StatusGone, "短链已过期")
+		renderErrorPage(c, http.StatusGone, errorPageExpired)
 		return
 	}
 
@@ -402,26 +442,98 @@ func renderPasswordPage(uid, errMsg string) string {
 	msg := ""
 	if errMsg != "" {
 		title = safeErr
-		msg = `<p style="color:#c0392b;font-size:13px;margin:0 0 14px;">` + safeErr + `</p>`
+		msg = `<p class="err">` + safeErr + `</p>`
 	}
+	// 与 PHP 侧 password_page_html 使用同一套 CSS 变量 + prefers-color-scheme，
+	// 保证两条跳转路径观感一致（暗色环境下不再出现刺眼白卡）。
 	return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>` + title + `</title>
+<title>` + title + ` - 短网址</title>
+<meta name="robots" content="noindex">
 <style>
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f2f5f7;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#16292b}
-.card{width:min(92vw,360px);background:#fff;border:1px solid #e4ecee;border-radius:14px;padding:28px 24px;box-shadow:0 8px 30px rgba(14,110,117,.08)}
+:root{--pw-page:#f2f5f7;--pw-card:#fff;--pw-line:#e4ecee;--pw-text:#16292b;--pw-dim:#6b7f86;--pw-input:#d3e0e3;--pw-brand:#0e6e75;--pw-brand-hover:#0a5a60;--pw-danger:#c0392b}
+@media (prefers-color-scheme:dark){:root{--pw-page:#0d1b20;--pw-card:#122027;--pw-line:#23343b;--pw-text:#e6edf0;--pw-dim:#9aa9ae;--pw-input:#31454d;--pw-brand:#12909a;--pw-brand-hover:#0e6e75;--pw-danger:#f87171}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--pw-page);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--pw-text)}
+.card{width:min(92vw,360px);background:var(--pw-card);border:1px solid var(--pw-line);border-radius:14px;padding:28px 24px;box-shadow:0 8px 30px rgba(14,110,117,.08)}
 .lock{font-size:34px;text-align:center;margin:0 0 6px}
 h1{font-size:17px;text-align:center;margin:0 0 6px;font-weight:700}
-.sub{font-size:12.5px;text-align:center;color:#6b7f86;margin:0 0 18px}
-input{width:100%;padding:11px 12px;border:1px solid #d3e0e3;border-radius:8px;font-size:15px;outline:none}
-input:focus{border-color:#0e6e75;box-shadow:0 0 0 3px rgba(14,110,117,.12)}
-button{width:100%;margin-top:12px;padding:11px;background:#0e6e75;color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}
-button:hover{background:#0a5a60}
+.sub{font-size:12.5px;text-align:center;color:var(--pw-dim);margin:0 0 18px}
+.err{color:var(--pw-danger);font-size:13px;margin:0 0 14px}
+input{width:100%;padding:11px 12px;border:1px solid var(--pw-input);border-radius:8px;font-size:15px;outline:none;background:var(--pw-card);color:var(--pw-text)}
+input:focus{border-color:var(--pw-brand);box-shadow:0 0 0 3px rgba(14,110,117,.12)}
+button{width:100%;margin-top:12px;padding:11px;background:var(--pw-brand);color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}
+button:hover{background:var(--pw-brand-hover)}
+.brand{display:block;margin-top:16px;text-align:center;font-size:12.5px;color:var(--pw-dim);text-decoration:none}
+.brand:hover{color:var(--pw-brand)}
 </style></head><body><form class="card" method="post" action="/` + safeUID + `">
 <p class="lock">🔒</p><h1>此链接受密码保护</h1><p class="sub">请输入访问密码以继续</p>
 ` + msg + `<input type="password" name="password" placeholder="访问密码" required autofocus autocomplete="off">
 <button type="submit">解锁访问</button>
+<a class="brand" href="/">← 返回短网址首页</a>
 </form></body></html>`
+}
+
+// Error page kinds. Kept as an enum so both the handler and tests can reference
+// them without string matching.
+type errorPageKind int
+
+const (
+	errorPageNotFound errorPageKind = iota
+	errorPageExpired
+	errorPageDisabled
+	errorPageInvalidTarget
+)
+
+// errorPageContent maps a kind to the visitor-facing (title, description) pair.
+// Expired/disabled are visitor-facing; invalid target is intended for the site
+// owner but is shown to the visitor too (the owner is usually the one testing).
+func errorPageContent(kind errorPageKind) (string, string, string) {
+	switch kind {
+	case errorPageExpired:
+		return "这个短链已过期", "链接的有效期已结束。请联系分享者重新生成一条。", "⏳"
+	case errorPageDisabled:
+		return "这个短链已被停用", "分享者或平台已停用该链接。如有疑问请联系分享者。", "🚫"
+	case errorPageInvalidTarget:
+		return "这个短链暂时无法访问", "目标地址未通过安全检查（可能指向内网或非法站点）。如果这是你自己的链接，请重新创建。", "⚠️"
+	default:
+		return "短链不存在", "这个短码没有对应的链接，可能输入有误或已被删除。", "🔍"
+	}
+}
+
+// renderErrorPage writes a branded, dark-mode-aware error page instead of a bare
+// text body. The short-link landing page is the first screen a visitor sees
+// after clicking a shared link, so it carries the same brand as the homepage.
+func renderErrorPage(c *gin.Context, status int, kind errorPageKind) {
+	title, desc, icon := errorPageContent(kind)
+	body := `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>` + html.EscapeString(title) + ` - 短网址</title>
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<style>
+:root{--ep-page:#f2f5f7;--ep-card:#fff;--ep-line:#e4ecee;--ep-text:#16292b;--ep-dim:#6b7f86;--ep-brand:#0e6e75;--ep-brand-hover:#0a5a60}
+@media (prefers-color-scheme:dark){:root{--ep-page:#0d1b20;--ep-card:#122027;--ep-line:#23343b;--ep-text:#e6edf0;--ep-dim:#9aa9ae;--ep-brand:#12909a;--ep-brand-hover:#0e6e75}}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--ep-page);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ep-text)}
+.card{width:min(92vw,400px);background:var(--ep-card);border:1px solid var(--ep-line);border-radius:14px;padding:32px 26px;text-align:center;box-shadow:0 8px 30px rgba(14,110,117,.08)}
+.icon{font-size:36px;margin:0 0 10px}
+h1{font-size:18px;margin:0 0 10px;font-weight:700}
+p{font-size:13.5px;line-height:1.7;color:var(--ep-dim);margin:0 0 22px}
+.actions{display:flex;gap:10px;flex-direction:column}
+a.btn{display:block;padding:11px;border-radius:8px;font-size:14px;font-weight:600;text-decoration:none;background:var(--ep-brand);color:#fff}
+a.btn:hover{background:var(--ep-brand-hover)}
+a.btn.ghost{background:transparent;color:var(--ep-brand);border:1px solid var(--ep-line)}
+.slogan{margin-top:18px;font-size:12px;color:var(--ep-dim)}
+</style></head><body><div class="card">
+<p class="icon">` + icon + `</p>
+<h1>` + html.EscapeString(title) + `</h1>
+<p>` + html.EscapeString(desc) + `</p>
+<div class="actions">
+<a class="btn" href="/">返回首页</a>
+<a class="btn ghost" href="/#single">重新生成短链</a>
+</div>
+<p class="slogan">短网址 · 一次生成，随处链接</p>
+</div></body></html>`
+	c.Data(status, "text/html; charset=utf-8", []byte(body))
 }
 
 // Health returns detailed system health information.
