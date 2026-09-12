@@ -181,14 +181,15 @@ service.interceptors.response.use(
 /* ---------------- 便捷方法（直接返回 data） ---------------- */
 
 const request = {
-  get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    return service.get<never, T>(url, config)
-  },
-  post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
-    return service.post<never, T>(url, data, config)
-  },
+	// 四个便捷方法统一用显式收口：axios 1.18+ 各方法的重载默认泛型不再稳定
+	// 透传 R=T，依赖 <never, T> 双泛型会在部分小版本下类型报错。
+	get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+		return service.get(url, config) as unknown as Promise<T>
+	},
+	post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+		return service.post(url, data, config) as unknown as Promise<T>
+	},
 	put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
-		// axios 1.18 起 put/delete 的重载默认泛型不再透传 R=T，这里显式收口
 		return service.put(url, data, config) as unknown as Promise<T>
 	},
 	delete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
