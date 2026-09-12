@@ -1029,8 +1029,9 @@ body.dialog-open {
     gap: 16px;
   }
 
+  /* ≤768 单列：此前只在 480 才单列，768–480 区间两列会让文字卡片过窄 */
   .feature-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 12px;
     margin-top: 50px;
   }
@@ -1082,10 +1083,6 @@ body.dialog-open {
 
   .hero-copy {
     font-size: 14px;
-  }
-
-  .feature-grid {
-    grid-template-columns: 1fr;
   }
 
   .result-url-row {

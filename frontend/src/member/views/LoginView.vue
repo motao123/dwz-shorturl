@@ -111,7 +111,7 @@ async function handleForgot() {
       <el-icon :size="17"><component :is="themeStore.dark ? Sunny : Moon" /></el-icon>
     </button>
     <div class="login-card">
-      <h1 class="brand">短网址 <span>会员中心</span></h1>
+      <h1 class="brand">短网址 <span>· 会员中心</span></h1>
       <el-tabs v-model="mode" stretch>
         <el-tab-pane label="登录" name="login" />
         <el-tab-pane label="注册" name="register" />

@@ -573,9 +573,9 @@ onMounted(async () => {
     </header>
 
     <main>
-      <!-- 邮箱未验证提示 -->
-      <div v-if="member && member.email_verified === 0" class="verify-banner">
-        <span>您的邮箱尚未验证，验证后可提升账号安全。</span>
+      <!-- 邮箱未验证提示：明确说明「验证后才能用批量生成」，避免用户点到批量才被拒 -->
+      <div v-if="member && member.email_verified === 0" class="verify-banner" role="status">
+        <span>您的邮箱尚未验证。<strong>验证后可解锁批量生成</strong>，并提升账号安全。</span>
         <el-button size="small" type="primary" plain :loading="verifying" @click="handleSendVerification">发送验证邮件</el-button>
       </div>
 
