@@ -520,7 +520,7 @@ function formatExpire(row: ShortUrl): string {
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="分组" width="104">
+          <el-table-column label="分组" width="104" class-name="col-secondary">
             <template #default="{ row }">
               <span class="row-sub">{{ row.category_name || categoryName(row.category_id) }}</span>
             </template>
@@ -537,6 +537,7 @@ function formatExpire(row: ShortUrl): string {
             label="创建时间"
             width="170"
             sortable="custom"
+            class-name="col-secondary"
           >
             <template #default="{ row }">
               <span class="mono row-sub">{{ dayjs(row.created_at).format('YYYY-MM-DD HH:mm') }}</span>

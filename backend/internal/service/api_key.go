@@ -17,7 +17,19 @@ var (
 	ErrApiKeyExpired  = errors.New("api key expired")
 )
 
+// ApiKeyCreateResult is the create-key response contract, shared with the
+// admin SPA (frontend/src/api/api-keys.ts). The SPA reads api_key/name/... at
+// the top level, so the flat shape is the authoritative one; key/plain_text are
+// kept for API-key-based callers that were built against the older shape.
 type ApiKeyCreateResult struct {
+	ID        uint64     `json:"id"`
+	Name      string     `json:"name"`
+	ApiKey    string     `json:"api_key"`
+	KeyPrefix string     `json:"key_prefix"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	RateLimit int        `json:"rate_limit"`
+
+	// 兼容字段（保留旧契约，避免既有集成方解析失败）
 	Key       *model.ApiKey `json:"key"`
 	PlainText string        `json:"plain_text"`
 }
@@ -76,6 +88,12 @@ func (s *apiKeyService) Create(userID uint64, name string, permissions string, r
 	}
 
 	return &ApiKeyCreateResult{
+		ID:        key.ID,
+		Name:      key.Name,
+		ApiKey:    plainText,
+		KeyPrefix: key.KeyPrefix,
+		ExpiresAt: key.ExpiresAt,
+		RateLimit: key.RateLimit,
 		Key:       key,
 		PlainText: plainText,
 	}, nil

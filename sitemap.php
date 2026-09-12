@@ -1,7 +1,14 @@
 <?php
 /**
  * 动态生成 sitemap.xml
- * 包含首页 + 最近创建的短链（最多 500 条）
+ *
+ * 只收录「有真实内容的落地页」：首页、API 文档页。
+ *
+ * 为什么不收录短码（历史行为）：
+ *   1) 短码是 302 跳板，不是落地页，搜索引擎不会把它当作有效内容；
+ *   2) 短码属于用户生成内容，可能指向违规站点，主动提交等于给爬虫喂料；
+ *   3) 大批量跳转页会触发「跳转农场」判定，反噬主站 SEO。
+ * 短码跳转响应同时携带 X-Robots-Tag: noindex（do.php / Go redirect.go）。
  */
 header('Content-Type: application/xml; charset=utf-8');
 header('Cache-Control: no-store, private, max-age=0');
@@ -48,38 +55,9 @@ echo "    <changefreq>daily</changefreq>\n";
 echo "    <priority>1.0</priority>\n";
 echo "  </url>\n";
 
-// API 文档页
-echo "  <url>\n";
-echo "    <loc>{$base_xml}/api.html</loc>\n";
-echo "    <lastmod>{$today}</lastmod>\n";
-echo "    <changefreq>monthly</changefreq>\n";
-echo "    <priority>0.6</priority>\n";
-echo "  </url>\n";
-
-// 最近创建的短链（仅收录启用中且未过期的链接）
-// A2：增加 status=1 过滤，避免已禁用/已软删除的短链被收录并向搜索引擎提交。
-$stmt = $DB->link->prepare(
-    "SELECT uid, created_at FROM wjoy_log
-     WHERE status = 1
-       AND (expire_at IS NULL OR expire_at = '' OR expire_at > NOW())
-     ORDER BY created_at DESC LIMIT 500"
-);
-
-if ($stmt) {
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($row = $result->fetch_assoc()) {
-        $uid = htmlspecialchars($row['uid'], ENT_XML1);
-        $lastmod = date('Y-m-d', strtotime($row['created_at']));
-        echo "  <url>\n";
-        echo "    <loc>{$base_xml}/{$uid}</loc>\n";
-        echo "    <lastmod>{$lastmod}</lastmod>\n";
-        echo "    <changefreq>weekly</changefreq>\n";
-        echo "    <priority>0.4</priority>\n";
-        echo "  </url>\n";
-    }
-    $stmt->close();
-}
+// 说明：api.html 自身带 <meta name="robots" content="noindex, nofollow">（避免
+// 接口文档被搜索引擎收录为内容页），本着「不收录被 noindex 的页面」的一致性，
+// 这里也不再向 sitemap 提交 api.html。若希望收录 API 文档，请先去掉其 noindex。
 
 echo '</urlset>' . "\n";
 
