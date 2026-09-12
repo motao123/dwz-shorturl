@@ -43,6 +43,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: dwz-redis
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?redis password required}
     command: >
       redis-server --appendonly yes --maxmemory 256mb
       --maxmemory-policy allkeys-lru
@@ -123,6 +125,8 @@ services:
       context: .
       dockerfile: deploy/docker/Dockerfile.web
     container_name: dwz-frontend
+    security_opt:
+      - seccomp:unconfined
     depends_on:
       backend:
         condition: service_started
@@ -130,6 +134,8 @@ services:
         condition: service_completed_successfully
     volumes:
       - app_config:/app/configs:ro
+    tmpfs:
+      - /run/nginx
     ports:
       - "${HTTP_PORT:-80}:80"
     restart: unless-stopped

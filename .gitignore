@@ -11,6 +11,7 @@ backend/dwz-admin-linux
 domains-page.png
 
 # Production configs - never commit real credentials
+.env
 backend/configs/config.yaml
 backend/configs/config.local.yaml
 deploy/.env

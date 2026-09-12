@@ -135,6 +135,9 @@ $yaml = "server:\n"
     . "  member_secret: " . yamlQuote($appKey) . "\n"
     . "public:\n"
     . "  base_url: " . yamlQuote($publicBaseUrl) . "\n"
+    // 反代链（宿主 nginx → 容器 nginx → backend）都在 docker 内网：声明可信
+    // 网段后 backend 才会信任 X-Forwarded-For，按真实访客 IP 限流与审计。
+    . "  trusted_proxies: [\"127.0.0.1\", \"172.16.0.0/12\"]\n"
     . "redis:\n"
     . "  addr: " . yamlQuote(env('REDIS_ADDR', 'redis:6379')) . "\n"
     . "  password: " . yamlQuote(env('REDIS_PASSWORD', '')) . "\n"
@@ -266,9 +269,10 @@ $dbname = '{{DB_NAME}}';
 $public_base_url = '{{PUBLIC_BASE_URL}}';
 
 // 反向代理 IP 白名单：仅当 REMOTE_ADDR 命中此处才信任 X-Forwarded-For。
-// 代理层请使用覆盖式赋值 proxy_set_header X-Forwarded-For $remote_addr;
-// 不要用 $proxy_add_x_forwarded_for，否则客户端可自行注入 XFF 绕过限流。
-$trusted_proxies = array();
+// 容器部署的代理链（宿主 nginx → 容器 nginx → php-fpm）都在 docker 内网，
+// 必须声明网段后 PHP 才会按 X-Forwarded-For 还原真实访客 IP 做限流与审计，
+// 否则全体访客会被并成同一个限流桶（20 次/分钟全局共享，瞬间全部 429）。
+$trusted_proxies = array('127.0.0.1', '172.16.0.0/12');
 
 // 单库模式：管理库与公共库是同一个库，双写连接复用主库。
 // 不需要第二个库的账号与权限，也不会有跨库 COLLATE 差异。
@@ -287,7 +291,10 @@ if ($admin_db_same_as_main) {
     $admin_db_name = '';
 }
 
-$rate_limit_dir = __DIR__ . '/logs/ratelimit';
+// config.php 落在只读共享卷（/app/configs），限流桶必须写到容器内可写目录，
+// 与 Dockerfile 预创建的 logs/ratelimit（www-data 可写）保持一致；
+// 用 __DIR__ 会指向只读卷导致 rate_limit() 写入失败，所有请求恒为 429。
+$rate_limit_dir = '/var/www/dwz/logs/ratelimit';
 
 // 必须与后端 config.yaml 的 jwt.member_secret 一致，否则 PHP 与 Go 两条跳转
 // 路径的密码解锁 cookie 互不认可（设置了访问密码的短链永远打不开）。
