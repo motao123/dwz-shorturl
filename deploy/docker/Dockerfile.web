@@ -10,8 +10,10 @@
 # ============================================================
 FROM node:25-alpine AS assets
 WORKDIR /app
-COPY frontend/package.json ./
-RUN npm install --no-audit --no-fund --registry=https://registry.npmmirror.com
+# 连 lockfile 一起拷贝并用 npm ci：保证 axios 等依赖版本与本地/CI 完全一致，
+# 否则 npm install 漂移到更新的 1.x 小版本会出现类型/行为不一致。
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund --registry=https://registry.npmmirror.com
 COPY frontend/ ./
 RUN npm run build
 
