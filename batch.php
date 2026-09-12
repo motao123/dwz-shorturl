@@ -16,8 +16,9 @@ if (!headers_sent()) header('Content-Type: application/json; charset=utf-8');
 // 批量生成需登录后才能使用
 $member = member_require_login($DB);
 
-// 批量生成需邮箱已验证（防垃圾账号批量刷链）
-if (empty($member['email_verified']) || (int)$member['email_verified'] !== 1) {
+// 批量生成需邮箱已验证（防垃圾账号批量刷链；后台可配置豁免）
+if (system_config_bool('member.batch_requires_verified', true)
+    && (empty($member['email_verified']) || (int)$member['email_verified'] !== 1)) {
     batch_error('请先在会员中心验证邮箱后使用批量生成', 10022, 403);
 }
 
@@ -38,7 +39,9 @@ if (strlen($password) > 72) batch_error('访问密码过长（最多 72 字节�
 if (strlen($raw) > 210000) batch_error('request too large', 10011, 413);
 $lines = preg_split('/\R+/', trim($raw), -1, PREG_SPLIT_NO_EMPTY);
 if (!$lines) batch_error('urls cannot be empty', 10001, 400);
-if (count($lines) > 100) batch_error('too many urls; maximum is 100', 10012, 422);
+// 单次批量上限由后台配置（clamp 到 1..1000，防误配打爆内存）
+$maxBatchUrls = max(1, min(1000, system_config_int('batch.max_urls', 100)));
+if (count($lines) > $maxBatchUrls) batch_error('too many urls; maximum is ' . $maxBatchUrls, 10012, 422);
 if (!rate_limit(real_ip(), 100, 60, count($lines))) {
     if (!headers_sent()) header('Retry-After: 60');
     batch_error('请求过于频繁，请稍后再试', 10005, 429);

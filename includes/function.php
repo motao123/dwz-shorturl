@@ -39,20 +39,43 @@ function real_ip(){
 	return $remote;
 }
 
+// 系统配置（system_configs 表）运行时读取：每请求一次查询、进程内缓存。
+// 读取失败（无管理库连接、表不存在等）一律回落到调用方给的默认值，
+// 保证任何部署形态下功能都退化为原始硬编码行为，而不是报错。
+function system_config_map() {
+    static $map = null;
+    if ($map !== null) return $map;
+    global $ADMIN_DB;
+    $map = array();
+    if (!isset($ADMIN_DB) || !$ADMIN_DB || empty($ADMIN_DB->link)) return $map;
+    $res = @$ADMIN_DB->query('SELECT config_key, config_value FROM system_configs');
+    if ($res) {
+        while ($row = $res->fetch_assoc()) $map[$row['config_key']] = $row['config_value'];
+        $res->free();
+    }
+    return $map;
+}
+
+function system_config_string($key, $default = '') {
+    $map = system_config_map();
+    return isset($map[$key]) && $map[$key] !== '' ? $map[$key] : $default;
+}
+
+function system_config_int($key, $default) {
+    $value = system_config_string($key, null);
+    return ($value === null || !is_numeric($value)) ? $default : (int)$value;
+}
+
+function system_config_bool($key, $default) {
+    $value = system_config_string($key, null);
+    if ($value === null) return $default;
+    return in_array(strtolower(trim($value)), array('1', 'true', 'on'), true);
+}
+
 // 「仅注册使用」开关：管理员在后台 系统配置 中把 shorturl.require_registration
 // 设为 true 后，匿名访客不能建链（batch.php 本就要求登录）。
-// 读取失败（跨库部署无管理库连接、表不存在等）一律按未开启处理，保持匿名可用。
 function member_only_create_enabled() {
-    global $ADMIN_DB;
-    if (!isset($ADMIN_DB) || !$ADMIN_DB || empty($ADMIN_DB->link)) return false;
-    $stmt = @$ADMIN_DB->prepare("SELECT config_value FROM system_configs WHERE config_key = 'shorturl.require_registration' LIMIT 1");
-    if (!$stmt) return false;
-    mysqli_stmt_execute($stmt);
-    mysqli_stmt_bind_result($stmt, $value);
-    $enabled = mysqli_stmt_fetch($stmt)
-        && in_array(strtolower(trim((string)$value)), array('1', 'true', 'on'), true);
-    mysqli_stmt_close($stmt);
-    return $enabled;
+    return system_config_bool('shorturl.require_registration', false);
 }
 
 function shorturl($input){
