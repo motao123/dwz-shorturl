@@ -161,8 +161,10 @@ $yaml = "server:\n"
 if (file_put_contents($yamlPath, $yaml, LOCK_EX) === false) {
     fatal("写入 {$yamlPath} 失败");
 }
-@chmod($yamlPath, 0600);
-logLine('已生成迁移用 config.yaml（0700 目录 / 0600 文件）');
+// 0644 而非 0600：backend 容器以非特权 app 用户只读挂载本卷，
+// 0600 root 会导致 backend 读不到配置而崩溃循环。文件在 docker 卷内，不对外暴露。
+@chmod($yamlPath, 0644);
+logLine('已生成迁移用 config.yaml（0644，backend 容器 app 用户可读）');
 if ($smtpHost === '' || $smtpUser === '' || $smtpPassword === '') {
     logLine('⚠️ 未配置 SMTP：会员「忘记密码」与邮箱验证不可用（批量生成需邮箱已验证）。');
     logLine('   如需启用，请在 .env 填写 SMTP_HOST / SMTP_USER / SMTP_PASSWORD 后重启 init 容器。');
