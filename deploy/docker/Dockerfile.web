@@ -28,7 +28,7 @@ RUN apk add --no-cache nginx supervisor tzdata \
 WORKDIR /var/www/dwz
 
 # PHP 前台（仓库根目录的 PHP 代码与静态资源）
-COPY do.php api.php batch.php member.php index.php stats.php sitemap.php index.html /var/www/dwz/
+COPY do.php api.php batch.php member.php index.php stats.php sitemap.php index.html api.html robots.txt /var/www/dwz/
 COPY includes/ /var/www/dwz/includes/
 COPY assets/ /var/www/dwz/assets/
 COPY site/ /var/www/dwz/site/
