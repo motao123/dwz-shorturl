@@ -60,31 +60,68 @@ interface MenuEntry {
   perm?: string
 }
 
-const menuEntries: MenuEntry[] = [
-  { path: '/dashboard', title: '仪表盘', icon: Odometer, perm: 'stats.read' },
-  { path: '/short-urls', title: '短链管理', icon: Link, perm: 'short_urls.read' },
-  { path: '/domains', title: '域名管理', icon: Connection, perm: 'domains.read' },
-  { path: '/stats', title: '统计分析', icon: TrendCharts, perm: 'stats.read' },
-  { path: '/monitor', title: '系统监控', icon: Monitor, perm: 'stats.read' },
-  { path: '/users', title: '用户管理', icon: User, perm: 'users.read' },
-  { path: '/members', title: '注册用户', icon: UserFilled, perm: 'users.read' },
-  { path: '/roles', title: '角色管理', icon: Stamp, perm: 'roles.read' },
-  { path: '/configs', title: '系统配置', icon: Setting, perm: 'configs.read' },
-  { path: '/audit-logs', title: '审计日志', icon: Document, perm: 'audit.read' },
-  { path: '/violations', title: '违规审核', icon: WarningFilled, perm: 'audit.read' },
-  { path: '/api-keys', title: 'API 密钥', icon: Key, perm: 'api_keys.read' },
-  { path: '/api-docs', title: 'API 文档', icon: Document, perm: 'api_keys.read' },
-  { path: '/webhooks', title: 'Webhook', icon: BellFilled, perm: 'api_keys.read' }
+interface MenuGroup {
+  title: string
+  entries: MenuEntry[]
+}
+
+// 后台菜单按职能分组：总览 / 短链业务 / 用户与权限 / 系统运维 / 开放能力。
+// perm 为该菜单项所需权限点，无权限时整项隐藏，分组内全部隐藏时整组隐藏。
+const menuGroups: MenuGroup[] = [
+  {
+    title: '总览',
+    entries: [{ path: '/dashboard', title: '仪表盘', icon: Odometer, perm: 'stats.read' }]
+  },
+  {
+    title: '短链业务',
+    entries: [
+      { path: '/short-urls', title: '短链管理', icon: Link, perm: 'short_urls.read' },
+      { path: '/domains', title: '域名管理', icon: Connection, perm: 'domains.read' },
+      { path: '/stats', title: '统计分析', icon: TrendCharts, perm: 'stats.read' }
+    ]
+  },
+  {
+    title: '用户与权限',
+    entries: [
+      { path: '/users', title: '用户管理', icon: User, perm: 'users.read' },
+      { path: '/members', title: '注册用户', icon: UserFilled, perm: 'users.read' },
+      { path: '/roles', title: '角色管理', icon: Stamp, perm: 'roles.read' }
+    ]
+  },
+  {
+    title: '系统运维',
+    entries: [
+      { path: '/monitor', title: '系统监控', icon: Monitor, perm: 'stats.read' },
+      { path: '/configs', title: '系统配置', icon: Setting, perm: 'configs.read' },
+      { path: '/audit-logs', title: '审计日志', icon: Document, perm: 'audit.read' },
+      { path: '/violations', title: '违规审核', icon: WarningFilled, perm: 'audit.read' }
+    ]
+  },
+  {
+    title: '开放能力',
+    entries: [
+      { path: '/api-keys', title: 'API 密钥', icon: Key, perm: 'api_keys.read' },
+      { path: '/api-docs', title: 'API 文档', icon: Document, perm: 'api_keys.read' },
+      { path: '/webhooks', title: 'Webhook 推送', icon: BellFilled, perm: 'api_keys.read' }
+    ]
+  }
 ]
 
 const visibleMenus = computed(() =>
-  menuEntries.filter((m) => !m.perm || hasPermission(m.perm))
+  menuGroups
+    .map((group) => ({
+      title: group.title,
+      entries: group.entries.filter((m) => !m.perm || hasPermission(m.perm))
+    }))
+    .filter((group) => group.entries.length > 0)
 )
+
+const allMenus = computed(() => visibleMenus.value.flatMap((g) => g.entries))
 
 const activeMenu = computed(() => '/' + (route.path.split('/')[1] || 'dashboard'))
 
 const crumbs = computed(() => {
-  const current = menuEntries.find((m) => m.path === activeMenu.value)
+  const current = allMenus.value.find((m) => m.path === activeMenu.value)
   return [
     { title: '首页', path: '/dashboard' },
     ...(current ? [{ title: current.title, path: current.path }] : [])
@@ -159,10 +196,12 @@ async function handleLogout() {
         text-color="#9db8bd"
         active-text-color="#ffffff"
       >
-        <el-menu-item v-for="item in visibleMenus" :key="item.path" :index="item.path">
-          <el-icon><component :is="item.icon" /></el-icon>
-          <template #title><span>{{ item.title }}</span></template>
-        </el-menu-item>
+        <el-menu-item-group v-for="group in visibleMenus" :key="group.title" :title="group.title">
+          <el-menu-item v-for="item in group.entries" :key="item.path" :index="item.path">
+            <el-icon><component :is="item.icon" /></el-icon>
+            <template #title><span>{{ item.title }}</span></template>
+          </el-menu-item>
+        </el-menu-item-group>
       </el-menu>
 
       <div v-show="!appStore.sidebarCollapsed" class="aside-foot mono">
@@ -302,6 +341,14 @@ async function handleLogout() {
   overflow-y: auto;
   overflow-x: hidden;
   --el-menu-item-height: 44px;
+}
+
+/* 菜单分组标题：弱化展示，仅作视觉分区（折叠侧栏时 Element Plus 自动隐藏） */
+.layout__menu :deep(.el-menu-item-group__title) {
+  padding: 10px 12px 4px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: #5e848b;
 }
 
 .layout__menu :deep(.el-menu-item) {
