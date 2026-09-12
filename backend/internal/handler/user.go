@@ -20,10 +20,11 @@ func NewUserHandler(svc service.UserService, auditSvc service.AuditService) *Use
 }
 
 type CreateUserRequest struct {
-	Username    string `json:"username" binding:"required,min=2,max=32"`
-	Email       string `json:"email" binding:"required,email"`
-	Password    string `json:"password" binding:"required,min=6"`
-	DisplayName string `json:"display_name"`
+	Username    string   `json:"username" binding:"required,min=2,max=32"`
+	Email       string   `json:"email" binding:"required,email"`
+	Password    string   `json:"password" binding:"required,min=6"`
+	DisplayName string   `json:"display_name"`
+	RoleIDs     []uint64 `json:"role_ids"`
 }
 
 type UpdateUserRequest struct {
@@ -52,6 +53,14 @@ func (h *UserHandler) Create(c *gin.Context) {
 	if err != nil {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
+	}
+
+	// 创建时可顺带分配角色，避免调用方必须再补一次 /users/:id/roles。
+	if len(req.RoleIDs) > 0 {
+		if err := h.svc.AssignRoles(user.ID, req.RoleIDs); err != nil {
+			pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, "user created but assign roles failed: "+err.Error())
+			return
+		}
 	}
 
 	auditLog(c, h.auditSvc, "user", "user_create", user.ID, `{"username":`+strconv.Quote(user.Username)+`}`)

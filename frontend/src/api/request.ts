@@ -187,12 +187,13 @@ const request = {
   post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
     return service.post<never, T>(url, data, config)
   },
-  put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
-    return service.put<never, T>(url, data, config)
-  },
-  delete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
-    return service.delete<never, T>(url, config)
-  }
+	put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<T> {
+		// axios 1.18 起 put/delete 的重载默认泛型不再透传 R=T，这里显式收口
+		return service.put(url, data, config) as unknown as Promise<T>
+	},
+	delete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+		return service.delete(url, config) as unknown as Promise<T>
+	}
 }
 
 export default request

@@ -105,10 +105,11 @@
     </tbody>
   </table>
 
-  <div class="note"><strong>注意：</strong>批量接口不支持 <code>custom</code> 和 <code>expire</code> 参数，所有短链均使用随机短码且永久有效。</div>
+  <div class="note"><strong>注意：</strong>批量接口需要<strong>会员登录</strong>（浏览器 Cookie 会话），匿名调用返回 <code>401</code>（result 10015）。不支持 <code>custom</code> 和 <code>expire</code> 参数，所有短链均使用随机短码且永久有效。</div>
 
   <h3>curl 示例</h3>
-  <pre><code>curl -X POST https://1.xk7.cn/batch.php \
+  <pre><code># 需先在浏览器登录会员（携带会话 Cookie），匿名调用返回 401
+curl -X POST https://1.xk7.cn/batch.php \
   --data-urlencode "urls=https://example.com/a
 https://example.com/b
 https://example.com/c"</code></pre>
