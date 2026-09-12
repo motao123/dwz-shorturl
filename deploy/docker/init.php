@@ -104,7 +104,7 @@ $smtpPort = env('SMTP_PORT', '465');
 $smtpUser = env('SMTP_USER', '');
 $smtpPassword = env('SMTP_PASSWORD', '');
 $smtpFrom = env('SMTP_FROM', '') !== '' ? env('SMTP_FROM', '') : $smtpUser;
-$smtpFromName = env('SMTP_FROM_NAME', '陌涛短链');
+$smtpFromName = env('SMTP_FROM_NAME', '短网址');
 $smtpSSL = !in_array(strtolower((string) env('SMTP_SSL', 'true')), array('0', 'false', 'no'), true);
 
 $configDir = '/app/configs';

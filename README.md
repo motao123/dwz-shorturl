@@ -171,7 +171,7 @@ SMTP_PORT=465                  # 465=隐式 TLS，587=STARTTLS
 SMTP_USER=noreply@example.com  # 完整邮箱地址
 SMTP_PASSWORD=你的SMTP授权码    # 注意是授权码，不是邮箱登录密码
 SMTP_FROM=noreply@example.com  # 留空则复用 SMTP_USER
-SMTP_FROM_NAME=陌涛短链
+SMTP_FROM_NAME=短网址
 SMTP_SSL=true
 ```
 
@@ -260,6 +260,28 @@ DWZ_SERVER=your.host DWZ_USER=root DWZ_PASS='密码' ./deploy.sh
 
 > `deploy.sh` 只负责发布代码，**不碰数据库**。数据库侧的上线动作由
 > `ops/one_click_migrate.sh` 一条命令完成（见上），两者互不依赖。
+
+#### 三条部署路径怎么选
+
+| 路径 | Web Server | 前台 PHP | 管理台 / 会员中心接口 | 说明 |
+|---|---|---|---|---|
+| **Docker**（推荐） | 容器内 nginx | ✅ | ✅ 开箱可用 | `docker compose up -d` 已配好全部反代，见上文 |
+| **nginx / 宝塔** | nginx | ✅ | ⚠️ **需手工配 4 段反代** | 未配则接口全 404，见 [docs/deploy-baota.md](docs/deploy-baota.md) |
+| **Apache** | Apache + .htaccess | ✅ | ⚠️ **需启用 mod_rewrite** | 默认走 `api_proxy.php` 兜底，开箱可用 |
+
+#### Apache 部署（含共享虚拟主机）
+
+`.htaccess` 已内置 Go 接口转发规则，默认走 `api_proxy.php` 兜底（curl 转发到 `127.0.0.1:8080`），**共享虚拟主机无需 `mod_proxy` 即可使用管理台与会员中心接口**。要求：
+
+1. Apache 开启 `AllowOverride All`（至少允许 `FileInfo`）与 `mod_rewrite`；
+2. PHP ≥ 8.0 且启用 `mysqli`、`curl` 扩展；
+3. Go 后端已启动在 `127.0.0.1:8080`；若地址不同，设置环境变量 `DWZ_BACKEND`。
+
+> 若主机**禁用了 `allow_url_fopen` 之外的一切网络能力**（极少数严格共享主机），或**纯 PHP 形态**（不起 Go 后端），请把 `.htaccess` 中「方案 B」整段注释掉。此时前台 `do.php` / `api.php` / `batch.php` / `member.php` 完全可用，仅管理台「域名池」与会员中心接口不可用。
+>
+> 若主机启用了 `mod_proxy`，建议改用 `.htaccess` 里的「方案 A」原生反代，少一次 PHP 往返。
+
+**症状自查**：管理台「域名池」下拉框为空、短链永远落在主域名、会员中心登录后接口 404 —— 都指向接口未转发，请先确认上表第 3 列的配置。
 
 ### 迁移体系（单一事实来源）
 
