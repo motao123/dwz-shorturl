@@ -729,9 +729,54 @@
     });
   }
 
+  // 自托管 Core Web Vitals 采集：LCP/CLS/INP/TTFB 聚合后在页面隐藏时
+  // 用 sendBeacon 上报 /rum.php（只含性能数值与路径，不含 Cookie 与页面内容）。
+  function initWebVitals() {
+    if (!('PerformanceObserver' in window) || !navigator.sendBeacon) return;
+    var vitals = { lcp: 0, cls: 0, inp: 0, ttfb: 0 };
+    var sent = false;
+    try {
+      new PerformanceObserver(function (list) {
+        var es = list.getEntries();
+        if (es.length) vitals.lcp = es[es.length - 1].startTime;
+      }).observe({ type: 'largest-contentful-paint', buffered: true });
+      new PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (e) {
+          if (!e.hadRecentInput) vitals.cls += e.value;
+        });
+      }).observe({ type: 'layout-shift', buffered: true });
+      new PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (e) {
+          if (e.duration > vitals.inp) vitals.inp = e.duration;
+        });
+      }).observe({ type: 'event', buffered: true, durationThreshold: 40 });
+      var nav = performance.getEntriesByType('navigation')[0];
+      if (nav) vitals.ttfb = nav.responseStart;
+    } catch (e) { return; }
+    function send() {
+      if (sent) return;
+      sent = true;
+      try {
+        navigator.sendBeacon('/rum.php', new Blob([JSON.stringify({
+          m: 'cwv',
+          lcp: vitals.lcp,
+          cls: vitals.cls,
+          inp: vitals.inp,
+          ttfb: vitals.ttfb,
+          url: location.pathname
+        })], { type: 'application/json' }));
+      } catch (e) { /* 忽略上报失败 */ }
+    }
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') send();
+    });
+    window.addEventListener('pagehide', send);
+  }
+
   restoreBatchDraft();
   setBatchGate();
   initCookieBanner();
+  initWebVitals();
   // 域名下拉改由登录态驱动：loadMemberState → setMemberUI → loadDomains()
   loadMemberState();
   checkHealth();
