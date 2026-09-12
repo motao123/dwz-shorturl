@@ -322,7 +322,7 @@ async function handleLogout() {
 .brand__sub {
   font-size: 9px;
   letter-spacing: 0.22em;
-  color: #5e848b;
+  color: #79a3aa;
 }
 
 .brand-text-enter-active,
@@ -348,7 +348,7 @@ async function handleLogout() {
   padding: 10px 12px 4px;
   font-size: 11px;
   letter-spacing: 0.12em;
-  color: #5e848b;
+  color: #79a3aa;
 }
 
 .layout__menu :deep(.el-menu-item) {
