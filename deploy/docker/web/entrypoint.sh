@@ -25,9 +25,9 @@ done
 ln -sf "$CONFIG_SRC" "$CONFIG_DST"
 echo "[web] 已链接 config.php"
 
-# 限流文件目录必须在 Web 根目录之外（config.php 里的 $rate_limit_dir 指向仓库内
-# 的 logs/ratelimit），并保证 php-fpm 的 nobody 用户可写。
+# 限流文件目录：config.php 的 $rate_limit_dir 指向 /var/www/dwz/logs/ratelimit
+# （nginx 已 deny /logs/ 的 Web 访问），并保证 php-fpm 的 www-data 用户可写。
 mkdir -p /var/www/dwz/logs/ratelimit
-chown -R nobody:nobody /var/www/dwz/logs
+chown -R www-data:www-data /var/www/dwz/logs
 
 exec "$@"

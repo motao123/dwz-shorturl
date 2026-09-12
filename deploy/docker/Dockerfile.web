@@ -8,7 +8,7 @@
 #
 # 用 nginx + php-fpm（Debian 基础镜像，PHP 8.2 与宝塔环境版本对应）。
 # ============================================================
-FROM node:20-alpine AS assets
+FROM node:25-alpine AS assets
 WORKDIR /app
 COPY frontend/package.json ./
 RUN npm install --no-audit --no-fund --registry=https://registry.npmmirror.com
@@ -26,7 +26,7 @@ RUN apk add --no-cache nginx supervisor tzdata \
 WORKDIR /var/www/dwz
 
 # PHP 前台（仓库根目录的 PHP 代码与静态资源）
-COPY do.php api.php batch.php member.php index.php stats.php sitemap.php /var/www/dwz/
+COPY do.php api.php batch.php member.php index.php stats.php sitemap.php index.html /var/www/dwz/
 COPY includes/ /var/www/dwz/includes/
 COPY assets/ /var/www/dwz/assets/
 COPY site/ /var/www/dwz/site/
@@ -46,7 +46,7 @@ RUN chmod +x /usr/local/bin/dwz-entrypoint
 # 运行期可写目录：限流文件与错误日志。config.php 由 init 容器生成到共享配置目录后
 # 由 entrypoint 软链接进来，不进镜像（镜像里绝不能有数据库口令）。
 RUN mkdir -p /var/www/dwz/logs/ratelimit /run/nginx \
-    && chown -R nobody:nobody /var/www/dwz/logs
+    && chown -R www-data:www-data /var/www/dwz/logs
 
 EXPOSE 80
 
