@@ -48,6 +48,7 @@
   var qrDownloadButton = document.getElementById('qrDownloadBtn');
 
   var memberState = { loggedIn: false, csrf: '' };
+  var domainsLoaded = false;
 
   function endpoint(file) {
     return new URL(file, document.baseURI).toString();
@@ -546,6 +547,14 @@
       memberUser.hidden = true;
       memberUser.textContent = '';
     }
+    // 域名池仅登录会员可选：服务端会忽略匿名的 domain 参数，若对匿名访客
+    // 展示下拉框，选了也不生效，是摆设控件。登录后加载，登出即隐藏。
+    if (memberState.loggedIn) {
+      loadDomains();
+    } else if (domainField && !domainField.hidden) {
+      domainField.hidden = true;
+      domainSelect.value = '';
+    }
     setBatchGate();
   }
 
@@ -633,8 +642,12 @@
   // 每个 fetch 的 POST 请求都带上会话 cookie（确保批量接口能识别登录态）
   updateBatchCount();
 
-  // Load available domains for the domain selector
+  // Load available domains for the domain selector（仅登录会员；幂等，避免重复 append）
   async function loadDomains() {
+    if (domainsLoaded) {
+      domainField.hidden = false;
+      return;
+    }
     try {
       var response = await fetch(endpoint('admin/api/domains/active'), {
         method: 'GET',
@@ -657,6 +670,7 @@
         if (d.name) opt.textContent += ' (' + d.name + ')';
         domainSelect.appendChild(opt);
       });
+      domainsLoaded = true;
       domainField.hidden = false;
       domainField.classList.add('fade-in');
     } catch (e) {
@@ -687,7 +701,7 @@
 
   restoreBatchDraft();
   setBatchGate();
-  loadDomains();
+  // 域名下拉改由登录态驱动：loadMemberState → setMemberUI → loadDomains()
   loadMemberState();
   checkHealth();
   window.setInterval(checkHealth, 60000);
