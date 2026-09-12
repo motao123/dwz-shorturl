@@ -113,6 +113,9 @@ member_result(1, 'ok', 1, 200, array(
     'member' => $member,
     'csrf' => $_SESSION['member_csrf'],
     'token' => $token,
+    // 「仅注册使用」开关状态随登录态下发：首页据此把建链表单切换为登录
+    // 引导（体验层）；api.php 的 401 拦截是真正的后端兜底。
+    'require_registration' => member_only_create_enabled(),
 ));
 
 function member_result($code, $msg, $result, $status = 200, $data = null) {

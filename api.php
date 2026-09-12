@@ -44,6 +44,12 @@ if (!rate_limit(real_ip(), 20, 60)) {
     api_result(0, '请求过于频繁，请稍后再试', 10005, 429);
 }
 
+// 注册制开关：管理员在后台系统配置开启后，匿名建链一律引导注册/登录
+// （batch.php 本就要求登录，不受影响）。会员 CSRF 校验在上方不受影响。
+if (member_id() <= 0 && member_only_create_enabled()) {
+    api_result(0, '当前站点已开启「仅注册使用」，请先注册或登录后再生成短链', 10015, 401);
+}
+
 $validation = validate_long_url($longurl);
 if (!$validation[0]) api_result(0, $validation[1], $validation[2], 400);
 $violation = check_url_violation($longurl);
