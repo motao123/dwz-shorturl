@@ -60,9 +60,19 @@ async function submit() {
       ElMessage.success('登录成功')
     } else {
       await register(form.username.trim(), form.email.trim(), form.password)
-      // 注册后自动发送邮箱验证邮件（失败不阻断）
-      sendVerification(form.email.trim()).catch(() => {})
-      ElMessage.success('注册成功，验证邮件已发送至您的邮箱')
+      // 注册后自动发送邮箱验证邮件（失败不阻断注册，但必须如实告知用户）。
+      // 原先无条件提示「验证邮件已发送」会让未配置 SMTP 的站点用户一直空等。
+      let verifySent = true
+      try {
+        await sendVerification(form.email.trim())
+      } catch {
+        verifySent = false
+      }
+      if (verifySent) {
+        ElMessage.success('注册成功，验证邮件已发送至您的邮箱（24 小时内有效），验证后可解锁批量生成')
+      } else {
+        ElMessage.warning('注册成功，但验证邮件发送失败：请到会员中心「重新发送验证邮件」，或联系管理员配置邮件服务')
+      }
     }
     if (redirectTo.value !== '/') {
       // 有 redirect 参数时整页跳转（如返回首页批量区）
@@ -139,11 +149,15 @@ async function handleForgot() {
 </template>
 
 <style scoped>
+/* 与管理台共用一套墨青主题 token（--dwz-petrol），不再使用与其他端割裂的
+   深青渐变，避免会员从首页跳到登录页时「像换了一个站点」。 */
 .login-wrap {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  background: linear-gradient(160deg, #10363e, #0a2227);
+  background:
+    radial-gradient(1200px 600px at 50% -10%, color-mix(in srgb, var(--dwz-petrol, #0e6e75) 10%, transparent), transparent 70%),
+    var(--el-bg-color-page, #f5f7f8);
   padding: 20px;
 }
 

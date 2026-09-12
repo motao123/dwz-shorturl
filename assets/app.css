@@ -238,6 +238,42 @@ textarea:focus-visible {
   line-height: 1.6;
 }
 
+.hero-copy-sub {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+/* 功能卡片上的「需注册」角标，避免承诺落差 */
+.feature-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  color: var(--ink-strong);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+/* 批量区未登录引导态 */
+.batch-gate {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  color: var(--muted);
+  background: var(--surface-soft);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.batch-gate a {
+  color: var(--ink-strong);
+  font-weight: 600;
+}
+
 /* ─── Tool card (main generator) ─── */
 .tool-card {
   width: min(100%, 900px);
@@ -855,6 +891,13 @@ textarea[aria-invalid="true"]:hover,
   margin-top: 12px;
 }
 
+.dialog-hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+
 .qr-box {
   width: fit-content;
   margin: 20px auto 0;
@@ -895,14 +938,73 @@ body.dialog-open {
   }
 }
 
+/* 汉堡按钮：桌面隐藏，窄屏显示（无 JS 时导航仍以横向滚动形式可达） */
+.nav-toggle {
+  display: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--ink-strong);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.nav-toggle:hover {
+  background: var(--surface-soft);
+}
+
+.header-nav-member {
+  display: none;
+}
+
 @media (max-width: 768px) {
   .site-header {
     height: 60px;
     padding: 0 16px;
   }
 
+  .nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* 折叠态默认隐藏，展开时以下拉面板呈现，保证会员入口在移动端可达 */
   .header-nav {
     display: none;
+    position: absolute;
+    top: 60px;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    padding: 10px 16px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    box-shadow: var(--shadow-md);
+  }
+
+  .header-nav.is-open {
+    display: flex;
+  }
+
+  .header-nav a {
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  .header-nav-member {
+    display: block;
+  }
+
+  .site-header {
+    position: relative;
   }
 
   .hero {

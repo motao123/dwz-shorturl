@@ -26,6 +26,12 @@ export interface UseListPageOptions<T> {
   immediate?: boolean
   /** 分页器布局；缺省按屏宽收敛（窄屏去掉 sizes/jumper，避免溢出） */
   pagerLayout?: (ctx: { isMobile: boolean; isTablet: boolean }) => string
+  /**
+   * 需要「每页条数」开关时的布局；窄屏自动收敛为纯翻页。
+   * 用于会员端等面向普通用户的列表：默认布局在窄屏会隐去 sizes，
+   * 这里给出一个在桌面端保留 total + sizes 的显式选项。
+   */
+  pagerLayoutFull?: (ctx: { isMobile: boolean; isTablet: boolean }) => string
   /** 地址栏读写入口，透传给 useListQuery（默认 window.location / history） */
   readLocation?: UseListQueryOptions['readLocation']
   writeHistory?: UseListQueryOptions['writeHistory']
@@ -62,6 +68,12 @@ export function useListPage<T extends object>(options: UseListPageOptions<T>) {
     if (isMobile.value) return 'prev, pager, next'
     if (isTablet.value) return 'total, prev, pager, next'
     return 'total, sizes, prev, pager, next, jumper'
+  })
+
+  const pagerLayoutFull = computed(() => {
+    if (options.pagerLayoutFull) return options.pagerLayoutFull({ isMobile: isMobile.value, isTablet: isTablet.value })
+    if (isMobile.value) return 'prev, pager, next'
+    return 'total, sizes, prev, pager, next'
   })
 
   /** 变更筛选 / 翻页后统一走这里，避免各页面自己记「要不要重置分页」 */
@@ -105,6 +117,7 @@ export function useListPage<T extends object>(options: UseListPageOptions<T>) {
     isTablet: isTablet as Ref<boolean>,
     breakpointTablet: BREAKPOINT_TABLET,
     pagerLayout,
+    pagerLayoutFull,
     search,
     reload,
     handlePageChange,

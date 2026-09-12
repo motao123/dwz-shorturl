@@ -117,6 +117,30 @@ describe('useListPage 列表页骨架', () => {
     expect(custom.list.pagerLayout.value).toBe('prev, pager, next')
   })
 
+  it('pagerLayoutFull 在桌面端保留总数与每页条数，窄屏收敛为纯翻页', () => {
+    const { list } = createPage()
+    // 测试环境默认按桌面断言：必须同时含 total 与 sizes，否则用户无法切每页条数
+    expect(list.pagerLayoutFull.value).toContain('total')
+    expect(list.pagerLayoutFull.value).toContain('sizes')
+    expect(list.pagerLayoutFull.value).not.toContain('jumper')
+
+    const custom = createPage('', { pagerLayoutFull: () => 'prev, pager, next' })
+    expect(custom.list.pagerLayoutFull.value).toBe('prev, pager, next')
+  })
+
+  it('handleSizeChange 变更每页条数后回到第一页并重新加载', async () => {
+    const { list, fetcherCalls } = createPage()
+    await flushPromises()
+    list.setPage(3)
+    await flushPromises()
+    const before = fetcherCalls.length
+    await list.handleSizeChange(50)
+    expect(fetcherCalls.length).toBeGreaterThan(before)
+    expect(list.page.value).toBe(1)
+    expect(list.perPage.value).toBe(50)
+    expect(fetcherCalls.at(-1)).toMatchObject({ page: 1, per_page: 50 })
+  })
+
   it('翻页与筛选变更写回地址栏，空值不出现在 URL 中', async () => {
     const { list, urls } = createPage()
     await flushPromises()

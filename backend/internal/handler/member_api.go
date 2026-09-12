@@ -25,6 +25,8 @@ type MemberCreateLinkRequest struct {
 	Custom     string `json:"custom"`
 	ExpireDays int    `json:"expire_days"`
 	Password   string `json:"password"`
+	// DomainID: 管理端配置的域名池域名。nil 表示使用主域名。
+	DomainID *uint64 `json:"domain_id"`
 }
 
 func (h *MemberApiHandler) Me(c *gin.Context) {
@@ -77,7 +79,7 @@ func (h *MemberApiHandler) CreateLink(c *gin.Context) {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "url is required")
 		return
 	}
-	record, err := h.svc.CreateLink(memberID, req.URL, req.Title, req.Custom, req.ExpireDays, c.ClientIP(), req.Password)
+	record, err := h.svc.CreateLink(memberID, req.URL, req.Title, req.Custom, req.ExpireDays, c.ClientIP(), req.Password, req.DomainID)
 	if err != nil {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return

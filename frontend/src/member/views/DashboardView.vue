@@ -26,6 +26,8 @@ import {
   importLinks,
   sendVerification,
   buildShortUrl,
+  listActiveDomains,
+  type ActiveDomain,
   type MemberLink,
   type LinkStat,
   type MemberBatchResult,
@@ -58,16 +60,21 @@ const list = useListPage<MemberLink>({
       return { list: res.list.map((l) => ({ ...l, short_url: buildShortUrl(l.uid) })), total: res.total }
     }),
   errorMessage: '加载失败',
-  pagerLayout: ({ isTablet }) => (isTablet ? 'prev, pager, next' : 'total, prev, pager, next')
+  pagerLayout: ({ isTablet }) => (isTablet ? 'prev, pager, next' : 'total, prev, pager, next'),
+  // P2-8：补每页条数切换与总数展示；窄屏只保留翻页，避免挤压表格
+  pagerLayoutFull: ({ isTablet }) => (isTablet ? 'prev, pager, next' : 'total, sizes, prev, pager, next')
 })
 
-const { rows, total, loading, pagerLayout } = list
+const { rows, total, loading, pagerLayoutFull, handleSizeChange } = list
 const keyword = list.filterRef<string>('keyword')
 const statusFilter = list.filterRef<string>('status')
 const handleSearch = list.search
 const handlePageChange = list.handlePageChange
 
-const createForm = reactive({ url: '', title: '', custom: '', expire_days: 0 })
+const createForm = reactive({ url: '', title: '', custom: '', expire_days: 0, domain_id: null as number | null })
+// P1-9：管理端配好的域名池，会员端也能选到；加载失败时提示「仅主域名」
+const domains = ref<ActiveDomain[]>([])
+const domainsLoaded = ref(false)
 const creating = ref(false)
 
 const expireOptions = [
@@ -83,6 +90,16 @@ function load() {
   void list.load()
 }
 
+async function loadDomains() {
+  try {
+    domains.value = await listActiveDomains()
+  } catch {
+    domains.value = []
+  } finally {
+    domainsLoaded.value = true
+  }
+}
+
 async function handleCreate() {
   if (!createForm.url.trim()) {
     ElMessage.warning('请输入目标网址')
@@ -90,12 +107,19 @@ async function handleCreate() {
   }
   creating.value = true
   try {
-    const created = await createLink(createForm.url.trim(), createForm.custom.trim(), createForm.expire_days, createForm.title.trim())
+    const created = await createLink(
+      createForm.url.trim(),
+      createForm.custom.trim(),
+      createForm.expire_days,
+      createForm.title.trim(),
+      createForm.domain_id
+    )
     ElMessage.success('短链创建成功')
     createForm.url = ''
     createForm.title = ''
     createForm.custom = ''
     createForm.expire_days = 0
+    createForm.domain_id = null
     createdResult.value = created.short_url || buildShortUrl(created.uid)
     createdVisible.value = true
     load()
@@ -360,38 +384,80 @@ function expiryLabel(expireAt: string | null): string {
   return dayjs(expireAt).format('YYYY-MM-DD')
 }
 
+// P2-6：二维码尺寸与格式可选，并按短链语义命名下载文件
+const qrSize = ref<320 | 640 | 1024>(320)
+const qrFormat = ref<'png' | 'svg'>('png')
+const qrSizeOptions = [
+  { label: '小 320px', value: 320 as const },
+  { label: '中 640px', value: 640 as const },
+  { label: '大 1024px', value: 1024 as const }
+]
+const qrFileName = computed(
+  () => qrUrl.value.replace(/^https?:\/\//, '').replace(/[^a-z0-9]/gi, '_') || 'qr'
+)
+
+async function renderQr(container: HTMLElement, url: string) {
+  container.innerHTML = ''
+  try {
+    const QRCode = (await import('qrcode')).default
+    if (qrFormat.value === 'svg') {
+      const svg = await QRCode.toString(url, {
+        type: 'svg',
+        width: qrSize.value,
+        margin: 1,
+        errorCorrectionLevel: 'M'
+      })
+      container.innerHTML = svg
+      return
+    }
+    const canvas = document.createElement('canvas')
+    container.appendChild(canvas)
+    await QRCode.toCanvas(canvas, url, {
+      width: qrSize.value,
+      margin: 1,
+      errorCorrectionLevel: 'M'
+    })
+  } catch {
+    container.innerHTML = '<p class="qr-error">二维码生成失败，请使用复制功能</p>'
+  }
+}
+
 function openQr(url: string) {
   qrUrl.value = url
   qrVisible.value = true
   // 动态引入 qrcode 包渲染，避免依赖外部 /assets/qrcode.min.js（生产构建中不存在）
-  requestAnimationFrame(async () => {
+  requestAnimationFrame(() => {
     const el = qrBox.value
     if (!el) return
-    el.innerHTML = ''
-    try {
-      const QRCode = (await import('qrcode')).default
-      const canvas = document.createElement('canvas')
-      el.appendChild(canvas)
-      await QRCode.toCanvas(canvas, url, { width: 220, margin: 1 })
-    } catch {
-      el.innerHTML = '<p class="qr-error">二维码生成失败，请使用复制功能</p>'
-    }
+    void renderQr(el, url)
   })
+}
+
+// 尺寸/格式切换后重绘，避免用户以为切换没生效
+function refreshQr() {
+  if (!qrUrl.value || !qrBox.value) return
+  void renderQr(qrBox.value, qrUrl.value)
 }
 
 function downloadQr() {
   const el = qrBox.value
   if (!el) return
   const canvas = el.querySelector('canvas')
-  const img = el.querySelector('img')
-  const href = canvas ? canvas.toDataURL('image/png') : img?.src || ''
+  const svg = el.querySelector('svg')
+  let href = ''
+  if (qrFormat.value === 'svg' && svg) {
+    href = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg.outerHTML)
+  } else if (canvas) {
+    href = canvas.toDataURL('image/png')
+  }
   if (!href) {
     ElMessage.error('二维码尚未生成')
     return
   }
+  const ext = qrFormat.value === 'svg' ? 'svg' : 'png'
   const a = document.createElement('a')
   a.href = href
-  a.download = `qrcode-${qrUrl.value.replace(/^https?:\/\//, '').replace(/[^a-z0-9]/gi, '_') || 'qr'}.png`
+  a.download = `qrcode-${qrFileName.value}.${ext}`
   document.body.appendChild(a)
   a.click()
   a.remove()
@@ -487,6 +553,7 @@ onMounted(async () => {
   list.hydrateFromUrl()
   void list.load()
   void loadSummary()
+  void loadDomains()
 })
 </script>
 
@@ -495,7 +562,7 @@ onMounted(async () => {
     <header class="topbar">
       <a class="brand" href="/">
         <span class="brand-mark">↗</span>
-        <span>短网址会员中心</span>
+        <span>短网址</span>
       </a>
       <div class="user">
         <el-button text :icon="themeStore.dark ? Sunny : Moon" :aria-label="themeStore.dark ? '切换到浅色' : '切换到深色'" :title="themeStore.dark ? '切换到浅色' : '切换到深色'" @click="themeStore.toggle()" />
@@ -531,14 +598,35 @@ onMounted(async () => {
       <!-- 创建 -->
       <section class="card">
         <h2>创建短链</h2>
+        <!-- 两行布局：第一行 URL + 标题，第二行短码 / 有效期 / 域名 + 操作。
+             原先 6 个控件挤一行，窄屏（<720px）才折行，中间尺寸体验很差。 -->
         <div class="create-row">
           <el-input v-model="createForm.url" placeholder="粘贴长网址" class="url-input" />
           <el-input v-model="createForm.title" placeholder="标题（可选）" class="title-input" />
-          <el-button :loading="fetchingTitle" @click="handleFetchTitle">获取标题</el-button>
+          <el-button class="fetch-title-btn" :loading="fetchingTitle" @click="handleFetchTitle">获取标题</el-button>
+        </div>
+        <div class="create-row create-row-options">
           <el-input v-model="createForm.custom" placeholder="自定义短码（可选）" class="custom-input" />
-          <el-select v-model="createForm.expire_days" class="expire-select">
+          <el-select v-model="createForm.expire_days" class="expire-select" aria-label="有效期">
             <el-option v-for="o in expireOptions" :key="o.value" :label="o.label" :value="o.value" />
           </el-select>
+          <!-- P1-9：管理端配好的域名池，会员端也要能选到 -->
+          <el-select
+            v-if="domains.length"
+            v-model="createForm.domain_id"
+            class="domain-select"
+            clearable
+            placeholder="默认域名"
+            aria-label="短链域名"
+          >
+            <el-option
+              v-for="d in domains"
+              :key="d.id"
+              :label="`${d.scheme || 'https'}://${d.domain}`"
+              :value="d.id"
+            />
+          </el-select>
+          <span v-else class="domain-hint">仅主域名</span>
           <el-button type="primary" :icon="Link" :loading="creating" @click="handleCreate">创建</el-button>
           <el-button @click="openBatch">批量创建</el-button>
         </div>
@@ -635,9 +723,11 @@ onMounted(async () => {
             :current-page="list.page.value"
             :total="total"
             :page-size="list.perPage.value"
-            :layout="pagerLayout"
+            :page-sizes="[20, 50, 100]"
+            :layout="pagerLayoutFull"
             background
             @current-change="handlePageChange"
+            @size-change="handleSizeChange"
           />
         </div>
       </section>
@@ -661,10 +751,19 @@ onMounted(async () => {
       <div class="qr-box">
         <div ref="qrBox" class="qr-canvas"></div>
         <p class="qr-hint mono">{{ qrUrl }}</p>
+        <div class="qr-options">
+          <el-radio-group v-model="qrSize" size="small" @change="refreshQr">
+            <el-radio-button v-for="o in qrSizeOptions" :key="o.value" :value="o.value">{{ o.label }}</el-radio-button>
+          </el-radio-group>
+          <el-radio-group v-model="qrFormat" size="small" @change="refreshQr">
+            <el-radio-button value="png">PNG</el-radio-button>
+            <el-radio-button value="svg">SVG</el-radio-button>
+          </el-radio-group>
+        </div>
       </div>
       <template #footer>
         <el-button @click="qrVisible = false">关闭</el-button>
-        <el-button type="primary" @click="downloadQr">下载图片</el-button>
+        <el-button type="primary" @click="downloadQr">下载{{ qrFormat === 'svg' ? ' SVG' : '图片' }}</el-button>
       </template>
     </el-dialog>
 
@@ -880,6 +979,32 @@ onMounted(async () => {
 .create-row {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.create-row + .create-row {
+  margin-top: 10px;
+}
+
+.create-row-options .domain-select,
+.create-row-options .expire-select {
+  width: 170px;
+}
+
+.qr-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.domain-hint {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  color: #94a3b8;
+  font-size: 12.5px;
 }
 
 .ops {
@@ -970,12 +1095,27 @@ onMounted(async () => {
   justify-content: flex-end;
 }
 
+@media (max-width: 1024px) {
+  .create-row {
+    flex-wrap: wrap;
+  }
+  .create-row-options > * {
+    flex: 1 1 160px;
+  }
+}
+
 @media (max-width: 720px) {
   .create-row {
     flex-direction: column;
   }
   .custom-input,
-  .expire-select {
+  .expire-select,
+  .domain-select,
+  .title-input,
+  .url-input {
+    width: 100%;
+  }
+  .fetch-title-btn {
     width: 100%;
   }
   .summary-grid {

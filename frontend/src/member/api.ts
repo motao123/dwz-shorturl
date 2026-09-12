@@ -225,11 +225,36 @@ export async function fetchTitle(url: string): Promise<string> {
   return r.title as string
 }
 
-export async function createLink(url: string, custom = '', expireDays = 0, title = ''): Promise<MemberLink> {
+export async function createLink(
+  url: string,
+  custom = '',
+  expireDays = 0,
+  title = '',
+  domainId?: number | null
+): Promise<MemberLink> {
   return go('/member/api/links', {
     method: 'POST',
-    body: JSON.stringify({ url, title, custom, expire_days: expireDays })
+    body: JSON.stringify({ url, title, custom, expire_days: expireDays, domain_id: domainId ?? null })
   })
+}
+
+/** 域名池中启用中的域名（公开路由，管理端配置后会员端可选择） */
+export interface ActiveDomain {
+  id: number
+  domain: string
+  scheme?: string
+  name?: string
+}
+
+export async function listActiveDomains(): Promise<ActiveDomain[]> {
+  const res = await fetch('/admin/api/domains/active', {
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' }
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const payload = await res.json()
+  const list = Array.isArray(payload) ? payload : (payload?.data ?? [])
+  return list as ActiveDomain[]
 }
 
 export interface MemberBatchResult {
