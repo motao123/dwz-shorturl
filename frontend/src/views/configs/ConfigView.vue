@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
-import { Refresh, Check } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus/es/components/message-box/index'
+import { Refresh, Check, Operation } from '@element-plus/icons-vue'
 import { getAllConfigs, batchUpdateConfigs, type ConfigItem } from '@/api/configs'
+import { runTask } from '@/api/monitor'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -13,6 +15,10 @@ const edits = ref<Record<string, string>>({})
 const dirtyKeys = ref<Set<string>>(new Set())
 
 const GROUP_LABELS: Record<string, string> = {
+  shorturl: '短链规则',
+  batch: '批量生成',
+  member: '会员策略',
+  stats: '统计页面',
   site: '站点信息',
   url: '短链规则',
   security: '安全策略',
@@ -21,6 +27,51 @@ const GROUP_LABELS: Record<string, string> = {
   notify: '通知配置',
   storage: '存储配置',
   other: '其他'
+}
+
+/** 取值有限的配置项渲染为下拉框（值 -> 展示文案） */
+const ENUM_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  'shorturl.default_expire_days': [
+    { value: '0', label: '永久有效' },
+    { value: '1', label: '1 天' },
+    { value: '7', label: '7 天' },
+    { value: '30', label: '30 天' },
+    { value: '365', label: '1 年' }
+  ]
+}
+
+/** 运维操作：手动触发后端 cron 任务（与「系统监控」页同一套任务） */
+const OPS_TASKS: { name: string; label: string; hint: string; danger?: boolean }[] = [
+  { name: 'mark_expired', label: '标记过期短链', hint: '扫描到期链接并置为过期状态' },
+  { name: 'reconcile_dual_write', label: '双写对账', hint: '合并 PHP 前台与后台的短链数据' },
+  { name: 'reconcile_clicks', label: '点击数校准', hint: '双向校准两表的点击计数' },
+  { name: 'aggregate_stats', label: '统计聚合', hint: '把点击明细聚合到小时表，加速报表' },
+  { name: 'cleanup_click_logs', label: '清理过期点击日志', hint: '删除超出保留期的点击明细', danger: true },
+  { name: 'cleanup_stats', label: '清理历史统计', hint: '删除过期的聚合统计数据', danger: true },
+  { name: 'remind_expiring', label: '发送到期提醒', hint: '给临期链接的属主发送提醒（需邮件服务）' },
+  { name: 'ensure_partitions', label: '补齐日志分区', hint: '创建缺失的 click_logs 月度分区（幂等）' }
+]
+const runningTask = ref('')
+
+async function handleRunTask(task: (typeof OPS_TASKS)[number]) {
+  try {
+    await ElMessageBox.confirm(
+      `确定立即执行「${task.label}」吗？${task.hint}。该操作同步执行，大数据量时可能耗时较长。`,
+      '运维操作确认',
+      { type: task.danger ? 'warning' : 'info', confirmButtonText: '执行', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  runningTask.value = task.name
+  try {
+    const res = await runTask(task.name)
+    ElMessage.success(res.ran ? `「${task.label}」执行完成` : `「${task.label}」本次无需处理`)
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '任务执行失败')
+  } finally {
+    runningTask.value = ''
+  }
 }
 
 interface ConfigGroup {
@@ -174,60 +225,103 @@ onMounted(loadConfigs)
       </div>
     </div>
 
-    <div v-loading="loading" class="config-groups">
-      <el-empty v-if="!loading && !configs.length" description="暂无配置项" />
+    <el-tabs class="config-tabs">
+      <el-tab-pane label="参数配置">
+        <div v-loading="loading" class="config-groups">
+          <el-empty v-if="!loading && !configs.length" description="暂无配置项" />
 
-      <section v-for="group in groups" :key="group.key" class="config-group app-card">
-        <header class="config-group__head">
-          <h3 class="config-group__title">{{ group.label }}</h3>
-          <span class="config-group__prefix mono">{{ group.key }}.*</span>
-        </header>
+          <section v-for="group in groups" :key="group.key" class="config-group app-card">
+            <header class="config-group__head">
+              <h3 class="config-group__title">{{ group.label }}</h3>
+              <span class="config-group__prefix mono">{{ group.key }}.*</span>
+            </header>
 
-        <div class="config-rows">
-          <div
-            v-for="item in group.items"
-            :key="item.config_key"
-            class="config-row"
-            :class="{ 'config-row--dirty': isDirty(item.config_key) }"
-          >
-            <div class="config-row__meta">
-              <code class="config-row__key mono">{{ item.config_key }}</code>
-              <span class="config-row__type mono">{{ item.value_type }}</span>
-              <p class="config-row__desc">{{ item.description || '—' }}</p>
-            </div>
-            <div class="config-row__input">
-              <template v-if="item.value_type === 'bool'">
-                <el-switch
-                  :model-value="['true', '1'].includes(edits[item.config_key] ?? '')"
-                  @change="(v: string | number | boolean) => { edits[item.config_key] = String(v); onEdit(item.config_key, String(v)) }"
-                />
-              </template>
-              <template v-else-if="item.value_type === 'json'">
-                <el-input
-                  v-model="edits[item.config_key]"
-                  type="textarea"
-                  :rows="3"
-                  class="mono"
-                  placeholder="JSON"
-                  @input="(v: string) => onEdit(item.config_key, v)"
-                />
-              </template>
-              <template v-else>
-                <el-input
-                  v-model="edits[item.config_key]"
-                  :class="{ mono: item.value_type === 'int' }"
-                  @input="(v: string) => onEdit(item.config_key, v)"
-                >
-                  <template v-if="item.is_public === 1" #suffix>
-                    <el-tag size="small" effect="plain" round>公开</el-tag>
+            <div class="config-rows">
+              <div
+                v-for="item in group.items"
+                :key="item.config_key"
+                class="config-row"
+                :class="{ 'config-row--dirty': isDirty(item.config_key) }"
+              >
+                <div class="config-row__meta">
+                  <code class="config-row__key mono">{{ item.config_key }}</code>
+                  <span class="config-row__type mono">{{ item.value_type }}</span>
+                  <p class="config-row__desc">{{ item.description || '—' }}</p>
+                </div>
+                <div class="config-row__input">
+                  <template v-if="ENUM_OPTIONS[item.config_key]">
+                    <el-select
+                      :model-value="edits[item.config_key]"
+                      @change="(v: unknown) => { edits[item.config_key] = String(v); onEdit(item.config_key, String(v)) }"
+                    >
+                      <el-option
+                        v-for="o in ENUM_OPTIONS[item.config_key]"
+                        :key="o.value"
+                        :value="o.value"
+                        :label="o.label"
+                      />
+                    </el-select>
                   </template>
-                </el-input>
-              </template>
+                  <template v-else-if="item.value_type === 'bool'">
+                    <el-switch
+                      :model-value="['true', '1'].includes(edits[item.config_key] ?? '')"
+                      @change="(v: string | number | boolean) => { edits[item.config_key] = String(v); onEdit(item.config_key, String(v)) }"
+                    />
+                  </template>
+                  <template v-else-if="item.value_type === 'json'">
+                    <el-input
+                      v-model="edits[item.config_key]"
+                      type="textarea"
+                      :rows="3"
+                      class="mono"
+                      placeholder="JSON"
+                      @input="(v: string) => onEdit(item.config_key, v)"
+                    />
+                  </template>
+                  <template v-else>
+                    <el-input
+                      v-model="edits[item.config_key]"
+                      :class="{ mono: item.value_type === 'int' }"
+                      @input="(v: string) => onEdit(item.config_key, v)"
+                    >
+                      <template v-if="item.is_public === 1" #suffix>
+                        <el-tag size="small" effect="plain" round>公开</el-tag>
+                      </template>
+                    </el-input>
+                  </template>
+                </div>
+              </div>
             </div>
+          </section>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="运维操作">
+        <p class="ops-hint">
+          以下操作与「系统监控」页的定时任务同源，点击后<strong>立即同步执行</strong>一次；
+          带 <span class="ops-danger-tag">!</span> 的操作会删除历史数据，请确认后执行。
+        </p>
+        <div class="ops-grid">
+          <div v-for="task in OPS_TASKS" :key="task.name" class="ops-card app-card" :class="{ 'ops-card--danger': task.danger }">
+            <div class="ops-card__head">
+              <el-icon class="ops-card__icon"><Operation /></el-icon>
+              <strong>{{ task.label }}</strong>
+              <code class="mono ops-card__name">{{ task.name }}</code>
+            </div>
+            <p class="ops-card__hint">{{ task.hint }}</p>
+            <el-button
+              size="small"
+              :type="task.danger ? 'danger' : 'primary'"
+              plain
+              :loading="runningTask === task.name"
+              @click="handleRunTask(task)"
+            >
+              立即执行
+            </el-button>
           </div>
         </div>
-      </section>
-    </div>
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
@@ -349,5 +443,71 @@ onMounted(loadConfigs)
     grid-template-columns: 1fr;
     gap: 10px;
   }
+}
+
+.config-tabs {
+  margin-top: 4px;
+}
+
+.ops-hint {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--dwz-text-dim);
+}
+
+.ops-danger-tag {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--dwz-red, #d54941);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.ops-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.ops-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+}
+
+.ops-card--danger {
+  border-color: rgba(213, 73, 65, 0.35);
+}
+
+.ops-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--dwz-ink);
+}
+
+.ops-card__icon {
+  color: var(--dwz-petrol-strong);
+}
+
+.ops-card__name {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--dwz-text-dim);
+}
+
+.ops-card__hint {
+  margin: 0;
+  flex: 1;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dwz-text-dim);
 }
 </style>

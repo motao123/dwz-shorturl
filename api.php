@@ -14,7 +14,10 @@ if (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST')
 
 $longurl = isset($_POST['url']) && is_string($_POST['url']) ? trim($_POST['url']) : '';
 $custom = isset($_POST['custom']) && is_string($_POST['custom']) ? trim($_POST['custom']) : '';
-$expire_raw = isset($_POST['expire']) ? $_POST['expire'] : 0;
+// 未显式传有效期时取后台配置的默认值（0 = 永久有效）
+$expire_raw = isset($_POST['expire']) && $_POST['expire'] !== ''
+    ? $_POST['expire']
+    : system_config_int('shorturl.default_expire_days', 0);
 $password = isset($_POST['password']) && is_string($_POST['password']) ? $_POST['password'] : '';
 $domain_id = isset($_POST['domain']) && is_string($_POST['domain']) ? trim($_POST['domain']) : '';
 // A3：domain 参数必须是纯数字 ID，且仅登录会员可用（匿名传 domain 一律忽略，
@@ -39,9 +42,14 @@ if (member_id() > 0) {
 
 // B11：限流必须在任何昂贵的校验（validate_long_url 含 DNS 解析）之前执行，
 // 否则攻击者可用解析开销打满请求，导致限流失效。
-if (!rate_limit(real_ip(), 20, 60)) {
+if (!rate_limit(real_ip(), system_config_int('shorturl.anon_rate_max', 20), system_config_int('shorturl.anon_rate_window', 60))) {
     if (!headers_sent()) header('Retry-After: 60');
     api_result(0, '请求过于频繁，请稍后再试', 10005, 429);
+}
+
+// 自定义短码总开关：关闭后所有 custom 参数一律拒绝（后台可即时切换）
+if ($custom !== '' && !system_config_bool('shorturl.allow_custom_code', true)) {
+    api_result(0, '站点已关闭自定义短码，请使用系统生成的短码', 10006, 422);
 }
 
 // 注册制开关：管理员在后台系统配置开启后，匿名建链一律引导注册/登录

@@ -101,3 +101,13 @@ export function ensurePartitions(months = 0, dryRun = false): Promise<PartitionE
 export function getPartitionStatus(): Promise<PartitionStatus> {
   return request.get<PartitionStatus>('/monitor/partitions')
 }
+
+export interface RunTaskResult {
+  task: string
+  ran: boolean
+}
+
+/** 手动触发一个 cron 任务（运维操作，同步执行） */
+export function runTask(name: string): Promise<RunTaskResult> {
+  return request.post<RunTaskResult>('/monitor/run-task', { name })
+}
