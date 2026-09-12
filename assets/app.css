@@ -1272,3 +1272,47 @@ body.dialog-open {
 #mylinksList .result-list {
   margin-top: 0;
 }
+
+/* Cookie 告知横幅：底部固定条，尊重 prefers-reduced-motion（无动画） */
+.cookie-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  background: #16282c;
+  color: #e8f4f2;
+  box-shadow: 0 -4px 18px rgba(22, 40, 44, 0.25);
+}
+
+.cookie-banner[hidden] {
+  display: none;
+}
+
+.cookie-banner p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.cookie-banner a {
+  color: #ffd58a;
+  text-decoration: underline;
+}
+
+.cookie-banner-btn {
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 18px;
+  background: #f5a623;
+  color: #16282c;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}

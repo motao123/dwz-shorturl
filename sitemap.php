@@ -55,9 +55,32 @@ echo "    <changefreq>daily</changefreq>\n";
 echo "    <priority>1.0</priority>\n";
 echo "  </url>\n";
 
-// 说明：api.html 自身带 <meta name="robots" content="noindex, nofollow">（避免
-// 接口文档被搜索引擎收录为内容页），本着「不收录被 noindex 的页面」的一致性，
-// 这里也不再向 sitemap 提交 api.html。若希望收录 API 文档，请先去掉其 noindex。
+// API 文档与宣传页均为可索引内容页，纳入 sitemap
+echo "  <url>
+";
+echo "    <loc>{$base_xml}/api.html</loc>
+";
+echo "    <lastmod>{$today}</lastmod>
+";
+echo "    <changefreq>weekly</changefreq>
+";
+echo "    <priority>0.8</priority>
+";
+echo "  </url>
+";
+
+echo "  <url>
+";
+echo "    <loc>{$base_xml}/site/</loc>
+";
+echo "    <lastmod>{$today}</lastmod>
+";
+echo "    <changefreq>weekly</changefreq>
+";
+echo "    <priority>0.6</priority>
+";
+echo "  </url>
+";
 
 echo '</urlset>' . "\n";
 

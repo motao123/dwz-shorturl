@@ -30,6 +30,9 @@ if (in_array($action, array('register', 'login', 'logout'), true)) {
 
 if ($action === 'register') {
     if (!rate_limit(real_ip(), 10, 3600)) member_result(0, '注册过于频繁，请稍后再试', 10005, 429);
+    // 注册必须明示同意协议与隐私政策（合规要求，前端勾选框 + 后端兜底校验）
+    $agree = isset($_POST['agree']) && (string)$_POST['agree'] === '1';
+    if (!$agree) member_result(0, '请先阅读并同意《用户协议》与《隐私政策》', 10021, 400);
     $username = isset($_POST['username']) ? trim($_POST['username']) : '';
     $email = isset($_POST['email']) ? trim($_POST['email']) : '';
     $password = isset($_POST['password']) ? $_POST['password'] : '';

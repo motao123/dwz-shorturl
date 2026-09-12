@@ -712,8 +712,26 @@
       });
   }
 
+  // Cookie 告知横幅：未记忆过选择时显示；同意写入 localStorage。
+  // 仅使用必要会话 Cookie，无第三方追踪，故采用告知条而非阻断式同意墙。
+  function initCookieBanner() {
+    var banner = document.getElementById('cookie-banner');
+    var accept = document.getElementById('cookie-accept');
+    if (!banner || !accept) return;
+    var KEY = 'dwz:cookie-notice-accepted';
+    try {
+      if (localStorage.getItem(KEY)) return;
+    } catch (e) { return; }
+    banner.hidden = false;
+    accept.addEventListener('click', function () {
+      try { localStorage.setItem(KEY, '1'); } catch (e) { /* 隐私模式下忽略 */ }
+      banner.hidden = true;
+    });
+  }
+
   restoreBatchDraft();
   setBatchGate();
+  initCookieBanner();
   // 域名下拉改由登录态驱动：loadMemberState → setMemberUI → loadDomains()
   loadMemberState();
   checkHealth();

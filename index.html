@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="generator" content="Imotao">
   <meta name="theme-color" content="#fafafb">
+  <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="./assets/favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
+  <link rel="manifest" href="./site.webmanifest">
   <title>短网址生成 - 免费在线缩短链接 | Imotao</title>
   <meta name="keywords" content="缩短网址,网址压缩,网址缩短,短网址,短域名,短地址,短URL,免费缩短网址,短链接生成器,短网址生成,免费缩址,域名伪装,域名转向,网站推广,短链接,长网址变短网址">
   <meta name="description" content="免费专业的网址缩短服务，支持自定义短码、有效期、二维码与批量生成。注册即用，秒级生成，永久有效。">
@@ -64,7 +68,7 @@
   <meta name="msvalidate.01" content="PLACEHOLDER">
 
   <link rel="stylesheet" href="./assets/tokens.min.css?v=3366f25a">
-  <link rel="stylesheet" href="./assets/app.min.css?v=705129a7">
+  <link rel="stylesheet" href="./assets/app.min.css?v=18d2f329">
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
@@ -221,8 +225,24 @@
 
   <footer class="site-footer">
     <p>短网址由用户生成，目标网站内容与本站无关。</p>
+    <p>
+      <a href="./privacy.html">隐私政策</a> ·
+      <a href="./terms.html">用户协议</a> ·
+      <a href="./report.html">违法信息举报</a>
+    </p>
+    <!-- 备案信息：取得备案号后替换占位文本（公安备案需另加图标与编号） -->
+    <p><a href="https://beian.miit.gov.cn/" rel="nofollow noopener" target="_blank">ICP 备案号：待备案补充</a></p>
     <p>© 2020–2026 <a href="https://imotao.com/">陌涛</a> · <a href="https://github.com/motao123/dwz-shorturl">获取源码</a></p>
   </footer>
+
+  <!-- Cookie 告知横幅：首次访问显示，同意后 localStorage 记忆（逻辑在 app.js） -->
+  <div id="cookie-banner" class="cookie-banner" role="region" aria-label="Cookie 使用告知" hidden>
+    <p>
+      本站使用必要的会话 Cookie 保障登录与安全功能，不使用第三方追踪 Cookie。
+      继续访问即表示同意，详见<a href="./privacy.html">隐私政策</a>。
+    </p>
+    <button type="button" id="cookie-accept" class="cookie-banner-btn">我知道了</button>
+  </div>
 
   <!-- 常驻 live region：屏幕阅读器在页面加载时即注册 role，避免 hidden 切换导致公告丢失 -->
   <div id="status" class="status-toast" role="status" aria-live="polite" aria-atomic="true" hidden>
@@ -261,7 +281,7 @@
   </div>
 
   <script src="./assets/qrcode.min.js?v=2.6.0"></script>
-  <script src="./assets/app.min.js?v=fabef26c"></script>
+  <script src="./assets/app.min.js?v=4ab1d142"></script>
 
   <!-- 百度统计 -->
   <script>
