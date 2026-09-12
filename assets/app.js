@@ -7,6 +7,7 @@
   var lastFocusedElement = null;
 
   var singleForm = document.getElementById('shorten-form');
+  var singleGate = document.getElementById('single-gate');
   var batchForm = document.getElementById('batch-form');
   var urlInput = document.getElementById('inputContent');
   var customInput = document.getElementById('customCode');
@@ -47,7 +48,7 @@
   var batchGate = document.getElementById('batch-gate');
   var qrDownloadButton = document.getElementById('qrDownloadBtn');
 
-  var memberState = { loggedIn: false, csrf: '' };
+  var memberState = { loggedIn: false, csrf: '', requireReg: false };
   var domainsLoaded = false;
 
   function endpoint(file) {
@@ -571,6 +572,16 @@
     }
   }
 
+  // 「仅注册使用」开关开启时，匿名访客的建链表单切换为登录引导
+  // （服务端 api.php 同步 401 兜底，这里只是体验层前置）。
+  function setSingleGate() {
+    if (!singleGate || !singleForm) return;
+    var gated = memberState.requireReg && !memberState.loggedIn;
+    singleGate.hidden = !gated;
+    singleForm.hidden = gated;
+    if (singleButton) singleButton.disabled = gated;
+  }
+
   var BATCH_DRAFT_KEY = 'dwz:batch-draft';
 
   function saveBatchDraft() {
@@ -610,6 +621,7 @@
       var payload = await response.json();
       if (payload && payload.result === 1 && payload.data) {
         memberState.csrf = payload.data.csrf || '';
+        memberState.requireReg = Boolean(payload.data.require_registration);
         setMemberUI(payload.data.member);
       } else {
         setMemberUI(null);
@@ -618,6 +630,7 @@
       setMemberUI(null);
     } finally {
       setBatchGate();
+      setSingleGate();
     }
   }
 

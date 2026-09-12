@@ -39,6 +39,22 @@ function real_ip(){
 	return $remote;
 }
 
+// 「仅注册使用」开关：管理员在后台 系统配置 中把 shorturl.require_registration
+// 设为 true 后，匿名访客不能建链（batch.php 本就要求登录）。
+// 读取失败（跨库部署无管理库连接、表不存在等）一律按未开启处理，保持匿名可用。
+function member_only_create_enabled() {
+    global $ADMIN_DB;
+    if (!isset($ADMIN_DB) || !$ADMIN_DB || empty($ADMIN_DB->link)) return false;
+    $stmt = @$ADMIN_DB->prepare("SELECT config_value FROM system_configs WHERE config_key = 'shorturl.require_registration' LIMIT 1");
+    if (!$stmt) return false;
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_bind_result($stmt, $value);
+    $enabled = mysqli_stmt_fetch($stmt)
+        && in_array(strtolower(trim((string)$value)), array('1', 'true', 'on'), true);
+    mysqli_stmt_close($stmt);
+    return $enabled;
+}
+
 function shorturl($input){
     $base32 = array('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0', '1', '2', '3', '4', '5');
     $hex = md5($input);

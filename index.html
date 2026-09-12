@@ -112,6 +112,11 @@
         <span class="privacy-note"><span aria-hidden="true">●</span> 注册即用</span>
       </div>
 
+      <!-- 「仅注册使用」开关开启时显示（后端 api.php 同步 401 兜底） -->
+      <p id="single-gate" class="batch-gate" hidden>
+        当前站点已开启「仅注册使用」：<a href="/member/login?redirect=%2F">登录 / 注册</a> 后即可生成短链。
+      </p>
+
       <form id="shorten-form" novalidate>
         <div class="field-group field-main">
           <label for="inputContent">目标网址</label>
@@ -256,7 +261,7 @@
   </div>
 
   <script src="./assets/qrcode.min.js?v=2.6.0"></script>
-  <script src="./assets/app.min.js?v=289c6827"></script>
+  <script src="./assets/app.min.js?v=fabef26c"></script>
 
   <!-- 百度统计 -->
   <script>
