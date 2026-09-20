@@ -142,7 +142,7 @@
             # 更新时，backup.sh 只会抛一句没头没尾的 "command not found"。这里先自证
             # 环境，缺什么直接红并打印诊断（DRILL_ENV_REV 已 +1 表示依赖变更）。
             echo "--- 演练环境自检"
-            for bin in mysql mysqladmin mysqldump mysqld gzip bash; do
+            for bin in mysql mysqladmin mysqldump mysqld mariadb-install-db gzip bash; do
               if ! command -v "$bin" >/dev/null 2>&1; then
                 echo "演练环境缺少 $bin：镜像未按 deploy/docker/drill/Dockerfile 重建"
                 echo "（该镜像被缓存时不会自动跟着 Dockerfile 变化重建；确认 DRILL_ENV_REV 已 +1）"
@@ -176,14 +176,29 @@
               mysql --socket=/run/mysqld/mysqld.sock -uroot -e "
                 CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY 'drillroot';
                 GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
-                ALTER USER 'root'@'localhost' IDENTIFIED BY 'drillroot';
+                ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('drillroot');
                 FLUSH PRIVILEGES;"
             }
-            # 初始化数据目录（--initialize-insecure 得到无口令 root，随后立刻设口令）。
-            if [ ! -d /var/lib/mysql/mysql ]; then
+            # 初始化数据目录。必须按**服务端 flavor** 分流：
+            #   - MariaDB（Alpine 的 `mariadb` 包，本镜像就是它）**没有**
+            #     `--initialize-insecure` —— 那是 MySQL 8 专属参数，用了会
+            #     "unknown option '--initialize-insecure'" 后立即 Abort
+            #     （实测该 stage 0.4s 红）。MariaDB 用 `mariadb-install-db`。
+            #   - MySQL 才用 `--initialize-insecure`。
+            # 判据取 `mysqld --version` 的实际输出，不再靠"包名想当然"。
+            init_datadir() {
+              [ -d /var/lib/mysql/mysql ] && return 0
               echo "初始化数据目录（约 20-30s）..."
-              mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql
-            fi
+              if mysqld --version 2>&1 | grep -qi 'mariadb'; then
+                echo "检测到 MariaDB 服务端，使用 mariadb-install-db"
+                mariadb-install-db --user=mysql --datadir=/var/lib/mysql --skip-test-db >/dev/null
+              else
+                echo "检测到 MySQL 服务端，使用 --initialize-insecure"
+                mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql
+              fi
+            }
+
+            init_datadir
             nohup mysqld --user=mysql --datadir=/var/lib/mysql \
               --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
               --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
@@ -314,7 +329,7 @@
             fi
             grep -Eq '^[[:space:]]*RUN[^#]*apk add[^#]* mariadb([[:space:]\\]|$)' "$drill_dockerfile" \
               || { echo "$drill_dockerfile 必须安装 mariadb 服务端（演练要在容器内直起 mysqld）"; exit 1; }
-            for bin in mysqldump mysqld mysql mysqladmin; do
+            for bin in mysqldump mysqld mariadb-install-db mysql mysqladmin; do
               grep -q "command -v $bin" "$drill_dockerfile" \
                 || { echo "$drill_dockerfile 缺少 $bin 的构建期预检（command -v $bin）"; exit 1; }
             done
@@ -429,7 +444,7 @@ master:
             # 更新时，backup.sh 只会抛一句没头没尾的 "command not found"。这里先自证
             # 环境，缺什么直接红并打印诊断（DRILL_ENV_REV 已 +1 表示依赖变更）。
             echo "--- 演练环境自检"
-            for bin in mysql mysqladmin mysqldump mysqld gzip bash; do
+            for bin in mysql mysqladmin mysqldump mysqld mariadb-install-db gzip bash; do
               if ! command -v "$bin" >/dev/null 2>&1; then
                 echo "演练环境缺少 $bin：镜像未按 deploy/docker/drill/Dockerfile 重建"
                 echo "（该镜像被缓存时不会自动跟着 Dockerfile 变化重建；确认 DRILL_ENV_REV 已 +1）"
@@ -463,14 +478,29 @@ master:
               mysql --socket=/run/mysqld/mysqld.sock -uroot -e "
                 CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY 'drillroot';
                 GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
-                ALTER USER 'root'@'localhost' IDENTIFIED BY 'drillroot';
+                ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('drillroot');
                 FLUSH PRIVILEGES;"
             }
-            # 初始化数据目录（--initialize-insecure 得到无口令 root，随后立刻设口令）。
-            if [ ! -d /var/lib/mysql/mysql ]; then
+            # 初始化数据目录。必须按**服务端 flavor** 分流：
+            #   - MariaDB（Alpine 的 `mariadb` 包，本镜像就是它）**没有**
+            #     `--initialize-insecure` —— 那是 MySQL 8 专属参数，用了会
+            #     "unknown option '--initialize-insecure'" 后立即 Abort
+            #     （实测该 stage 0.4s 红）。MariaDB 用 `mariadb-install-db`。
+            #   - MySQL 才用 `--initialize-insecure`。
+            # 判据取 `mysqld --version` 的实际输出，不再靠"包名想当然"。
+            init_datadir() {
+              [ -d /var/lib/mysql/mysql ] && return 0
               echo "初始化数据目录（约 20-30s）..."
-              mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql
-            fi
+              if mysqld --version 2>&1 | grep -qi 'mariadb'; then
+                echo "检测到 MariaDB 服务端，使用 mariadb-install-db"
+                mariadb-install-db --user=mysql --datadir=/var/lib/mysql --skip-test-db >/dev/null
+              else
+                echo "检测到 MySQL 服务端，使用 --initialize-insecure"
+                mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql
+              fi
+            }
+
+            init_datadir
             nohup mysqld --user=mysql --datadir=/var/lib/mysql \
               --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
               --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
@@ -601,7 +631,7 @@ master:
             fi
             grep -Eq '^[[:space:]]*RUN[^#]*apk add[^#]* mariadb([[:space:]\\]|$)' "$drill_dockerfile" \
               || { echo "$drill_dockerfile 必须安装 mariadb 服务端（演练要在容器内直起 mysqld）"; exit 1; }
-            for bin in mysqldump mysqld mysql mysqladmin; do
+            for bin in mysqldump mysqld mariadb-install-db mysql mysqladmin; do
               grep -q "command -v $bin" "$drill_dockerfile" \
                 || { echo "$drill_dockerfile 缺少 $bin 的构建期预检（command -v $bin）"; exit 1; }
             done

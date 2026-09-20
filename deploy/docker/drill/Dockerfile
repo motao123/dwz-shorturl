@@ -28,8 +28,9 @@
 # ============================================================
 FROM docker:27-cli
 
-# DRILL_ENV_REV: 4 —— 依赖有变必须 +1，便于在 CI 日志里确认跑的是哪一版镜像。
-LABEL cnb.drill.env.rev="4"
+# DRILL_ENV_REV: 5 —— 依赖有变必须 +1，便于在 CI 日志里确认跑的是哪一版镜像。
+# （rev 4 → 5：补 mariadb-install-db 预检，见下。）
+LABEL cnb.drill.env.rev="5"
 
 RUN apk add --no-cache bash gzip mariadb-client mariadb coreutils git \
     # 构建期预检：装完立刻验证命令真的存在，把"包内容与预期不符"拦在构建期，
@@ -38,5 +39,10 @@ RUN apk add --no-cache bash gzip mariadb-client mariadb coreutils git \
     && command -v mysqladmin >/dev/null \
     && command -v mysqldump >/dev/null \
     && command -v mysqld >/dev/null \
+    # 本镜像是 Alpine 的 mariadb 包，服务端是 **MariaDB**：它没有 MySQL 8 的
+    # `mysqld --initialize-insecure`，初始化数据目录要用 `mariadb-install-db`
+    # （stage 里按 `mysqld --version` 分流）。缺它就会在初始化那一步 Abort，
+    # 所以这里一并预检。
+    && command -v mariadb-install-db >/dev/null \
     && command -v gzip >/dev/null \
     && command -v docker >/dev/null
