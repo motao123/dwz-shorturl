@@ -60,7 +60,7 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 CURRENT_PART=""
 cleanup() {
   rc=$?
-  [ -n "$CURRENT_PART" ] && rm -f "$CURRENT_PART"
+  [ -n "$CURRENT_PART" ] && rm -f "$CURRENT_PART.raw" "$CURRENT_PART"
   return $rc
 }
 trap cleanup EXIT INT TERM
@@ -94,15 +94,34 @@ for db in admin public; do
   fi
 
   # 口令走环境变量（MYSQL_PWD），不拼进 argv，ps / docker inspect 看不到明文。
+  #
+  # 不能用 `if ! mysqldump | gzip > "$PART"` 这种管道形式：
+  #   - 管道整体返回值 = 最后一个命令（gzip）的返回值，gzip 正常退出即为 0，
+  #     mysqldump 的失败被吞掉，于是会产出一份"空/半份但 gzip 合法"的备份；
+  #   - 在 set -o pipefail 下按命令 shell 的规则本应报错，但 CNB 流水线里
+  #     backup.sh 是被 dash/bash-POSIX 模式以非交互方式调起的，job 控制关闭，
+  #     整个管道退化为最右侧进程的返回值，pipefail 不生效 —— 实测（PR #48
+  #     「备份→恢复演练」stage）连数据库连不上时 backup.sh 反而返回 0，
+  #     真失败被静默当成成功，这正是 #55 要消灭的"看起来成功其实是残档"。
+  # 所以显式落盘 + tmp 文件 + 两次独立判返回值，任何一步非零都视为失败。
+  RAW="$PART.raw"
+  CURRENT_PART="$PART"
   if ! MYSQL_PWD="$PASS" mysqldump \
         -h"$DB_HOST" -P"$DB_PORT" -u"$USER" \
         --single-transaction --routines --triggers --quick --no-tablespaces \
-        "$NAME" | gzip -9 > "$PART"; then
-    rm -f "$PART"
+        "$NAME" > "$RAW"; then
+    rm -f "$RAW" "$PART"
     CURRENT_PART=""
-    fail_alert "备份失败：$NAME dump/gzip 非零退出，已删除残档 $PART"
+    fail_alert "备份失败：$NAME mysqldump 非零退出，已删除残档"
     exit 1
   fi
+  if ! gzip -9 -c "$RAW" > "$PART"; then
+    rm -f "$RAW" "$PART"
+    CURRENT_PART=""
+    fail_alert "备份失败：$NAME gzip 压缩失败，已删除残档 $PART"
+    exit 1
+  fi
+  rm -f "$RAW"
 
   # 三重校验，缺一不可：
   #   1) 中间文件非空（空文件 gzip -t 也会"通过"）

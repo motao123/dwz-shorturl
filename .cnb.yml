@@ -185,8 +185,16 @@
             mkdir -p "$BACKUP_DIR"
 
             echo "--- 备份"
+            # 显式断言备份成功且真的产出了两份非空 dump。
+            # #55 教训：backup.sh 历史上会把失败当成功返回 0，只靠 "脚本没报错"
+            # 判定备份成功等于没验；这里用产物存在性做二次兜底。
             bash deploy/backup.sh
             ls -la "$BACKUP_DIR"
+            for f in "$BACKUP_DIR"/dwz_admin-*.sql.gz "$BACKUP_DIR"/dwz_public-*.sql.gz; do
+              [ -s "$f" ] || { echo "备份产物缺失或为空：$f"; exit 1; }
+              gzip -t "$f" || { echo "备份产物 gzip 校验失败：$f"; exit 1; }
+            done
+            echo "备份成功：两份 dump 均非空且 gzip 合法"
 
             echo "--- 恢复演练（必须 PASS）"
             bash deploy/restore.sh --check
@@ -401,8 +409,16 @@ master:
             mkdir -p "$BACKUP_DIR"
 
             echo "--- 备份"
+            # 显式断言备份成功且真的产出了两份非空 dump。
+            # #55 教训：backup.sh 历史上会把失败当成功返回 0，只靠 "脚本没报错"
+            # 判定备份成功等于没验；这里用产物存在性做二次兜底。
             bash deploy/backup.sh
             ls -la "$BACKUP_DIR"
+            for f in "$BACKUP_DIR"/dwz_admin-*.sql.gz "$BACKUP_DIR"/dwz_public-*.sql.gz; do
+              [ -s "$f" ] || { echo "备份产物缺失或为空：$f"; exit 1; }
+              gzip -t "$f" || { echo "备份产物 gzip 校验失败：$f"; exit 1; }
+            done
+            echo "备份成功：两份 dump 均非空且 gzip 合法"
 
             echo "--- 恢复演练（必须 PASS）"
             bash deploy/restore.sh --check
