@@ -309,6 +309,34 @@ func applyOne(db *gorm.DB, m migration.File, cfg *config.Config, vars map[string
 	return nil
 }
 
+// phpBin returns the PHP interpreter to run PHP-side migrations with.
+func phpBin() string {
+	if v := os.Getenv("DWZ_PHP_BIN"); v != "" {
+		return v
+	}
+	return "php"
+}
+
+// preflightPHP fails fast when the configured PHP interpreter cannot run the
+// bundled PHP migrations (missing binary or missing extension). It runs before
+// ANY migration is applied so a missing ext/mysqli cannot leave the database
+// half-migrated with the version table giving no hint about where it stopped.
+// No-op when the migration set has no PHP files.
+func preflightPHP(files []migration.File) error {
+	for _, f := range files {
+		if f.IsSQL() {
+			continue
+		}
+		if err := migration.CheckPHPReady(phpBin()); err != nil {
+			return fmt.Errorf("%s", migration.EnsurePHPMigrationRecordsFix(err.Error()))
+		}
+		fmt.Printf("php preflight: %s ready (extensions %s)\n",
+			phpBin(), strings.Join(migration.RequiredPHPModules, ", "))
+		return nil
+	}
+	return nil
+}
+
 // applyPHP runs a PHP migration script through the php CLI. These exist because
 // a few migrations have to read data before deciding which DDL is safe
 // (legacy_schema.php only adds the unique indexes when there are no duplicate
@@ -321,11 +349,6 @@ func applyPHP(db *gorm.DB, m migration.File, cfg *config.Config, dryRun bool) er
 	if dryRun {
 		fmt.Printf("  would run %s  (php script)\n", m.Key)
 		return nil
-	}
-
-	phpBin := os.Getenv("DWZ_PHP_BIN")
-	if phpBin == "" {
-		phpBin = "php"
 	}
 
 	// PHP-side migrations operate on the public database; pass the admin name too
@@ -344,7 +367,7 @@ func applyPHP(db *gorm.DB, m migration.File, cfg *config.Config, dryRun bool) er
 		"--db=" + publicCfg.DBName,
 		"--admin-db=" + cfg.Database.DBName,
 	}
-	if err := runPHP(phpBin, args); err != nil {
+	if err := runPHP(phpBin(), args); err != nil {
 		return fmt.Errorf("php script failed: %w", err)
 	}
 	return db.Exec("INSERT INTO schema_migrations (version) VALUES (?)", m.Key).Error
@@ -545,6 +568,14 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	}
+
+	// Pre-flight the PHP interpreter before touching the schema: the PHP
+	// migrations need ext/mysqli, and discovering that mid-run leaves a
+	// half-migrated database behind.
+	if err := preflightPHP(migs); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	appliedAny := false
