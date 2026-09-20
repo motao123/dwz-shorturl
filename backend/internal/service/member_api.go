@@ -552,6 +552,14 @@ func (s *memberApiService) VerifyEmail(token string) error {
 // ImportLinks imports links from CSV text. Each line: url,title,custom,expire_days
 // (expire_days and the rest optional). Mirrors the admin CSV import columns.
 func (s *memberApiService) ImportLinks(memberID uint64, content string, ip string) (*MemberImportResult, error) {
+	// #8: the same "邮箱已验证" gate as BatchCreateLinks. Import used to call
+	// CreateLink directly and skipped the check, so an unverified registration
+	// could still bulk-produce up to MemberImportMaxRows links per request —
+	// the admin switch member.batch_requires_verified was honoured on one bulk
+	// path and ignored on the other. Both now go through requireVerified.
+	if err := s.requireVerified(memberID); err != nil {
+		return nil, err
+	}
 	results := make([]MemberBatchResult, 0, 16)
 	if len(content) > 210000 {
 		return nil, errors.New("import content too large")
@@ -623,8 +631,8 @@ func (s *memberApiService) ImportLinks(memberID uint64, content string, ip strin
 // Each result row carries the short URL or the error for that URL.
 func (s *memberApiService) BatchCreateLinks(memberID uint64, urls []string, ip string) ([]MemberBatchResult, error) {
 	// 批量创建需邮箱已验证（防垃圾账号批量刷链）
-	if m, err := s.memberRepo.FindByID(memberID); err == nil && m.EmailVerified != 1 {
-		return nil, ErrEmailNotVerified
+	if err := s.requireVerified(memberID); err != nil {
+		return nil, err
 	}
 	results := make([]MemberBatchResult, 0, len(urls))
 	for _, raw := range urls {
@@ -643,6 +651,21 @@ func (s *memberApiService) BatchCreateLinks(memberID uint64, urls []string, ip s
 		results = append(results, row)
 	}
 	return results, nil
+}
+
+// requireVerified enforces the "email verified before bulk creation" rule that
+// member.batch_requires_verified advertises. It is shared by every bulk entry
+// point so a new one cannot silently bypass the gate again (#8): BatchCreateLinks
+// and ImportLinks both call it.
+func (s *memberApiService) requireVerified(memberID uint64) error {
+	m, err := s.memberRepo.FindByID(memberID)
+	if err != nil {
+		return err
+	}
+	if m.EmailVerified != 1 {
+		return ErrEmailNotVerified
+	}
+	return nil
 }
 
 func (s *memberApiService) DeleteLink(memberID, linkID uint64) error {

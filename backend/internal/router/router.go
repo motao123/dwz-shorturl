@@ -8,6 +8,7 @@ import (
 	"dwz-admin/internal/middleware"
 	"dwz-admin/internal/pkg"
 	"dwz-admin/internal/repository"
+	"dwz-admin/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -32,7 +33,7 @@ type Handlers struct {
 	Metrics *handler.MetricsHandler
 }
 
-func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, error), logger *zap.Logger, cfg *config.Config, apiKeyRepo repository.ApiKeyRepo, rateLimiter *pkg.RateLimiter, memberRepo repository.MemberRepo) {
+func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, error), logger *zap.Logger, cfg *config.Config, apiKeyRepo repository.ApiKeyRepo, rateLimiter *pkg.RateLimiter, memberRepo repository.MemberRepo, runtimeCfg *service.RuntimeConfig) {
 	// Global middleware
 	engine.Use(middleware.CORS(cfg))
 	engine.Use(middleware.Logger(logger))
@@ -53,13 +54,26 @@ func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, err
 	// Member API (public registered users, authenticated by member JWT)
 	member := engine.Group("/member/api")
 
-	// Public member auth routes (no JWT required): password reset flow
-	member.POST("/auth/forgot-password", h.MemberApi.RequestPasswordReset)
-	member.POST("/auth/reset-password", h.MemberApi.ResetPassword)
-	member.POST("/auth/send-verification", h.MemberApi.SendVerification)
-	member.POST("/auth/verify-email", h.MemberApi.VerifyEmail)
+	// #8/#37: the member API is the only externally reachable group that had no
+	// limiter at all. The quota comes from the config catalog so an operator can
+	// tune it without a redeploy; the identity is the member token once
+	// authenticated, falling back to the client IP on the public auth routes.
+	memberRate := middleware.NewMemberRateLimiter(rateLimiter, func() (int, time.Duration) {
+		if runtimeCfg == nil {
+			return 120, time.Minute
+		}
+		return runtimeCfg.MemberRateLimit()
+	})
+
+	// Public member auth routes (no JWT required): password reset flow.
+	// Rate-limited by IP: these are the enumeration / mail-bomb surface.
+	member.POST("/auth/forgot-password", middleware.RateLimitMember(memberRate), h.MemberApi.RequestPasswordReset)
+	member.POST("/auth/reset-password", middleware.RateLimitMember(memberRate), h.MemberApi.ResetPassword)
+	member.POST("/auth/send-verification", middleware.RateLimitMember(memberRate), h.MemberApi.SendVerification)
+	member.POST("/auth/verify-email", middleware.RateLimitMember(memberRate), h.MemberApi.VerifyEmail)
 
 	member.Use(middleware.MemberAuth(memberRepo.FindByID))
+	member.Use(middleware.RateLimitMember(memberRate))
 	{
 		member.GET("/me", h.MemberApi.Me)
 		member.GET("/summary", h.MemberApi.Summary)
