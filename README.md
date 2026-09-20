@@ -230,6 +230,8 @@ DWZ_DB_USER=root DWZ_DB_PASS='密码' ./ops/one_click_migrate.sh --public-db=<�
 cd backend && go run ./cmd/migrate -baseline -migrations ../backend/migrations
 
 # 4. PHP 前台（需 PHP 8 + mysqli）
+#    注意：迁移工具会在执行任何 DDL 之前先检查 PHP 解释器与 mysqli 扩展，
+#    缺失时直接报错退出（而不是跑到一半才崩，留下半迁移的库）。
 #    单库部署（推荐）：--single-db 让 config.php 直接复用主库连接，
 #    不需要再配第二套 admin_db_*，也没有跨库权限/COLLATE 问题。
 php setup.php --host=127.0.0.1 --port=3306 \
