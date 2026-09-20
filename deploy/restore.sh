@@ -120,8 +120,11 @@ latest_valid_dump() {
       echo "$f"; return 0
     fi
     echo "==> 跳过不完整备份：$f" >&2
+  # ⚠️ 不用 `find -printf`：busybox 的 find 没有该动作（Alpine 上直接
+  # "find: unrecognized: -printf" 并返回非零），改用 `-exec ls -1t {} +`
+  # —— POSIX 行为，busybox / GNU 都支持，仍按 mtime 倒序。
   done < <(find "$RESTORE_DIR" -maxdepth 1 -type f -name "${prefix}-*.sql.gz" \
-             -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+             -exec ls -1t {} + 2>/dev/null)
   return 1
 }
 

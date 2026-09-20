@@ -158,14 +158,21 @@ done
 # （历史行为：KEEP=7 时两个库合计只剩 7 份，管理库约 3 份先被删掉。）
 for prefix in "$DB_ADMIN_NAME" "$DB_PUBLIC_NAME"; do
   # 按修改时间倒序，保留最近 $KEEP 份（文件名含时间戳，同一次运行的两个库
-  # 时间戳相同，-t 排序稳定）。用 find -printf 而非 ls，避免文件名含空格/
-  # 特殊字符时被拆词（SC2012）。
+  # 时间戳相同，排序稳定）。
+  #
+  # ⚠️ 不要用 `find ... -printf`：**busybox 的 find 没有 -printf**
+  # （Alpine 上一执行就 "find: unrecognized: -printf"，返回码 1）。
+  # 本脚本在本地 Debian/GNU 环境跑得好好的，进 Alpine 容器（drill 镜像）
+  # 立刻红 —— PR #48 第 7 轮 CI 就卡在这一行：两份 dump 已经备份成功、
+  # 日志都打出来了，紧接着因 `set -e` 被这条 find 的非零退出终止。
+  # 改用 `-exec ls -1t {} +`：POSIX 行为，busybox/GNU 都支持，
+  # 且 find 直接输出文件路径、由 ls 按 mtime 排序，避免 SC2012 的拆词问题。
   # 只轮转最终产物（*.sql.gz），绝不匹配 .part 中间文件。
   find "$BACKUP_DIR" -maxdepth 1 -type f -name "${prefix}-*${SUFFIX}" \
-       -printf '%T@ %p\n' 2>/dev/null \
-    | sort -rn \
+       -exec ls -1t {} + 2>/dev/null \
     | tail -n +$((KEEP + 1)) \
-    | while read -r _ts old; do
+    | while IFS= read -r old; do
+        [ -n "$old" ] || continue
         rm -f "$old"
         echo "==> 已清理旧备份 $old"
       done
