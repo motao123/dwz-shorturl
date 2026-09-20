@@ -5,7 +5,7 @@
 -- 1. domains table -----------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `domains` (
   `id`          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  `domain`      VARCHAR(128) NOT NULL COMMENT 'domain name e.g. 1.xk7.cn',
+  `domain`      VARCHAR(128) NOT NULL COMMENT 'domain name e.g. links.example.com',
   `scheme`      VARCHAR(8)   NOT NULL DEFAULT 'https' COMMENT 'http or https',
   `name`        VARCHAR(64)  NULL COMMENT 'display name',
   `project`     VARCHAR(64)  NULL COMMENT 'owning project / group',

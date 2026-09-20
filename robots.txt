@@ -6,4 +6,7 @@ User-agent: *
 Allow: /
 Disallow: /admin/
 
-Sitemap: https://1.xk7.cn/sitemap.xml
+# Sitemap 指令按协议必须是绝对地址，而这个文件是静态下发的、不知道自己在哪个域上，
+# 所以不能再硬编码上游维护者的站点（那会把爬虫和抓取配额送到别人的域名去）(#20)。
+# 部署时把下面这行的注释去掉，换成你自己的域名：
+# Sitemap: https://your-domain.com/sitemap.xml

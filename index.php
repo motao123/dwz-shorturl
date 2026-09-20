@@ -59,6 +59,22 @@ foreach ($replacements as $search => $replace) {
     $html = str_replace($search, $replace, $html);
 }
 
+// 首页是全站唯一由 PHP 渲染的页面，因此把相对地址升级成绝对地址：canonical /
+// og:url / og:image 用绝对 URL 才是规范写法。仓库里存的是相对形式，这样在
+// config.php 缺失、或页面被静态直出时，也不会指向任何人的域名（#20）。
+$origin = rtrim((string)($public_base_url ?? ''), '/');
+if ($origin !== '') {
+    $safe = htmlspecialchars($origin, ENT_QUOTES);
+    $absolute = [
+        '<link rel="canonical" href="/">'                  => '<link rel="canonical" href="' . $safe . '/">',
+        '<meta property="og:url" content="/">'             => '<meta property="og:url" content="' . $safe . '/">',
+        '<meta property="og:image" content="/assets/'      => '<meta property="og:image" content="' . $safe . '/assets/',
+        '<meta name="twitter:image" content="/assets/'     => '<meta name="twitter:image" content="' . $safe . '/assets/',
+        '"url": "/",'                                      => '"url": "' . $safe . '/",',
+    ];
+    $html = strtr($html, $absolute);
+}
+
 // 如果百度统计 ID 为空，移除统计代码块
 if (empty($configs['seo.baidu_tongji_id'])) {
     $html = preg_replace('/\s*<!-- 百度统计 -->.*?<\/script>\s*/s', "\n", $html);

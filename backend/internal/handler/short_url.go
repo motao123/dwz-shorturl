@@ -140,7 +140,7 @@ func (h *ShortUrlHandler) dispatchCreated(record *model.ShortUrl) {
 		"id":        record.ID,
 		"uid":       record.UID,
 		"long_url":  record.LongURL,
-		"short_url": service.PublicShortURL(record.UID),
+		"short_url": record.ShortURL,
 	})
 }
 
@@ -163,7 +163,7 @@ func (h *ShortUrlHandler) CreatePublic(c *gin.Context) {
 	h.dispatchCreated(record)
 	pkg.Success(c, gin.H{
 		"uid":        record.UID,
-		"short_url":  service.PublicShortURL(record.UID),
+		"short_url":  record.ShortURL,
 		"long_url":   record.LongURL,
 		"expire_at":  record.ExpireAt,
 		"created_at": record.CreatedAt,
@@ -206,7 +206,7 @@ func (h *ShortUrlHandler) BatchCreatePublic(c *gin.Context) {
 		out = append(out, gin.H{
 			"index":     o.Index,
 			"uid":       o.Record.UID,
-			"short_url": service.PublicShortURL(o.Record.UID),
+			"short_url": o.Record.ShortURL,
 			"long_url":  o.Record.LongURL,
 		})
 		h.dispatchCreated(o.Record)

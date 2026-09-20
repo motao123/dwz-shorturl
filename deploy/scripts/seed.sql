@@ -81,4 +81,6 @@ INSERT INTO system_configs (config_key, config_value, value_type, description, i
 ('ssrf.enabled', 'true', 'bool', '是否启用SSRF防护', 0),
 ('stats.click_log_retention_days', '90', 'int', '点击日志保留天数', 0),
 ('site.name', '短网址管理', 'string', '站点名称', 1),
-('site.public_base_url', 'https://1.xk7.cn', 'string', '短链公开基础URL', 1);
+-- site.public_base_url 故意留空：种子数据里写上游维护者的域名，等于让每个新装
+-- 实例默认把自己的短链指向别人的站点（#20）。部署后请在后台「系统配置」里填自己的域。
+('site.public_base_url', '', 'string', '短链公开基础URL（部署后必须填写自己的域名）', 1);

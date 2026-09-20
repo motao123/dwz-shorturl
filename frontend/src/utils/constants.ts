@@ -1,10 +1,11 @@
-/** 短链对外域名（用于拼接完整短链） */
-export const SHORT_DOMAIN = 'https://dwz.cn'
-
-/** 拼接完整短链 */
-export function buildShortUrl(uid: string, domain?: string): string {
-  const base = domain || SHORT_DOMAIN
-  return `${base}/${uid}`
+/** 短链的完整地址一律由后端下发（行可能绑定在自有域名上，客户端无从推断）。
+ *
+ * #30：此前这里有一个硬编码的 `SHORT_DOMAIN = 'https://dwz.cn'` 作为兜底，而列表
+ * 接口并不返回 short_url，于是管理台每一次「复制短链 / 访问短链」复制到的都是
+ * 别人的域名。空值不再猜测主机：拿不到地址就宁可不可点。
+ */
+export function shortUrlOf(row: { short_url?: string | null }): string {
+  return row.short_url ?? ''
 }
 
 /** 短链状态展示映射 */

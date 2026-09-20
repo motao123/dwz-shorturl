@@ -4,6 +4,7 @@ import (
 	"sort"
 	"time"
 
+	"dwz-admin/internal/config"
 	"dwz-admin/internal/model"
 	"dwz-admin/internal/pkg"
 	"dwz-admin/internal/repository"
@@ -203,14 +204,37 @@ func (s *statsService) TopN(n int, dateFrom, dateTo *time.Time) ([]model.ShortUr
 	if n <= 0 || n > 100 {
 		n = 10
 	}
-	return s.shortUrlRepo.FindTopN(n, dateFrom, dateTo)
+	urls, err := s.shortUrlRepo.FindTopN(n, dateFrom, dateTo)
+	if err != nil {
+		return nil, err
+	}
+	s.fillAddresses(urls)
+	return urls, nil
 }
 
 func (s *statsService) Recent(n int) ([]model.ShortUrl, error) {
 	if n <= 0 || n > 100 {
 		n = 20
 	}
-	return s.shortUrlRepo.FindRecent(n)
+	urls, err := s.shortUrlRepo.FindRecent(n)
+	if err != nil {
+		return nil, err
+	}
+	s.fillAddresses(urls)
+	return urls, nil
+}
+
+// fillAddresses gives dashboard rows the same absolute short_url the list
+// endpoints return, so the stats view can link out without inventing a host (#30).
+func (s *statsService) fillAddresses(urls []model.ShortUrl) {
+	if len(urls) == 0 {
+		return
+	}
+	var domains []model.Domain
+	if err := s.db.Find(&domains).Error; err != nil {
+		return
+	}
+	applyShortURLs(urls, domainsFromList(domains), config.Get().Public.BaseURL)
 }
 
 // LinkStats returns per-link click analytics (total, 7-day trend, top referrers).

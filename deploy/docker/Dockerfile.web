@@ -39,6 +39,13 @@ COPY site/ /var/www/dwz/site/
 # ROOT . '/migrations' 定位，故保留原相对路径 /var/www/dwz/migrations/。
 COPY migrations/ /var/www/dwz/migrations/
 
+# 违规词库（#11）。PHP 前台与 Go 后台共用同一份 JSON：Go 侧 go:embed 进二进制，
+# PHP 侧运行时读取。此前镜像里根本没有 backend/，includes/function.php 只能回落
+# 到内置的 3 域名 / 5 关键词，公开 api.php、batch.php 的合规拦截静默弱化到与后台
+# 完全不同的强度。刻意落在 web 根之外（/etc/dwz）：黑名单可被公开下载就等于把绕过
+# 方法交给提交方。
+COPY backend/internal/pkg/data/violation_rules.json /etc/dwz/violation_rules.json
+
 # 管理台构建产物（/admin/ 与 /member/）
 COPY --from=assets /app/dist/ /var/www/dwz/admin/
 COPY --from=assets /app/dist/member.html /var/www/dwz/member/index.html

@@ -39,7 +39,7 @@ services:
       - DWZ_JWT_SECRET=${JWT_SECRET:?JWT_SECRET 必须在 .env 中设置}
       - DWZ_JWT_ACCESS_EXPIRY=2h
       - DWZ_JWT_REFRESH_EXPIRY=168h
-      - DWZ_PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-https://1.xk7.cn}
+      - DWZ_PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
       - DWZ_LOG_LEVEL=info
     depends_on:
       mysql:

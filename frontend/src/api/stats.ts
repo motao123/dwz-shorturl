@@ -29,6 +29,8 @@ export interface TopUrl {
   long_url: string
   title: string | null
   clicks: number
+  /** 完整短链地址，由后端按下辖域名下发（#30） */
+  short_url?: string
 }
 
 export interface TopQuery {
@@ -44,6 +46,8 @@ export interface RecentUrl {
   title: string | null
   clicks: number
   source: string
+  /** 完整短链地址，由后端按下辖域名下发（#30） */
+  short_url?: string
   created_at: string
 }
 

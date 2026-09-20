@@ -7,14 +7,14 @@
   <title>违法信息举报 - Imotao 短网址</title>
   <meta name="description" content="Imotao 短网址违法信息举报通道：举报范围、举报方式与处理时限承诺。">
   <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://1.xk7.cn/report.html">
+  <link rel="canonical" href="/report.html">
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="./assets/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="stylesheet" href="./assets/tokens.min.css">
   <link rel="stylesheet" href="./assets/api.min.css">
   <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"首页","item":"https://1.xk7.cn/"},{"@type":"ListItem","position":2,"name":"违法信息举报","item":"https://1.xk7.cn/report.html"}]}
+  {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"首页","item":"/"},{"@type":"ListItem","position":2,"name":"违法信息举报","item":"/report.html"}]}
   </script>
 </head>
 <body>
@@ -35,9 +35,13 @@
   <table>
     <thead><tr><th>通道</th><th>说明</th></tr></thead>
     <tbody>
-      <tr><td>举报邮箱</td><td><code>abuse@1.xk7.cn</code></td></tr>
+      <!-- #20：这里此前硬编码着上游维护者的真实举报邮箱，于是每一个二开/自托管
+           站点都在自己的页面上公示别人的收件地址——举报信会寄到作者域，既是合规
+           问题也是骚扰。改成必须替换的中性占位地址：错了很显眼，而真实地址不该
+           由上游代你公示。部署时请替换为你自己的 abuse@ 地址。 -->
+      <tr><td>举报邮箱</td><td><code>abuse@your-domain.com</code>（部署时替换为自有邮箱）</td></tr>
       <tr><td>邮件主题格式</td><td>【短链举报】+ 被举报短链地址</td></tr>
-      <tr><td>正文请包含</td><td>被举报短链（如 https://1.xk7.cn/xxxxxx）、违规类型、截图或说明、你的联系方式（可选）</td></tr>
+      <tr><td>正文请包含</td><td>被举报短链（如 https://你的域名/xxxxxx）、违规类型、截图或说明、你的联系方式（可选）</td></tr>
       <tr><td>国家级通道</td><td>中央网信办举报中心：<a href="https://www.12377.cn/" rel="nofollow noopener" target="_blank">www.12377.cn</a></td></tr>
     </tbody>
   </table>

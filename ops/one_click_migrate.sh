@@ -19,7 +19,7 @@
 #       --user=root --pass='密码' --host=127.0.0.1 --port=3306
 #
 # 可选：
-#   --web-root=/data/www/wwwroot/1.xk7.cn   静态资源构建目录（默认脚本上级目录）
+#   --web-root=/data/www/wwwroot/your-domain.com   静态资源构建目录（默认脚本上级目录）
 #   --skip-backup                           跳过备份（不推荐）
 #   --skip-assets                           跳过静态资源构建
 #   --dry-run                               只打印将要执行的命令，不落库

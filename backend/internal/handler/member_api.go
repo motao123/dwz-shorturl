@@ -87,7 +87,7 @@ func (h *MemberApiHandler) CreateLink(c *gin.Context) {
 	pkg.Success(c, gin.H{
 		"id":        record.ID,
 		"uid":       record.UID,
-		"short_url": service.PublicShortURL(record.UID),
+		"short_url": record.ShortURL,
 		"long_url":  record.LongURL,
 		"title":     record.Title,
 	})

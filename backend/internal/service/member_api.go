@@ -129,7 +129,12 @@ func (s *memberApiService) ListLinks(memberID uint64, page, perPage int, keyword
 		zero := int8(0)
 		filters.Status = &zero
 	}
-	return s.shortUrlRepo.List(page, perPage, filters)
+	// Member-facing lists get the same short_url fill as admin queries, so a link
+	// bound to its own domain shows that domain instead of the deployment
+	// default (#30).
+	urls, total, err := s.shortUrlRepo.List(page, perPage, filters)
+	s.shortUrlSvc.FillShortURLs(urls)
+	return urls, total, err
 }
 
 // listByStatus runs a custom query for statuses that can't be expressed with the
@@ -154,10 +159,21 @@ func (s *memberApiService) listByStatus(memberID uint64, page, perPage int, keyw
 	}
 	var list []model.ShortUrl
 	err := query.Order("created_at DESC").Offset((page - 1) * perPage).Limit(perPage).Find(&list).Error
+	s.shortUrlSvc.FillShortURLs(list)
 	return list, total, err
 }
 
 func (s *memberApiService) CreateLink(memberID uint64, url, title, custom string, expireDays int, ip, password string, domainID *uint64) (*model.ShortUrl, error) {
+	record, err := s.createLink(memberID, url, title, custom, expireDays, ip, password, domainID)
+	if record != nil {
+		s.shortUrlSvc.FillShortURL(record)
+	}
+	return record, err
+}
+
+// createLink holds the creation logic. Callers use CreateLink, which additionally
+// fills short_url (#30).
+func (s *memberApiService) createLink(memberID uint64, url, title, custom string, expireDays int, ip, password string, domainID *uint64) (*model.ShortUrl, error) {
 	url = trimSpace(url)
 	if err := validateURL(url); err != nil {
 		return nil, err
@@ -246,6 +262,7 @@ func (s *memberApiService) ExportLinks(memberID uint64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.shortUrlSvc.FillShortURLs(urls)
 
 	var buf bytes.Buffer
 	buf.WriteString("uid,short_url,long_url,title,clicks,expire_at,created_at\n")
@@ -255,7 +272,7 @@ func (s *memberApiService) ExportLinks(memberID uint64) ([]byte, error) {
 			expireAt = u.ExpireAt.Format(time.RFC3339)
 		}
 		line := fmt.Sprintf("%s,\"%s\",\"%s\",\"%s\",%d,%s,%s\n",
-			u.UID, PublicShortURL(u.UID), csvSafeCell(u.LongURL), csvSafeCell(u.Title), u.Clicks, expireAt, u.CreatedAt.Format(time.RFC3339))
+			u.UID, u.ShortURL, csvSafeCell(u.LongURL), csvSafeCell(u.Title), u.Clicks, expireAt, u.CreatedAt.Format(time.RFC3339))
 		buf.WriteString(line)
 	}
 	return buf.Bytes(), nil
@@ -607,7 +624,7 @@ func (s *memberApiService) ImportLinks(memberID uint64, content string, ip strin
 			row.Error = err.Error()
 		} else {
 			row.UID = record.UID
-			row.ShortURL = PublicShortURL(record.UID)
+			row.ShortURL = record.ShortURL
 		}
 		results = append(results, row)
 		if len(results) >= MemberImportMaxRows {
@@ -646,7 +663,7 @@ func (s *memberApiService) BatchCreateLinks(memberID uint64, urls []string, ip s
 			row.Error = err.Error()
 		} else {
 			row.UID = record.UID
-			row.ShortURL = PublicShortURL(record.UID)
+			row.ShortURL = record.ShortURL
 		}
 		results = append(results, row)
 	}
@@ -911,12 +928,10 @@ func trimSpace(s string) string {
 }
 
 // emailBaseURL resolves the public base URL used in outbound emails. It follows
-// the public.base_url config (instead of a hardcoded domain) and trims trailing
-// slashes so link concatenation stays consistent.
+// the public.base_url config and trims trailing slashes so link concatenation
+// stays consistent. An empty result means "not configured": callers must then
+// omit the link rather than fall back to any hard-coded domain, which would
+// steer the operator's users onto a third-party site (#20).
 func emailBaseURL() string {
-	base := strings.TrimRight(strings.TrimSpace(config.Get().Public.BaseURL), "/")
-	if base == "" {
-		base = "https://1.xk7.cn"
-	}
-	return base
+	return strings.TrimRight(strings.TrimSpace(config.Get().Public.BaseURL), "/")
 }

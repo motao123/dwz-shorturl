@@ -56,9 +56,21 @@ $member_secret = '';
 $stats_enabled = false;
 $stats_token = '';
 
-// 合规与联系邮箱。举报（report.html）与隐私政策（privacy.html）页面上公示的
-// 地址取自这里——此前邮箱硬编码在 HTML 里，且写着「占位，运营后替换」，既容易
-// 忘记替换，也让公开页面看起来未就绪。改到配置项后，运营只需改这一处。
-// 留空时页面退化为引导用户使用站内举报入口，不会展示一个收不到信的假地址。
-$abuse_email = 'abuse@example.com';   // 违法信息举报
-$privacy_email = 'privacy@example.com'; // 隐私与个人信息权利请求
+// 合规页联系方式（#20）。
+// report.html / privacy.html 是静态页、不由 PHP 渲染，所以这两个值**目前没有任何
+// 消费方**——此前这里的注释声称"页面取自这里"，是假的。两页里现在写的是
+// `abuse@your-domain.com` / `privacy@your-domain.com` 占位地址，部署时请直接改那
+// 两个文件。若你希望它由配置驱动，需要把两页改成 PHP 渲染（并在 nginx/Apache 各
+// 加一条路由），届时再把这两个键接上。
+$abuse_email = '';
+$privacy_email = '';
+
+// 违规词库文件路径（可选，#11）。
+// PHP 前台与 Go 后台共用同一份 violation_rules.json：Go 侧已 go:embed 编译进二进制，
+// PHP 侧在运行时读取。留空即按顺序自动查找：
+//   1) /etc/dwz/violation_rules.json（Docker 镜像与 deploy.sh 的落点）
+//   2) 仓库内 backend/internal/pkg/data/violation_rules.json（git clone / 开发机）
+// 全部找不到时退回内置最小黑名单（3 域名 / 5 关键词）并写一行错误日志——那时
+// 公开 api.php、batch.php 的拦截强度会明显低于后台与 Go 侧，务必在部署后确认。
+// 不要把它指到 web 根下的路径：词库可被下载等于把黑名单交给提交方。
+$violation_rules_file = '';

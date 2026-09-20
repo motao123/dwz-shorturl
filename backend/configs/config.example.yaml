@@ -33,7 +33,10 @@ jwt:
   access_expiry: 2h
   refresh_expiry: 168h
 public:
-  base_url: "https://1.xk7.cn"
+  # 站点对外地址，必须改成你自己的域，例如 https://links.example.com。
+  # 留空时短链地址会退化为相对路径、续期邮件里也不再附会员中心链接，
+  # 并且服务启动时会打一条 warn —— 不要再照抄示例里的域名上线（#20）。
+  base_url: ""
   trusted_proxies: []
 rate_limit:
   single_max: 20

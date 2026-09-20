@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -55,6 +56,14 @@ func main() {
 	// Initialize logger
 	zapLogger := initLogger(cfg.Log.Level, cfg.Log.File)
 	defer zapLogger.Sync()
+
+	// public.base_url is no longer defaulted to any domain (#20). Without it the
+	// API returns relative short-link addresses and expiry emails omit the member
+	// center link — correct, but almost never what an operator intended, so say so.
+	if strings.TrimSpace(cfg.Public.BaseURL) == "" {
+		zapLogger.Warn("public.base_url is empty: short links will be returned as relative addresses",
+			zap.String("remediation", "set public.base_url in configs/config.yaml to your own site origin"))
+	}
 
 	// Initialize database
 	db := initDB(cfg, zapLogger)
