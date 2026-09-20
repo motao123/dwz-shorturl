@@ -1,0 +1,27 @@
+# 最小 Prometheus 抓取配置。
+#
+# 后端 /metrics 暴露的是标准文本格式（无额外依赖，见
+# backend/internal/handler/metrics.go）。把本文件挂载到 Prometheus 的
+# /etc/prometheus/prometheus.yml，并把 alert-rules.yml 放到
+# rule_files 指向的位置即可。
+#
+# 若后端不在本机，把 targets 改成实际地址；若 /metrics 已按
+# deploy/nginx/default.conf 限制了来源，请确保 Prometheus 的出口 IP 在
+# 允许网段内。
+
+global:
+  # 15 秒足够快，又不会对后端造成压力（每次抓取只做一次 DB ping + 一次 Redis ping）。
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alert-rules.yml
+
+scrape_configs:
+  - job_name: dwz-backend
+    metrics_path: /metrics
+    static_configs:
+      # 同机部署：后端默认监听 127.0.0.1:8080。
+      - targets: ["127.0.0.1:8080"]
+        labels:
+          service: dwz-shorturl

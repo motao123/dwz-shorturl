@@ -102,15 +102,15 @@ function shorturl($input){
 
 // Validate a destination once for both single and batch APIs.
 function validate_long_url($url, $skip_dns = false) {
-    if (!is_string($url) || $url === '') return array(false, 'the url cannot be empty', 10001);
-    if (strlen($url) > 2048) return array(false, 'url too long', 10002);
-    if (preg_match('/[\x00-\x20\x7f]/', $url)) return array(false, 'url is incorrect', 10002);
+    if (!is_string($url) || $url === '') return array(false, '链接不能为空', 10001);
+    if (strlen($url) > 2048) return array(false, '链接过长，请缩短后重试', 10002);
+    if (preg_match('/[\x00-\x20\x7f]/', $url)) return array(false, '链接格式不正确，请输入完整的 http(s) 地址', 10002);
     $parts = parse_url($url);
-    if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) return array(false, 'url is incorrect', 10002);
-    if (!in_array(strtolower($parts['scheme']), array('http', 'https'), true)) return array(false, 'url is incorrect', 10002);
-    if (isset($parts['user']) || isset($parts['pass'])) return array(false, 'url is incorrect', 10002);
-    if (isset($parts['port']) && ($parts['port'] < 1 || $parts['port'] > 65535)) return array(false, 'url is incorrect', 10002);
-    if (isPrivateHost($parts['host'], $skip_dns)) return array(false, 'url host not allowed', 10004);
+    if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) return array(false, '链接格式不正确，请输入完整的 http(s) 地址', 10002);
+    if (!in_array(strtolower($parts['scheme']), array('http', 'https'), true)) return array(false, '链接格式不正确，请输入完整的 http(s) 地址', 10002);
+    if (isset($parts['user']) || isset($parts['pass'])) return array(false, '链接格式不正确，请输入完整的 http(s) 地址', 10002);
+    if (isset($parts['port']) && ($parts['port'] < 1 || $parts['port'] > 65535)) return array(false, '链接格式不正确，请输入完整的 http(s) 地址', 10002);
+    if (isPrivateHost($parts['host'], $skip_dns)) return array(false, '该地址不允许被缩短（内网/本机/云元数据地址）', 10004);
     return array(true, '', 1);
 }
 
@@ -335,10 +335,16 @@ function create_short_url($DB, $longurl, $custom = null, $expire_days = 0, $doma
 
     $attempts = $custom !== '' ? 1 : 12;
     for ($attempt = 0; $attempt < $attempts; $attempt++) {
+        // 始终加随机盐：短码由 md5(长链 + 盐) 推导，盐为空时同一个长链永远
+        // 得到同一个短码。此前只有第 2 次重试起才加盐，于是「首个短码」是可
+        // 预测的——知道算法与长链即可推算出别人的短码，也方便批量探测已存在
+        // 的链接。现在每次生成都是独立随机短码。
+        // 幂等去重不受影响：调用方在本函数之前已按 url_hash 命中「已存在」分支，
+        // 不会为同一长链反复建新码。
         try {
-            $salt = $attempt === 0 ? '' : '|' . $attempt . '|' . bin2hex(random_bytes(8));
+            $salt = '|' . $attempt . '|' . bin2hex(random_bytes(8));
         } catch (Throwable $e) {
-            $salt = '|' . $attempt . '|' . uniqid('', true);
+            $salt = '|' . $attempt . '|' . uniqid('', true) . '|' . mt_rand();
         }
         $uid = $custom !== '' ? $custom : shorturl($longurl . $salt);
         $stmt = $DB->prepare('INSERT INTO wjoy_log (uid,longurl,url_hash,expire_at,password_hash) VALUES (?,?,?,?,?)');
@@ -372,33 +378,31 @@ function create_short_url($DB, $longurl, $custom = null, $expire_days = 0, $doma
 // 返回 array('blocked'=>bool, 'reason'=>string)
 // ---------------------------------------------------------------------------
 
-$blocked_domain_suffixes = array(
-    // 菠菜 / gambling
-    'bet365.com', '188bet.com', 'bwin.com', 'dafabet.com', 'm88.com',
-    '18win.com', 'betway.com', 'w88.com', 'fun88.com', '12bet.com',
-    '10bet.com', '365bet.com', 'betflik.com', 'ufa999.com', 'pgslot.com',
-    'slotxo.com', 'milton88.com', 'boss888.com', 'mgm888.com', 'jackpot.com',
-    // 仿冒 / phishing / scam
-    'phishing.com', 'scam.com', 'bitcoin-cash.cc', 'secure-login-verify.com',
-    'account-verify.com', 'paypal-verify.com', 'appleid-verify.com',
-    // 恶意下载 / malware
-    'malware.com', 'trojan-download.com', 'spam-site.com',
-);
+// 违规规则的唯一来源：backend/internal/pkg/data/violation_rules.json。
+// Go 侧（internal/pkg/violation.go）通过 go:embed 读同一文件，PHP 侧在此加载，
+// 两边共用一份数据，从结构上杜绝「词库双实现漂移」。
+// 加载失败时退回内置最小集合并记日志，避免整个检测静默失效。
+$blocked_domain_suffixes = array();
+$blocked_keywords = array();
 
-$blocked_keywords = array(
-    // 菠菜 / gambling
-    'betting', 'casino', 'poker', 'slot', 'gambling', '老虎机', '百家乐',
-    '轮盘', '德州扑克', '棋牌充值', '博彩', '赌场', '网络赌博', '太阳城',
-    '澳门娱乐场', '六合彩', '外围赌', '重庆时时彩', '彩票投注',
-    // 仿冒 / phishing
-    'password reset please login', 'verify your account immediately',
-    '登录验证您的账户', '您的账户已被冻结', '账户异常请立即验证',
-    // 恶意下载 / malware
-    'download-virus', 'free-crack', 'keygen', '盗版激活码',
-    // 诈骗 / scam
-    '刷单返利', '稳赚不赔', '高额回报', '保本保息', '先付后取',
-);
-
+(function () {
+    global $blocked_domain_suffixes, $blocked_keywords;
+    $rules_file = __DIR__ . "/../backend/internal/pkg/data/violation_rules.json";
+    $fallback_domains = array("bet365.com", "phishing.com", "malware.com");
+    $fallback_keywords = array("casino", "gambling", "博彩", "赌场", "刷单返利");
+    $raw = @file_get_contents($rules_file);
+    $data = $raw === false ? null : json_decode($raw, true);
+    if (!is_array($data)) {
+        error_log("[dwz] 违规规则文件不可用：" . $rules_file . "，已退回内置最小黑名单");
+        $blocked_domain_suffixes = $fallback_domains;
+        $blocked_keywords = $fallback_keywords;
+        return;
+    }
+    $blocked_domain_suffixes = isset($data["domain_suffixes"]) && is_array($data["domain_suffixes"])
+        ? $data["domain_suffixes"] : $fallback_domains;
+    $blocked_keywords = isset($data["keywords"]) && is_array($data["keywords"])
+        ? $data["keywords"] : $fallback_keywords;
+})();
 function check_url_violation($url) {
     global $blocked_domain_suffixes, $blocked_keywords;
 
@@ -409,7 +413,7 @@ function check_url_violation($url) {
     // 云元数据端点始终拦截（SSRF 纵深防御）
     if ($host === '169.254.169.254' || substr($host, -15) === '.169.254.169.254'
         || $host === 'metadata.google.internal' || substr($host, -24) === 'metadata.google.internal') {
-        return array('blocked' => true, 'reason' => 'cloud metadata address is not allowed');
+        return array('blocked' => true, 'reason' => '云元数据地址不允许访问');
     }
 
     // 域名精确 / 后缀黑名单
@@ -497,7 +501,16 @@ function base64url_encode($data) {
 // Mirrors what the Go /r/:code path persists so admin stats stay consistent.
 function record_click_analytics($uid) {
     global $ADMIN_DB;
-    if (!$ADMIN_DB || empty($ADMIN_DB->link)) return;
+    if (!$ADMIN_DB || empty($ADMIN_DB->link)) {
+        // Analytics has no admin connection, so this click cannot be recorded
+        // anywhere. Silently returning used to make a pure-PHP deployment look
+        // "successful" while every stat stayed at zero, and the operator had no
+        // signal at all. Log once per process (guarded so a busy redirect path
+        // cannot flood php_error.log) and, in that state, still fall back to the
+        // legacy wjoy_log counter so the frontend does not lose the click.
+        record_click_analytics_degraded($uid);
+        return;
+    }
     $ip = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '';
     $ua = isset($_SERVER['HTTP_USER_AGENT']) ? substr($_SERVER['HTTP_USER_AGENT'], 0, 512) : '';
     $ref = isset($_SERVER['HTTP_REFERER']) ? substr($_SERVER['HTTP_REFERER'], 0, 512) : '';
@@ -516,6 +529,29 @@ function record_click_analytics($uid) {
         mysqli_stmt_execute($stmt);
         mysqli_stmt_close($stmt);
     }
+}
+
+// Degraded analytics path: the admin DB is not configured, so click_logs and
+// short_urls.clicks are unreachable. Fall back to the legacy wjoy_log counter
+// (the pre-dual-write behaviour) so a pure-PHP install still shows non-zero
+// clicks, and emit a single actionable warning per request so the misconfig is
+// visible instead of producing a silently empty dashboard.
+function record_click_analytics_degraded($uid) {
+    static $warned = false;
+    if (!$warned) {
+        $warned = true;
+        error_log('[dwz] 点击统计已降级：未配置 ADMIN_DB（$admin_db_user / $admin_db_name 为空），'
+            . 'click_logs 与 short_urls.clicks 无法写入，后台统计将长期为空。'
+            . '请在 config.php 中配置后台库连接，或改用 Go 跳转网关 /r/:code。');
+    }
+
+    global $DB;
+    if (!$DB || empty($DB->link)) return;
+    $stmt = $DB->prepare('UPDATE wjoy_log SET clicks = clicks + 1 WHERE uid = ? LIMIT 1');
+    if (!$stmt) return;
+    mysqli_stmt_bind_param($stmt, 's', $uid);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
 }
 
 // ---------------------------------------------------------------------------

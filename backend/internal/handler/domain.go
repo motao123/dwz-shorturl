@@ -87,7 +87,7 @@ func (h *DomainHandler) GetByID(c *gin.Context) {
 func (h *DomainHandler) Create(c *gin.Context) {
 	var req CreateDomainRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "domain is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "请填写域名")
 		return
 	}
 
@@ -166,7 +166,7 @@ func (h *DomainHandler) Check(c *gin.Context) {
 func (h *DomainHandler) BatchStatus(c *gin.Context) {
 	var req BatchStatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "ids array is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "ids 数组不能为空")
 		return
 	}
 

@@ -36,12 +36,25 @@ if ($domain_id !== '' && (!ctype_digit($domain_id) || member_id() <= 0)) {
 }
 $password = isset($_POST['password']) && is_string($_POST['password']) ? $_POST['password'] : '';
 if (strlen($password) > 72) batch_error('访问密码过长（最多 72 字节）', 10008, 422);
-if (strlen($raw) > 210000) batch_error('request too large', 10011, 413);
+if (strlen($raw) > 210000) batch_error('请求内容过大（上限约 200KB），请分批提交', 10011, 413);
 $lines = preg_split('/\R+/', trim($raw), -1, PREG_SPLIT_NO_EMPTY);
-if (!$lines) batch_error('urls cannot be empty', 10001, 400);
+if (!$lines) batch_error('请至少填写一条链接', 10001, 400);
 // 单次批量上限由后台配置（clamp 到 1..1000，防误配打爆内存）
 $maxBatchUrls = max(1, min(1000, system_config_int('batch.max_urls', 100)));
-if (count($lines) > $maxBatchUrls) batch_error('too many urls; maximum is ' . $maxBatchUrls, 10012, 422);
+// 超限时明确告诉用户「超出多少、怎么处理」，而不是只丢一句上限值。
+// 此前只返回 "too many urls; maximum is N"，用户拿到后既不知道超了几条，
+// 也不知道该怎么改，只能自己数。这里把三个数字都给出来。
+if (count($lines) > $maxBatchUrls) {
+    $total = count($lines);
+    $excess = $total - $maxBatchUrls;
+    batch_error(
+        '一次最多提交 ' . $maxBatchUrls . ' 条，当前提交 ' . $total . ' 条，'
+        . '超出 ' . $excess . ' 条。请删减后再提交，或拆成多次。',
+        10012,
+        422,
+        array('submitted' => $total, 'maximum' => $maxBatchUrls, 'excess' => $excess)
+    );
+}
 if (!rate_limit(real_ip(), 100, 60, count($lines))) {
     if (!headers_sent()) header('Retry-After: 60');
     batch_error('请求过于频繁，请稍后再试', 10005, 429);
@@ -98,10 +111,13 @@ http_response_code(200);
 echo json_encode($results, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 $DB->close();
 
-function batch_error($msg, $result, $status) {
+function batch_error($msg, $result, $status, $extra = null) {
     global $DB;
     if (!headers_sent()) http_response_code($status);
-    echo json_encode(array('code' => 0, 'msg' => $msg, 'result' => $result), JSON_UNESCAPED_UNICODE);
+    $payload = array('code' => 0, 'msg' => $msg, 'result' => $result);
+    // 可选的结构化细节（如超限的具体条数），便于前端直接渲染而无需解析文案。
+    if (is_array($extra)) $payload['data'] = $extra;
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
     if (isset($DB)) $DB->close();
     exit();
 }

@@ -25,14 +25,21 @@ import (
 	"gorm.io/gorm"
 )
 
+// User-facing service errors.
+//
+// These strings are returned verbatim to the browser (handlers pass err.Error()
+// into the JSON envelope), so they are written in Chinese to match the rest of
+// the product. They previously mixed English and Chinese depending on which
+// layer rejected the input, e.g. a user typed a bad URL and got
+// "url host not allowed" while the surrounding UI was entirely Chinese.
 var (
-	ErrURLInvalid       = errors.New("url is invalid")
-	ErrURLTooLong       = errors.New("url too long")
-	ErrSSRFBlocked      = errors.New("url host not allowed")
-	ErrDNSResolve       = errors.New("url host cannot be resolved, please retry later")
-	ErrCustomCodeFormat = errors.New("custom code format error, must be 6-8 chars of a-z0-5")
-	ErrCustomCodeTaken  = errors.New("custom code already taken")
-	ErrCodeCollision    = errors.New("short code collision, please retry")
+	ErrURLInvalid       = errors.New("链接格式不正确，请输入完整的 http(s) 地址")
+	ErrURLTooLong       = errors.New("链接过长，请缩短后重试")
+	ErrSSRFBlocked      = errors.New("该地址不允许被缩短（内网/本机/云元数据地址）")
+	ErrDNSResolve       = errors.New("该域名暂时无法解析，请稍后重试")
+	ErrCustomCodeFormat = errors.New("自定义短码格式不正确：需为 6-8 位小写字母或数字")
+	ErrCustomCodeTaken  = errors.New("自定义短码已被占用")
+	ErrCodeCollision    = errors.New("短码生成冲突，请重试")
 )
 
 // PublicSyncError reports that an administrative change was applied to the

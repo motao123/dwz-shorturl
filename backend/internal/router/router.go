@@ -29,6 +29,7 @@ type Handlers struct {
 	Monitor  *handler.MonitorHandler
 	Webhook  *handler.WebhookHandler
 	MemberApi *handler.MemberApiHandler
+	Metrics *handler.MetricsHandler
 }
 
 func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, error), logger *zap.Logger, cfg *config.Config, apiKeyRepo repository.ApiKeyRepo, rateLimiter *pkg.RateLimiter, memberRepo repository.MemberRepo) {
@@ -233,4 +234,12 @@ func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, err
 
 	// Health check (detailed)
 	engine.GET("/health", h.Redirect.Health)
+
+	// Prometheus-format metrics for an external scraper. Registered outside the
+	// admin API group so a scrape needs no auth token; deployments that expose
+	// this port publicly should restrict /metrics at the proxy (see
+	// nginx.example.conf, which allows only the monitoring network).
+	if h.Metrics != nil {
+		engine.GET("/metrics", h.Metrics.Metrics)
+	}
 }

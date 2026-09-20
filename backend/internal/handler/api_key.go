@@ -29,7 +29,7 @@ type CreateApiKeyRequest struct {
 func (h *ApiKeyHandler) Create(c *gin.Context) {
 	var req CreateApiKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "name is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "请填写名称")
 		return
 	}
 

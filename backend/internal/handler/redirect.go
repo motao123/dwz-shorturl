@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"dwz-admin/internal/config"
@@ -49,6 +50,13 @@ type ClickQueue struct {
 	pending     int64 // atomically tracked count of queued events
 	mu          sync.Mutex
 	onClick     func(uid string) // optional webhook callback per click
+
+	// Counters exposed through /metrics. They are the ones an operator actually
+	// needs to alert on: a rising drop count means the queue is saturated (and
+	// clicks are being lost), a rising persisted count shows the drain rate.
+	dropped   int64 // events discarded because the queue was full
+	persisted int64 // events successfully written to click_logs
+	failed    int64 // events whose insert failed (dropped after retries)
 }
 
 const (
@@ -118,7 +126,29 @@ func (q *ClickQueue) Enqueue(evt ClickEvent) {
 	select {
 	case q.ch <- evt:
 	default:
+		atomic.AddInt64(&q.dropped, 1)
 		q.logger.Warn("click queue full, dropping event", zap.String("uid", evt.UID))
+	}
+}
+
+// ClickQueueStats is a point-in-time snapshot of the queue's counters, used by
+// /metrics and the health endpoint.
+type ClickQueueStats struct {
+	Pending   int
+	Capacity  int
+	Dropped   int64
+	Persisted int64
+	Failed    int64
+}
+
+// Stats returns the current queue counters.
+func (q *ClickQueue) Stats() ClickQueueStats {
+	return ClickQueueStats{
+		Pending:   len(q.ch),
+		Capacity:  cap(q.ch),
+		Dropped:   atomic.LoadInt64(&q.dropped),
+		Persisted: atomic.LoadInt64(&q.persisted),
+		Failed:    atomic.LoadInt64(&q.failed),
 	}
 }
 
@@ -216,6 +246,9 @@ func (q *ClickQueue) persist(events []ClickEvent) {
 	if len(clickLogs) > 0 {
 		if err := q.db.CreateInBatches(clickLogs, 100).Error; err != nil {
 			q.logger.Error("batch insert click logs failed", zap.Error(err))
+			atomic.AddInt64(&q.failed, int64(len(clickLogs)))
+		} else {
+			atomic.AddInt64(&q.persisted, int64(len(clickLogs)))
 		}
 	}
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -123,6 +124,51 @@ func (s *CronService) registerTasks() {
 	}
 }
 
+// Retention defaults for analytics tables. Both are overridable at runtime via
+// system_configs so an operator can shorten or extend retention without a
+// redeploy; an out-of-range or unparseable value falls back to the default
+// rather than deleting more (or less) than intended.
+const (
+	defaultClickLogRetentionDays = 90
+	defaultStatsRetentionDays    = 90
+
+	// Guard rails: below 1 day the nightly job would erase fresh data, and a
+	// value that large is almost certainly a typo.
+	minRetentionDays = 1
+	maxRetentionDays = 3650
+
+	configKeyClickLogRetention = "analytics.click_logs_retention_days"
+	configKeyStatsRetention    = "analytics.stats_hourly_retention_days"
+)
+
+// retentionDays resolves a retention override from system_configs, clamping it
+// into the sane range and falling back to the caller's default. A missing row,
+// an empty value, or a non-numeric value all mean "use the default" — never
+// "delete nothing" or "delete everything".
+func (s *CronService) retentionDays(key string, fallback int) int {
+	var row model.SystemConfig
+	err := s.db.Where("config_key = ?", key).First(&row).Error
+	if err != nil || strings.TrimSpace(row.ConfigValue) == "" {
+		return fallback
+	}
+	n, convErr := strconv.Atoi(strings.TrimSpace(row.ConfigValue))
+	if convErr != nil {
+		s.logger.Warn("retention config is not a number, using default",
+			zap.String("key", key),
+			zap.String("value", row.ConfigValue),
+			zap.Int("default_days", fallback))
+		return fallback
+	}
+	if n < minRetentionDays || n > maxRetentionDays {
+		s.logger.Warn("retention config out of range, using default",
+			zap.String("key", key),
+			zap.Int("value", n),
+			zap.Int("default_days", fallback))
+		return fallback
+	}
+	return n
+}
+
 // safe wraps a background task body so a panic inside a cron job cannot crash
 // the whole process (cron invokes jobs synchronously on its own goroutine).
 func safe(name string, logger *zap.Logger, fn func()) func() {
@@ -174,10 +220,13 @@ func (s *CronService) markExpiredLinks() {
 }
 
 // cleanupOldClickLogs removes click_logs rows older than the configured
-// retention period (default 90 days). Uses a batched DELETE to avoid
-// locking issues on large tables.
+// retention period. The period used to be hard-coded to 90 days, which forced
+// anyone needing shorter (privacy / disk) or longer (year-over-year analysis)
+// retention to patch and redeploy; it is now read from system_configs on every
+// run, so a change takes effect at the next nightly job with no restart.
 func (s *CronService) cleanupOldClickLogs() {
-	threshold := time.Now().AddDate(0, 0, -90)
+	days := s.retentionDays(configKeyClickLogRetention, defaultClickLogRetentionDays)
+	threshold := time.Now().AddDate(0, 0, -days)
 	result := s.db.Where("created_at < ?", threshold).
 		Delete(&model.ClickLog{})
 	if result.Error != nil {
@@ -188,14 +237,17 @@ func (s *CronService) cleanupOldClickLogs() {
 		s.logger.Info("cleaned up old click logs",
 			zap.Int64("deleted", result.RowsAffected),
 			zap.Time("threshold", threshold),
+			zap.Int("retention_days", days),
 		)
 	}
 }
 
-// cleanupOldStats removes stats_hourly rows older than the retention period
-// (90 days) to keep the aggregation table bounded.
+// cleanupOldStats removes stats_hourly rows older than the retention period to
+// keep the aggregation table bounded. Configurable for the same reason as
+// click_logs (see cleanupOldClickLogs).
 func (s *CronService) cleanupOldStats() {
-	threshold := time.Now().AddDate(0, 0, -90)
+	days := s.retentionDays(configKeyStatsRetention, defaultStatsRetentionDays)
+	threshold := time.Now().AddDate(0, 0, -days)
 	result := s.db.Table("stats_hourly").Where("hour < ?", threshold).Delete(&map[string]interface{}{})
 	if result.Error != nil {
 		s.logger.Error("stats cleanup task failed", zap.Error(result.Error))
@@ -205,6 +257,7 @@ func (s *CronService) cleanupOldStats() {
 		s.logger.Info("cleaned up old stats_hourly rows",
 			zap.Int64("deleted", result.RowsAffected),
 			zap.Time("threshold", threshold),
+			zap.Int("retention_days", days),
 		)
 	}
 }

@@ -76,7 +76,7 @@ func (h *MemberApiHandler) CreateLink(c *gin.Context) {
 	memberID := c.GetUint64("member_id")
 	var req MemberCreateLinkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "url is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "url 不能为空")
 		return
 	}
 	record, err := h.svc.CreateLink(memberID, req.URL, req.Title, req.Custom, req.ExpireDays, c.ClientIP(), req.Password, req.DomainID)
@@ -127,7 +127,7 @@ type VerifyEmailRequest struct {
 func (h *MemberApiHandler) SendVerification(c *gin.Context) {
 	var req SendVerificationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "email is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "请填写邮箱")
 		return
 	}
 	if err := h.svc.SendVerification(req.Email); err != nil {
@@ -140,7 +140,7 @@ func (h *MemberApiHandler) SendVerification(c *gin.Context) {
 func (h *MemberApiHandler) VerifyEmail(c *gin.Context) {
 	var req VerifyEmailRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "token is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "token 不能为空")
 		return
 	}
 	if err := h.svc.VerifyEmail(req.Token); err != nil {
@@ -159,7 +159,7 @@ type MemberResetPasswordRequest struct {
 func (h *MemberApiHandler) RequestPasswordReset(c *gin.Context) {
 	var req ForgotPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "email is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "请填写邮箱")
 		return
 	}
 	if err := h.svc.RequestPasswordReset(req.Email); err != nil {
@@ -190,7 +190,7 @@ type FetchTitleRequest struct {
 func (h *MemberApiHandler) FetchTitle(c *gin.Context) {
 	var req FetchTitleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "url is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "url 不能为空")
 		return
 	}
 	title, err := h.svc.FetchTitle(req.URL)
@@ -209,7 +209,7 @@ func (h *MemberApiHandler) ImportLinks(c *gin.Context) {
 	memberID := c.GetUint64("member_id")
 	var req MemberImportRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "content is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "content 不能为空")
 		return
 	}
 	result, err := h.svc.ImportLinks(memberID, req.Content, c.ClientIP())
@@ -228,7 +228,7 @@ func (h *MemberApiHandler) BatchCreateLinks(c *gin.Context) {
 	memberID := c.GetUint64("member_id")
 	var req MemberBatchCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "urls is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "urls 不能为空")
 		return
 	}
 	if len(req.URLs) > 100 {
@@ -251,7 +251,7 @@ func (h *MemberApiHandler) RenewExpiring(c *gin.Context) {
 	memberID := c.GetUint64("member_id")
 	var req RenewExpiringRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.ExpireDays <= 0 {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "expire_days is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "expire_days 不能为空")
 		return
 	}
 	renewed, syncErr, err := h.svc.RenewExpiring(memberID, req.ExpireDays)

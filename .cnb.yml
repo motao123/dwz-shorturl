@@ -1,16 +1,20 @@
 # ============================================================
 # CNB 云原生构建流水线
 #
-# 目标：在 Pull Request 阶段做「增量」依赖风险检查 —— 只对本次 PR
-#       新引入的漏洞 / License 风险阻断，历史遗留告警不阻断。
-#
-# 背景：本项目依赖曾长期落后（golang.org/x/crypto 0.25.0、
-#       echarts 5.6.0 等），平台安全页因此累积大量存量告警。若在 PR
-#       阶段做全量门禁，任何一个 PR 都会被历史告警卡死；只有增量门禁
-#       才能让「新引入的风险」真正被拦住，同时不被存量噪音淹没。
-#
-# 配套：依赖自动升级见 .github/dependabot.yml
-#       平台仓库级扫描范围配置见 .cnb/security/code_scan_config.yml
+# 两条流水线，职责分离：
+#   1. dependency-risk-check — PR 阶段做「增量」依赖风险检查，只对本次 PR
+#      新引入的漏洞 / License 风险阻断，历史遗留告警不阻断。
+#      背景：本项目依赖曾长期落后（golang.org/x/crypto 0.25.0、
+#      echarts 5.6.0 等），平台安全页因此累积大量存量告警。若在 PR
+#      阶段做全量门禁，任何一个 PR 都会被历史告警卡死；只有增量门禁
+#      才能让「新引入的风险」真正被拦住，同时不被存量噪音淹没。
+#      配套：依赖自动升级见 .github/dependabot.yml
+#            平台仓库级扫描范围配置见 .cnb/security/code_scan_config.yml
+#   2. test-gate — Go / 前端 / PHP 全量单测与语法检查。
+#      背景：此前仓库没有任何测试门禁，master 上的 Go 单测失败
+#      （migration 注册表契约）长期无人发现，「回归」不可观测。
+#      该流水线同时挂在 pull_request 与 push 上：PR 卡住新引入的问题，
+#      push 兜住直接推到分支的情况，让 master 的红灯无法再被忽略。
 # ============================================================
 
 # 所有分支的 PR 都执行（含 master 与 auto/* 等特性分支）
@@ -38,3 +42,91 @@
           image: cnbcool/sca-sbom:latest
           settings:
             output: ${CNB_BUILD_WORKSPACE}/.cnb-sca/sbom-delta.json
+
+    # 测试门禁与依赖扫描并行，互不阻塞；单测本就需要比扫描更多的内存。
+    - name: test-gate
+      runner:
+        cpus: 4
+      stages:
+        # --- Go：编译 + 单测 -------------------------------------------------
+        # 任一阶段失败即中断，不再往下跑（快速失败）。
+        - name: Go 编译与单测
+          image: golang:1.26
+          script: |
+            set -e
+            go version
+            cd backend
+            go vet ./...
+            go build ./...
+            go test ./...
+
+        # --- PHP：全量语法检查 -----------------------------------------------
+        - name: PHP 语法检查
+          image: php:8.4-cli
+          script: |
+            set -e
+            php -v
+            fail=0
+            # 逐个文件校验；find 排除依赖与产物目录，避免检查第三方代码。
+            while IFS= read -r f; do
+              out=$(php -l "$f" 2>&1) || { echo "$out"; fail=1; }
+            done < <(find . -name '*.php' \
+              -not -path './node_modules/*' \
+              -not -path './frontend/node_modules/*' \
+              -not -path './vendor/*')
+            [ "$fail" -eq 0 ] || { echo "PHP 语法检查失败"; exit 1; }
+            echo "PHP 语法检查通过"
+
+        # --- 前端：单测 + 构建 -----------------------------------------------
+        # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
+        - name: 前端单测与构建
+          image: node:24
+          script: |
+            set -e
+            cd frontend
+            npm ci --no-audit --no-fund
+            npm test
+            npm run build
+
+# 直接推送到 master（含合入后的结果）也要跑测试门禁：
+# PR 门禁只覆盖「提 PR 的路径」，直接 push 或合并后的 master 需要一个兜底，
+# 否则红灯仍然可能只存在于 master 而无人知晓。
+master:
+  push:
+    - name: test-gate
+      runner:
+        cpus: 4
+      stages:
+        - name: Go 编译与单测
+          image: golang:1.26
+          script: |
+            set -e
+            go version
+            cd backend
+            go vet ./...
+            go build ./...
+            go test ./...
+
+        - name: PHP 语法检查
+          image: php:8.4-cli
+          script: |
+            set -e
+            php -v
+            fail=0
+            while IFS= read -r f; do
+              out=$(php -l "$f" 2>&1) || { echo "$out"; fail=1; }
+            done < <(find . -name '*.php' \
+              -not -path './node_modules/*' \
+              -not -path './frontend/node_modules/*' \
+              -not -path './vendor/*')
+            [ "$fail" -eq 0 ] || { echo "PHP 语法检查失败"; exit 1; }
+            echo "PHP 语法检查通过"
+
+        - name: 前端单测与构建
+          image: node:24
+          script: |
+            set -e
+            cd frontend
+            npm ci --no-audit --no-fund
+            npm test
+            npm run build

@@ -37,6 +37,23 @@ func (f *fakeCounter) Expire(_ context.Context, key string, ttl time.Duration) (
 	return true, nil
 }
 
+func (f *fakeCounter) Get(_ context.Context, key string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if exp, ok := f.ttl[key]; ok && time.Now().After(exp) {
+		return 0, nil
+	}
+	return f.counts[key], nil
+}
+
+func (f *fakeCounter) Delete(_ context.Context, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.counts, key)
+	delete(f.ttl, key)
+	return nil
+}
+
 func newTestLimiter() (*RateLimiter, *fakeCounter) {
 	fc := newFakeCounter()
 	return NewRateLimiterWithCounter(fc), fc

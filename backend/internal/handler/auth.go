@@ -34,7 +34,7 @@ type RefreshRequest struct {
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "username and password are required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "请填写用户名和密码")
 		return
 	}
 
@@ -55,7 +55,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "refresh_token is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "refresh_token 不能为空")
 		return
 	}
 

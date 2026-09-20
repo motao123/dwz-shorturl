@@ -55,3 +55,10 @@ $member_secret = '';
 // 统计页默认关闭。若要启用，建议同时设置足够长的随机令牌。
 $stats_enabled = false;
 $stats_token = '';
+
+// 合规与联系邮箱。举报（report.html）与隐私政策（privacy.html）页面上公示的
+// 地址取自这里——此前邮箱硬编码在 HTML 里，且写着「占位，运营后替换」，既容易
+// 忘记替换，也让公开页面看起来未就绪。改到配置项后，运营只需改这一处。
+// 留空时页面退化为引导用户使用站内举报入口，不会展示一个收不到信的假地址。
+$abuse_email = 'abuse@example.com';   // 违法信息举报
+$privacy_email = 'privacy@example.com'; // 隐私与个人信息权利请求

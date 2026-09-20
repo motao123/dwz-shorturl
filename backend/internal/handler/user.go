@@ -215,7 +215,7 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 
 	var req ResetPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "password is required (min 6 chars)")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "请填写密码（至少 6 位）")
 		return
 	}
 
@@ -237,7 +237,7 @@ func (h *UserHandler) AssignRoles(c *gin.Context) {
 
 	var req AssignRolesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "role_ids is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "role_ids 不能为空")
 		return
 	}
 
