@@ -50,6 +50,20 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 
+		// #7: a refresh token must never authenticate an API call. Access and
+		// refresh tokens were signed with the same key and had the same shape, and
+		// nothing here looked at TokenType, so a refresh token — which lives 7 days,
+		// is stored in localStorage by the frontend, and was not revoked by logout
+		// or by a password change — worked as a full admin credential.
+		//
+		// Tokens minted before the field existed carry no type; they predate the
+		// refresh flow and are treated as access tokens for backward compatibility.
+		if claims.TokenType != "" && claims.TokenType != pkg.TokenTypeAccess {
+			pkg.Fail(c, http.StatusUnauthorized, pkg.CodeUnauthorized, "invalid token type")
+			c.Abort()
+			return
+		}
+
 		// P1-4: reject tokens that were revoked via logout.
 		if tokenBlacklistCheck != nil && claims.ID != "" && tokenBlacklistCheck(claims.ID) {
 			pkg.Fail(c, http.StatusUnauthorized, pkg.CodeUnauthorized, "token has been revoked")

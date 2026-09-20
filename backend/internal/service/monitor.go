@@ -147,14 +147,33 @@ func (s *monitorService) Status() (*MonitorStatus, error) {
 	}
 
 	// DB
+	//
+	// #29: this used to report Healthy unconditionally, with no Ping and no code
+	// path that could ever set Error. The monitor page therefore showed a green
+	// database while /metrics in the same process correctly reported
+	// dwz_db_up = 0 — two views of one fact that disagreed. Ping it.
 	if s.db != nil {
 		ds := &DBStatus{Healthy: true}
 		sqlDB, err := s.db.DB()
-		if err == nil && sqlDB != nil {
+		if err != nil || sqlDB == nil {
+			ds.Healthy = false
+			if err != nil {
+				ds.Error = err.Error()
+			} else {
+				ds.Error = "database handle unavailable"
+			}
+		} else {
 			stats := sqlDB.Stats()
 			ds.OpenConns = stats.OpenConnections
 			ds.InUse = stats.InUse
 			ds.Idle = stats.Idle
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			if pingErr := sqlDB.PingContext(ctx); pingErr != nil {
+				ds.Healthy = false
+				ds.Error = pingErr.Error()
+			}
+			cancel()
 		}
 		status.DB = ds
 	}

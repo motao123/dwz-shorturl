@@ -109,3 +109,25 @@ func ParseToken(tokenStr string) (*Claims, error) {
 	}
 	return nil, ErrTokenInvalid
 }
+
+// RefreshTokenIdentity parses a refresh token and returns its jti and remaining
+// lifetime, for blacklisting on logout. It returns an error for an access token
+// (or a malformed one), so logout cannot be tricked into blacklisting the wrong
+// credential class.
+func RefreshTokenIdentity(tokenStr string) (jti string, ttl time.Duration, err error) {
+	claims, err := ParseToken(tokenStr)
+	if err != nil {
+		return "", 0, err
+	}
+	if claims.TokenType != TokenTypeRefresh {
+		return "", 0, ErrTokenInvalid
+	}
+	if claims.ExpiresAt == nil {
+		return claims.ID, 0, nil
+	}
+	ttl = time.Until(claims.ExpiresAt.Time)
+	if ttl <= 0 {
+		return claims.ID, 0, nil
+	}
+	return claims.ID, ttl, nil
+}

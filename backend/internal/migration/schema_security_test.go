@@ -63,12 +63,19 @@ func TestNoHardcodedAdminCredentialInSchema(t *testing.T) {
 
 // TestNoHardcodedCredentialInInstallerAssets applies the same rule to the other
 // files that can create accounts or ship example credentials.
+//
+// The "no INSERT INTO users" half was previously only enforced for schema.sql.
+// deploy/scripts/seed.sql went on shipping an `admin` row with a
+// REPLACE_WITH_YOUR_BCRYPT_HASH placeholder, so every fresh split-DB Docker
+// deployment got an account that can never log in (and the comment advertised a
+// `cmd/generate-hash` that does not exist). Both halves now cover both files.
 func TestNoHardcodedCredentialInInstallerAssets(t *testing.T) {
 	root := repoRoot(t)
 	files := []string{
 		filepath.Join(root, "install.sql"),
 		filepath.Join(root, "deploy", "scripts", "seed.sql"),
 	}
+	insertUsers := regexp.MustCompile(`(?is)INSERT\s+INTO\s+` + "`?" + `users` + "`?")
 	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {
@@ -77,8 +84,14 @@ func TestNoHardcodedCredentialInInstallerAssets(t *testing.T) {
 			}
 			t.Fatal(err)
 		}
-		if m := bcryptHashRe.FindString(string(b)); m != "" {
+		body := string(b)
+		if m := bcryptHashRe.FindString(body); m != "" {
 			t.Errorf("%s contains a hardcoded bcrypt hash %q", filepath.Base(f), m)
+		}
+		if insertUsers.MatchString(body) {
+			t.Errorf("%s inserts into `users`; administrator accounts must be created "+
+				"by cmd/createadmin (or deploy/docker/init.php) from an operator-supplied "+
+				"password, never seeded by a migration/seed script", filepath.Base(f))
 		}
 	}
 }

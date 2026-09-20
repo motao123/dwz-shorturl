@@ -47,8 +47,11 @@ function animateTo(key: keyof typeof display, target: number, decimals = 0, dura
   animTimers.push(requestAnimationFrame(step))
 }
 
+// 后端 service/stats.go 已经把 active_rate 算成百分数（clicked/total*100）。
+// 这里原来又做了一次 `rate > 1 ? rate : rate*100`：真实活跃率 0.8% 会被放大成
+// 80%，运维据此会以为健康度良好。现在只做格式化，不再二次放大。
 function rateToPercent(rate: number): number {
-  return rate > 1 ? rate : Number((rate * 100).toFixed(1))
+  return Number(rate.toFixed(1))
 }
 
 async function loadOverview() {

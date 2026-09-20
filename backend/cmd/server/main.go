@@ -114,13 +114,25 @@ func main() {
 	wjoyLogRepo := repository.NewWjoyLogRepo(publicDB)
 	webhookRepo := repository.NewWebhookRepo(db)
 
+	// Runtime governance switches (#4): one resolver, consulted by the create path,
+	// and invalidated whenever the admin UI saves a config so a toggle takes effect
+	// at once instead of after the cache TTL.
+	runtimeCfg := service.NewRuntimeConfig(configRepo, zapLogger)
+
 	// Initialize services
-	authSvc := service.NewAuthService(userRepo, roleRepo)
-	shortUrlSvc := service.NewShortUrlService(shortUrlRepo, rdb, db, wjoyLogRepo, domainRepo, violationRepo)
+	authSvc := service.NewAuthService(userRepo, roleRepo).WithTokenBlacklist(func(jti string) bool {
+		if jti == "" {
+			return false
+		}
+		n, err := rdb.Exists(rdb.Context(), "jwt:blacklist:"+jti).Result()
+		return err == nil && n > 0
+	})
+	shortUrlSvc := service.NewShortUrlService(shortUrlRepo, rdb, db, wjoyLogRepo, domainRepo, violationRepo).
+		WithSettings(runtimeCfg)
 	userSvc := service.NewUserService(userRepo)
 	roleSvc := service.NewRoleService(roleRepo)
 	statsSvc := service.NewStatsService(shortUrlRepo, db)
-	configSvc := service.NewConfigService(configRepo)
+	configSvc := service.NewConfigService(configRepo).WithRuntimeConfig(runtimeCfg)
 	auditSvc := service.NewAuditService(auditRepo)
 	apiKeySvc := service.NewApiKeyService(apiKeyRepo)
 	domainSvc := service.NewDomainService(domainRepo)

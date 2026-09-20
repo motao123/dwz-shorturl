@@ -37,7 +37,11 @@ var (
 	ErrURLTooLong       = errors.New("链接过长，请缩短后重试")
 	ErrSSRFBlocked      = errors.New("该地址不允许被缩短（内网/本机/云元数据地址）")
 	ErrDNSResolve       = errors.New("该域名暂时无法解析，请稍后重试")
-	ErrCustomCodeFormat = errors.New("自定义短码格式不正确：需为 6-8 位小写字母或数字")
+	ErrCustomCodeFormat   = errors.New("自定义短码格式不正确：需为 6-8 位小写字母或数字")
+	ErrCustomCodeDisabled = errors.New("管理员已关闭自定义短码功能")
+	// ErrExpireDaysNotAllowed carries the permitted values so the message stays
+	// accurate when an operator edits the whitelist.
+	ErrExpireDaysNotAllowed = errors.New("有效期不在管理员允许的范围内")
 	ErrCustomCodeTaken  = errors.New("自定义短码已被占用")
 	ErrCodeCollision    = errors.New("短码生成冲突，请重试")
 )
@@ -78,6 +82,11 @@ type ShortUrlService interface {
 	// RenewIfExpired reactivates a soft-expired link in place, shared by the
 	// public API and member console paths so semantics stay identical.
 	RenewIfExpired(existing *model.ShortUrl, expireDays int)
+	// WithSettings attaches the runtime governance switches (#4/#62).
+	WithSettings(rc *RuntimeConfig) ShortUrlService
+	// Settings exposes the resolver so handlers can echo derived limits (e.g. the
+	// effective batch cap) back to clients instead of hard-coding them.
+	Settings() *RuntimeConfig
 }
 
 type shortUrlService struct {
@@ -88,6 +97,9 @@ type shortUrlService struct {
 	domainRepo repository.DomainRepo
 	violation  repository.ViolationRepo
 	sf         singleflightGroup
+	// settings resolves the admin governance switches (custom codes, expiry
+	// whitelist, batch cap) from system_configs (#4/#62). Nil-safe.
+	settings *RuntimeConfig
 	// legacyTable caches whether the admin DB exposes a wjoy_log table, so cache
 	// misses on unknown short codes don't hammer information_schema every time.
 	legacyTable legacyTableCheck
@@ -109,6 +121,38 @@ func (c *legacyTableCheck) tableExists(db *gorm.DB) bool {
 
 func NewShortUrlService(repo repository.ShortUrlRepo, rdb *redis.Client, db *gorm.DB, wjoyLog repository.WjoyLogRepo, domainRepo repository.DomainRepo, violationRepo repository.ViolationRepo) ShortUrlService {
 	return &shortUrlService{repo: repo, rdb: rdb, db: db, wjoyLog: wjoyLog, domainRepo: domainRepo, violation: violationRepo}
+}
+
+// WithSettings attaches the runtime config resolver. Without it the service
+// keeps its historical permissive behaviour, so existing tests and embedded
+// uses are unaffected; main() always attaches one.
+func (s *shortUrlService) WithSettings(rc *RuntimeConfig) ShortUrlService {
+	s.settings = rc
+	return s
+}
+
+// Settings returns the runtime config resolver (may be nil when unattached).
+func (s *shortUrlService) Settings() *RuntimeConfig { return s.settings }
+
+// allowCustomCode reports whether caller-supplied codes are accepted. Absent a
+// resolver the answer is "yes", matching pre-#4 behaviour.
+func (s *shortUrlService) allowCustomCode() bool {
+	if s.settings == nil {
+		return true
+	}
+	return s.settings.AllowCustomCode()
+}
+
+// expireDaysAllowed enforces the whitelist that previously existed only on the
+// PHP side (#62), so both create paths agree.
+func (s *shortUrlService) expireDaysAllowed(days int) error {
+	if s.settings == nil {
+		return nil
+	}
+	if s.settings.IsExpireDaysAllowed(days) {
+		return nil
+	}
+	return ErrExpireDaysNotAllowed
 }
 
 // checkViolation runs the synchronous violation rules on a destination URL and
@@ -162,9 +206,20 @@ func (s *shortUrlService) Create(longURL, custom string, expireDays int, domainI
 		return nil, err
 	}
 
+	if err := s.expireDaysAllowed(expireDays); err != nil {
+		return nil, err
+	}
+
 	custom = strings.TrimSpace(custom)
-	if custom != "" && !isValidCustomCode(custom) {
-		return nil, ErrCustomCodeFormat
+	if custom != "" {
+		// #4: the "允许自定义短码" switch is a governance gate; honouring it only in
+		// PHP meant the admin UI showed it closed while this path ignored it.
+		if !s.allowCustomCode() {
+			return nil, ErrCustomCodeDisabled
+		}
+		if !isValidCustomCode(custom) {
+			return nil, ErrCustomCodeFormat
+		}
 	}
 
 	if err := s.validateDomain(domainID); err != nil {
@@ -210,9 +265,13 @@ func (s *shortUrlService) Create(longURL, custom string, expireDays int, domainI
 		var uid string
 		if custom != "" {
 			uid = custom
-		} else if attempt == 0 {
-			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy))
 		} else {
+			// #6: every generated code carries a random salt, including the first
+			// attempt. Deriving the first code as md5(longURL + scope) made it
+			// predictable: anyone who knows the long URL can compute the short code
+			// offline (and brute-force a password-protected link's secret). Idempotency
+			// does not depend on the code — it comes from url_hash — so salting the
+			// first attempt costs nothing.
 			salt := fmt.Sprintf("|%d|%s", attempt, pkg.GenerateRandomCode(8))
 			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy) + salt)
 		}
@@ -434,9 +493,17 @@ func (s *shortUrlService) createWithTitle(longURL, title, custom string, expireD
 	if err := s.checkViolation(longURL, source, ip); err != nil {
 		return nil, err
 	}
+	if err := s.expireDaysAllowed(expireDays); err != nil {
+		return nil, err
+	}
 	custom = strings.TrimSpace(custom)
-	if custom != "" && !isValidCustomCode(custom) {
-		return nil, ErrCustomCodeFormat
+	if custom != "" {
+		if !s.allowCustomCode() {
+			return nil, ErrCustomCodeDisabled
+		}
+		if !isValidCustomCode(custom) {
+			return nil, ErrCustomCodeFormat
+		}
 	}
 	hash := urlHash(longURL, urlScopeKey(nil, createdBy))
 
@@ -472,9 +539,12 @@ func (s *shortUrlService) createWithTitle(longURL, title, custom string, expireD
 		var uid string
 		if custom != "" {
 			uid = custom
-		} else if attempt == 0 {
-			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy))
 		} else {
+			// #6: every generated code carries a random salt, including the first
+			// attempt. Deriving attempt 0 as md5(longURL + scope) made it predictable:
+			// knowing the long URL was enough to compute the short code offline (and
+			// to brute-force a password-protected link's secret). Idempotency comes
+			// from url_hash, not from a deterministic code, so this costs nothing.
 			salt := fmt.Sprintf("|%d|%s", attempt, pkg.GenerateRandomCode(8))
 			uid = pkg.ShortURL(longURL + urlScopeSeparator + urlScopeKey(nil, createdBy) + salt)
 		}
@@ -565,6 +635,15 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 		if err := validateURL(longURL); err != nil {
 			return nil, err
 		}
+		// #31: Create ran checkViolation but Update did not, so a link could be
+		// created with a harmless destination and then repointed at a phishing page
+		// with no interception and no review entry — the moderation loop had a hole
+		// exactly where an attacker would use it.
+		if longURL != record.LongURL {
+			if err := s.checkViolation(longURL, "update", record.IP); err != nil {
+				return nil, err
+			}
+		}
 		record.LongURL = longURL
 		record.URLHash = urlHash(longURL, urlScopeKey(record.MemberID, record.CreatedBy))
 	}
@@ -582,11 +661,13 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 				record.Status = 1
 			}
 		} else {
-			// expireDays <= 0 means "permanent": clear the expiry AND bring an
-			// expired/disabled link back to active, otherwise the row would show
-			// enabled in the console while the public path still returns 410.
+			// expireDays <= 0 means "permanent": clear the expiry. Only a link that
+			// lapsed on its own (status 2 = expired) is brought back; a link an
+			// administrator disabled (status 0) must stay disabled, otherwise a
+			// routine "续期/永久有效" action silently re-enables whatever risk control
+			// had taken down (#32).
 			record.ExpireAt = nil
-			if status == nil && record.Status != 1 {
+			if status == nil && record.Status == 2 {
 				record.Status = 1
 			}
 		}
@@ -1096,9 +1177,45 @@ func isPrivateHostResolve(host string) (bool, error) {
 	return false, nil
 }
 
+// reservedRanges are the CIDRs PHP's FILTER_FLAG_NO_RES_RANGE rejects but Go's
+// standard helpers do not. Without them the two create paths disagreed on the
+// same URL: Go accepted a host resolving to e.g. 0.0.0.0/8 or 100.64.0.0/10
+// while PHP refused it (#63). The list mirrors
+//   - PHP: FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+//   - the named ranges in RFC 5735 / RFC 6598 / RFC 2544.
+var reservedRanges = func() []*net.IPNet {
+	cidrs := []string{
+		"0.0.0.0/8",       // "this network"
+		"100.64.0.0/10",   // carrier-grade NAT
+		"192.0.0.0/24",    // IETF protocol assignments
+		"192.0.2.0/24",    // TEST-NET-1
+		"198.18.0.0/15",   // benchmarking
+		"198.51.100.0/24", // TEST-NET-2
+		"203.0.113.0/24",  // TEST-NET-3
+		"240.0.0.0/4",     // reserved (includes 255.255.255.255)
+		"2001:db8::/32",   // documentation
+	}
+	out := make([]*net.IPNet, 0, len(cidrs))
+	for _, c := range cidrs {
+		if _, n, err := net.ParseCIDR(c); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}()
+
+// isPrivateIP reports whether an address must not be reachable by the shortener:
+// loopback, RFC1918 private, link-local, multicast, unspecified, or one of the
+// reserved/documentation ranges. This is the Go counterpart of PHP's isPrivateHost
+// address test and the two are asserted to agree by TestSSRFParityWithPHP.
 func isPrivateIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
 		return true
+	}
+	for _, n := range reservedRanges {
+		if n.Contains(ip) {
+			return true
+		}
 	}
 	return false
 }

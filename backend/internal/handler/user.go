@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -42,6 +43,23 @@ type AssignRolesRequest struct {
 	RoleIDs []uint64 `json:"role_ids" binding:"required"`
 }
 
+// actorID returns the authenticated administrator's user id as set by the Auth
+// middleware. 0 means "no identity" (internal call), which the service treats as
+// unchecked — the HTTP surface always has an identity, so guards always apply.
+func actorID(c *gin.Context) uint64 {
+	if v, ok := c.Get("user_id"); ok {
+		switch t := v.(type) {
+		case uint64:
+			return t
+		case int:
+			return uint64(t)
+		case float64:
+			return uint64(t)
+		}
+	}
+	return 0
+}
+
 func (h *UserHandler) Create(c *gin.Context) {
 	var req CreateUserRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -57,7 +75,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 
 	// 创建时可顺带分配角色，避免调用方必须再补一次 /users/:id/roles。
 	if len(req.RoleIDs) > 0 {
-		if err := h.svc.AssignRoles(user.ID, req.RoleIDs); err != nil {
+		if err := h.svc.AssignRolesAs(actorID(c), user.ID, req.RoleIDs); err != nil {
 			pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, "user created but assign roles failed: "+err.Error())
 			return
 		}
@@ -80,9 +98,9 @@ func (h *UserHandler) Update(c *gin.Context) {
 		return
 	}
 
-	user, err := h.svc.Update(id, req.Email, req.DisplayName, req.AvatarURL, req.Status)
+	user, err := h.svc.UpdateAs(actorID(c), id, req.Email, req.DisplayName, req.AvatarURL, req.Status)
 	if err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+		pkg.Fail(c, guardStatus(err), pkg.CodeForbidden, err.Error())
 		return
 	}
 
@@ -97,8 +115,8 @@ func (h *UserHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.Delete(id); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+	if err := h.svc.DeleteAs(actorID(c), id); err != nil {
+		pkg.Fail(c, guardStatus(err), pkg.CodeForbidden, err.Error())
 		return
 	}
 
@@ -183,8 +201,8 @@ func (h *UserHandler) EnableTotp(c *gin.Context) {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "code and secret are required")
 		return
 	}
-	if err := h.svc.EnableTotp(id, req.Code, req.Secret); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+	if err := h.svc.EnableTotpAs(actorID(c), id, req.Code, req.Secret); err != nil {
+		pkg.Fail(c, guardStatus(err), pkg.CodeForbidden, err.Error())
 		return
 	}
 	auditLog(c, h.auditSvc, "user", "user_totp_enable", id, "")
@@ -198,8 +216,8 @@ func (h *UserHandler) DisableTotp(c *gin.Context) {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, "invalid id")
 		return
 	}
-	if err := h.svc.DisableTotp(id); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+	if err := h.svc.DisableTotpAs(actorID(c), id); err != nil {
+		pkg.Fail(c, guardStatus(err), pkg.CodeForbidden, err.Error())
 		return
 	}
 	auditLog(c, h.auditSvc, "user", "user_totp_disable", id, "")
@@ -219,8 +237,8 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.ResetPassword(id, req.Password); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+	if err := h.svc.ResetPasswordAs(actorID(c), id, req.Password); err != nil {
+		pkg.Fail(c, guardStatus(err), pkg.CodeForbidden, err.Error())
 		return
 	}
 
@@ -241,11 +259,24 @@ func (h *UserHandler) AssignRoles(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.AssignRoles(id, req.RoleIDs); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+	if err := h.svc.AssignRolesAs(actorID(c), id, req.RoleIDs); err != nil {
+		pkg.Fail(c, guardStatus(err), pkg.CodeForbidden, err.Error())
 		return
 	}
 
 	auditLog(c, h.auditSvc, "user", "user_roles", id, "")
 	pkg.Success(c, nil)
+}
+
+// guardStatus maps a privilege-guard error to 403 and everything else to 400.
+func guardStatus(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
+	switch {
+	case errors.Is(err, service.ErrPrivilegeEscalation),
+		errors.Is(err, service.ErrSuperAdminOnly):
+		return http.StatusForbidden
+	}
+	return http.StatusBadRequest
 }

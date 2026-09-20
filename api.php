@@ -77,18 +77,47 @@ $owner_scope = url_scope_key($owner_member);
 $owner_hash = url_scope_hash($longurl, $owner_scope);
 $owner_uid = find_uid_by_scope($DB, $owner_hash);
 if ($owner_uid !== '' && ($custom === '' || $custom === $owner_uid)) {
-    // 该作用域下已存在同一目标 URL 的短链：直接复用，不再重复 INSERT。
-    $expire_at = $expire > 0 ? date('Y-m-d H:i:s', time() + $expire * 86400) : null;
-    if ($expire > 0 && isset($DB) && !empty($DB->link)) {
-        $stmt = $DB->prepare('UPDATE wjoy_log SET expire_at=? WHERE url_hash=?');
-        if ($stmt) {
-            mysqli_stmt_bind_param($stmt, 'ss', $expire_at, $owner_hash);
-            mysqli_stmt_execute($stmt);
-            mysqli_stmt_close($stmt);
+    // 该作用域下已存在同一目标 URL 的短链：复用已有短码，不重复 INSERT。
+    //
+    // A5 修复：这里原来会无条件 UPDATE wjoy_log.expire_at。匿名作用域是所有
+    // 匿名请求共享的池子（member_id=0 → w:0），于是任何人只要知道某条长链，
+    // 重发一次带 expire 的请求就能把全网在用的永久链改成 1 天后 410，且原值
+    // 不可恢复；同一次调用还会把管理库副本的 password_hash 清成 NULL，使 Go
+    // 跳转路径随后免密放行。
+    //
+    // 现在的语义与 PHP 侧既有函数 renew_if_expired() 一致：只在短链「已过期」
+    // 时才续期，未过期或永久链保持原样。「续期」不再是「任意改写」。
+    $r = short_url_result($owner_uid, 'existing', 'existence', $domain_id);
+    if ($expire > 0) {
+        $current_expire = null;
+        if (isset($DB) && !empty($DB->link)) {
+            $stmt = $DB->prepare('SELECT expire_at FROM wjoy_log WHERE url_hash=? LIMIT 1');
+            if ($stmt) {
+                mysqli_stmt_bind_param($stmt, 's', $owner_hash);
+                mysqli_stmt_execute($stmt);
+                $res = mysqli_stmt_get_result($stmt);
+                if ($res && ($row = mysqli_fetch_assoc($res))) $current_expire = $row['expire_at'];
+                mysqli_stmt_close($stmt);
+            }
         }
-        sync_short_url_to_admin($owner_uid, $longurl, $expire_at, $owner_member, null);
+        $is_expired = $current_expire !== null && $current_expire !== ''
+            && strtotime($current_expire) !== false && strtotime($current_expire) < time();
+        if ($is_expired) {
+            $expire_at = date('Y-m-d H:i:s', time() + $expire * 86400);
+            if (isset($DB) && !empty($DB->link)) {
+                $stmt = $DB->prepare('UPDATE wjoy_log SET expire_at=? WHERE url_hash=?');
+                if ($stmt) {
+                    mysqli_stmt_bind_param($stmt, 'ss', $expire_at, $owner_hash);
+                    mysqli_stmt_execute($stmt);
+                    mysqli_stmt_close($stmt);
+                }
+                // password_hash 传 null 表示「本次请求未提供密码」；sync 内部对
+                // null 不再下发，避免抹掉既有密码保护。
+                sync_short_url_to_admin($owner_uid, $longurl, $expire_at, $owner_member, null);
+            }
+            $r = short_url_result($owner_uid, 'renewed', 'renewed', $domain_id);
+        }
     }
-    $r = short_url_result($owner_uid, $expire > 0 ? 'renewed' : 'existence', $expire > 0 ? 'renewed' : 'existing', $domain_id);
 } else {
     $r = create_short_url($DB, $longurl, $custom, $expire, $domain_id, $password, $owner_member, $owner_hash);
 }

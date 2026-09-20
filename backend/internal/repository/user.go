@@ -20,6 +20,18 @@ type UserRepo interface {
 	SoftDelete(id uint64) error
 	GetRoles(userID uint64) ([]model.Role, error)
 	SetRoles(userID uint64, roleIDs []uint64) error
+	// LoadRoles fills RoleIDs/RoleNames on the given users from user_roles in a
+	// single query (no N+1). Used by List/GetByID so the API returns the current
+	// role assignment instead of an empty one (#1).
+	LoadRoles(users ...*model.User) error
+	// FindRoleByID resolves a role for privilege-grant checks.
+	FindRoleByID(id uint64) (*model.Role, error)
+	// GetPermissions lists a role's permissions (used to compare account strength).
+	GetPermissions(roleID uint64) ([]model.Permission, error)
+	// RemoveAllRoles strips every role from a user. Deliberately a separate method
+	// from SetRoles: clearing a role set is a destructive act and the ordinary
+	// assign path must not be able to do it by accident (#1).
+	RemoveAllRoles(userID uint64) error
 }
 
 type userRepo struct {
@@ -124,6 +136,77 @@ func (r *userRepo) GetRoles(userID uint64) ([]model.Role, error) {
 		return nil, err
 	}
 	return roles, nil
+}
+
+// LoadRoles batch-loads role assignments for the given users. A single query is
+// used regardless of how many users are passed: List pages can hold 100 rows and
+// the previous per-row lookup would have been an N+1.
+func (r *userRepo) LoadRoles(users ...*model.User) error {
+	if len(users) == 0 {
+		return nil
+	}
+	ids := make([]uint64, 0, len(users))
+	for _, u := range users {
+		if u != nil {
+			ids = append(ids, u.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	type row struct {
+		UserID uint64
+		ID     uint64
+		Name   string
+	}
+	var rows []row
+	if err := r.db.Table("user_roles").
+		Select("user_roles.user_id AS user_id, roles.id AS id, roles.name AS name").
+		Joins("JOIN roles ON roles.id = user_roles.role_id").
+		Where("user_roles.user_id IN ?", ids).
+		Scan(&rows).Error; err != nil {
+		return err
+	}
+
+	byUser := map[uint64][]row{}
+	for _, x := range rows {
+		byUser[x.UserID] = append(byUser[x.UserID], x)
+	}
+	for _, u := range users {
+		if u == nil {
+			continue
+		}
+		rs := byUser[u.ID]
+		u.RoleIDs = make([]uint64, 0, len(rs))
+		u.RoleNames = make([]string, 0, len(rs))
+		for _, x := range rs {
+			u.RoleIDs = append(u.RoleIDs, x.ID)
+			u.RoleNames = append(u.RoleNames, x.Name)
+		}
+	}
+	return nil
+}
+
+func (r *userRepo) FindRoleByID(id uint64) (*model.Role, error) {
+	var role model.Role
+	if err := r.db.First(&role, id).Error; err != nil {
+		return nil, err
+	}
+	return &role, nil
+}
+
+func (r *userRepo) GetPermissions(roleID uint64) ([]model.Permission, error) {
+	var perms []model.Permission
+	err := r.db.
+		Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").
+		Where("role_permissions.role_id = ?", roleID).
+		Find(&perms).Error
+	return perms, err
+}
+
+func (r *userRepo) RemoveAllRoles(userID uint64) error {
+	return r.db.Where("user_id = ?", userID).Delete(&model.UserRole{}).Error
 }
 
 func (r *userRepo) SetRoles(userID uint64, roleIDs []uint64) error {

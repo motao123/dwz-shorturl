@@ -91,6 +91,23 @@
             fi
             echo "PHP 语法检查通过"
 
+        # --- 安全配置断言 -----------------------------------------------------
+        # XFF 必须使用覆盖式赋值。追加式（$proxy_add_x_forwarded_for）会把
+        # 客户端自带的 X-Forwarded-For 带进后端，访客可据此伪造来源 IP，
+        # 绕过限流与登录锁定、污染地域统计。这类配置错误不会让任何测试变红，
+        # 只能靠一条 grep 守住；注释里的说明不算违规，所以只看赋值行。
+        - name: 反代 XFF 赋值方式检查
+          image: alpine:3.20
+          script: |
+            set -e
+            hits=$(grep -rInE '^[[:space:]]*proxy_set_header[[:space:]]+X-Forwarded-For[[:space:]]+\$proxy_add_x_forwarded_for' --include='*.conf' --include='*.yml' --include='*.yaml' --exclude-dir=node_modules . || true)
+            if [ -n "$hits" ]; then
+              echo "发现追加式 X-Forwarded-For 赋值（可被伪造 IP）："
+              echo "$hits"
+              echo "请改为：proxy_set_header X-Forwarded-For \$remote_addr;"
+              exit 1
+            fi
+            echo "XFF 赋值方式检查通过"
         # --- 前端：单测 + 构建 -----------------------------------------------
         # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
         - name: 前端单测与构建
@@ -151,6 +168,25 @@ master:
             fi
             echo "PHP 语法检查通过"
 
+        # --- 安全配置断言 -----------------------------------------------------
+        # XFF 必须使用覆盖式赋值。追加式（$proxy_add_x_forwarded_for）会把
+        # 客户端自带的 X-Forwarded-For 带进后端，访客可据此伪造来源 IP，
+        # 绕过限流与登录锁定、污染地域统计。这类配置错误不会让任何测试变红，
+        # 只能靠一条 grep 守住；注释里的说明不算违规，所以只看赋值行。
+        - name: 反代 XFF 赋值方式检查
+          image: alpine:3.20
+          script: |
+            set -e
+            hits=$(grep -rInE '^[[:space:]]*proxy_set_header[[:space:]]+X-Forwarded-For[[:space:]]+\$proxy_add_x_forwarded_for' --include='*.conf' --include='*.yml' --include='*.yaml' --exclude-dir=node_modules . || true)
+            if [ -n "$hits" ]; then
+              echo "发现追加式 X-Forwarded-For 赋值（可被伪造 IP）："
+              echo "$hits"
+              echo "请改为：proxy_set_header X-Forwarded-For \$remote_addr;"
+              exit 1
+            fi
+            echo "XFF 赋值方式检查通过"
+        # --- 前端：单测 + 构建 -----------------------------------------------
+        # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
         - name: 前端单测与构建
           image: node:24
           script: |

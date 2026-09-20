@@ -57,6 +57,12 @@ func (f *fakeUserRepo) UpdatePassword(uint64, string) error     { return nil }
 func (f *fakeUserRepo) SoftDelete(uint64) error                 { return nil }
 func (f *fakeUserRepo) GetRoles(uint64) ([]model.Role, error)   { return f.roles, nil }
 func (f *fakeUserRepo) SetRoles(uint64, []uint64) error         { return nil }
+func (f *fakeUserRepo) FindRoleByID(uint64) (*model.Role, error) {
+	return nil, errors.New("not found")
+}
+func (f *fakeUserRepo) LoadRoles(users ...*model.User) error { return nil }
+func (f *fakeUserRepo) GetPermissions(uint64) ([]model.Permission, error) { return nil, nil }
+func (f *fakeUserRepo) RemoveAllRoles(uint64) error         { return nil }
 
 type fakeRoleRepo struct{}
 
@@ -74,6 +80,7 @@ func (fakeRoleRepo) GetUserPermissions(uint64) ([]model.Permission, error) {
 	return nil, nil
 }
 func (fakeRoleRepo) FindAllPermissions() ([]model.Permission, error) { return nil, nil }
+func (fakeRoleRepo) RolesOfUser(uint64) ([]model.Role, error)        { return nil, nil }
 
 // newLockoutLimiter builds a limiter over a fake counter so the lockout logic
 // can be exercised without Redis.

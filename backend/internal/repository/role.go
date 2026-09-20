@@ -16,6 +16,8 @@ type RoleRepo interface {
 	GetPermissions(roleID uint64) ([]model.Permission, error)
 	SetPermissions(roleID uint64, permIDs []uint64) error
 	GetUserPermissions(userID uint64) ([]model.Permission, error)
+	// RolesOfUser lists the roles bound to a user (used by privilege guards).
+	RolesOfUser(userID uint64) ([]model.Role, error)
 	FindAllPermissions() ([]model.Permission, error)
 }
 
@@ -105,6 +107,15 @@ func (r *roleRepo) GetUserPermissions(userID uint64) ([]model.Permission, error)
 		Distinct().
 		Find(&perms).Error
 	return perms, err
+}
+
+func (r *roleRepo) RolesOfUser(userID uint64) ([]model.Role, error) {
+	var roles []model.Role
+	err := r.db.
+		Joins("JOIN user_roles ON user_roles.role_id = roles.id").
+		Where("user_roles.user_id = ?", userID).
+		Find(&roles).Error
+	return roles, err
 }
 
 func (r *roleRepo) FindAllPermissions() ([]model.Permission, error) {

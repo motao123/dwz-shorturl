@@ -83,6 +83,14 @@ func (f *fakeUserRepo) UpdatePassword(id uint64, passwordHash string) error {
 func (f *fakeUserRepo) SoftDelete(id uint64) error { return nil }
 
 func (f *fakeUserRepo) GetRoles(userID uint64) ([]model.Role, error) { return nil, nil }
+func (f *fakeUserRepo) FindRoleByID(id uint64) (*model.Role, error) {
+	return nil, errors.New("not found")
+}
+func (f *fakeUserRepo) LoadRoles(users ...*model.User) error { return nil }
+func (f *fakeUserRepo) GetPermissions(roleID uint64) ([]model.Permission, error) {
+	return nil, nil
+}
+func (f *fakeUserRepo) RemoveAllRoles(userID uint64) error { return nil }
 
 func (f *fakeUserRepo) SetRoles(userID uint64, roleIDs []uint64) error {
 	f.roles[userID] = roleIDs
@@ -112,6 +120,7 @@ func (f *fakeRoleRepo) GetPermissions(roleID uint64) ([]model.Permission, error)
 func (f *fakeRoleRepo) SetPermissions(roleID uint64, permIDs []uint64) error         { return nil }
 func (f *fakeRoleRepo) GetUserPermissions(userID uint64) ([]model.Permission, error) { return nil, nil }
 func (f *fakeRoleRepo) FindAllPermissions() ([]model.Permission, error)              { return nil, nil }
+func (f *fakeRoleRepo) RolesOfUser(userID uint64) ([]model.Role, error)              { return nil, nil }
 
 func newTestProvisioner() (*provisioner, *fakeUserRepo) {
 	users := newFakeUserRepo()
