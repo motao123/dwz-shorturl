@@ -84,6 +84,13 @@ type ShortUrlService interface {
 	RenewIfExpired(existing *model.ShortUrl, expireDays int)
 	// WithSettings attaches the runtime governance switches (#4/#62).
 	WithSettings(rc *RuntimeConfig) ShortUrlService
+	// FillShortURLs / FillShortURL / FillShortURLOutcomes populate each record's
+	// absolute short_url from its own bound domain (#30). Handlers that return
+	// links to a client call these; the redirect path must not, since it never
+	// shows the address.
+	FillShortURLs(urls []model.ShortUrl)
+	FillShortURL(record *model.ShortUrl)
+	FillShortURLOutcomes(outcomes []BatchOutcome)
 	// Settings exposes the resolver so handlers can echo derived limits (e.g. the
 	// effective batch cap) back to clients instead of hard-coding them.
 	Settings() *RuntimeConfig
@@ -196,6 +203,16 @@ func (s *shortUrlService) validateDomain(domainID *uint64) error {
 }
 
 func (s *shortUrlService) Create(longURL, custom string, expireDays int, domainID *uint64, createdBy *uint64, source, ip, password string) (*model.ShortUrl, error) {
+	record, err := s.create(longURL, custom, expireDays, domainID, createdBy, source, ip, password)
+	if record != nil {
+		s.FillShortURL(record)
+	}
+	return record, err
+}
+
+// create holds the creation logic. Use the exported Create, which additionally
+// fills short_url so no caller ever receives a record without an address (#30).
+func (s *shortUrlService) create(longURL, custom string, expireDays int, domainID *uint64, createdBy *uint64, source, ip, password string) (*model.ShortUrl, error) {
 	longURL = strings.TrimSpace(longURL)
 	if err := validateURL(longURL); err != nil {
 		return nil, err
@@ -401,6 +418,7 @@ func (s *shortUrlService) BatchCreatePublicAPI(urls []string, domainID *uint64, 
 			seen[u] = record
 		}
 	}
+	s.FillShortURLOutcomes(outcomes)
 	return outcomes
 }
 
@@ -436,6 +454,7 @@ func (s *shortUrlService) BatchCreate(urls []string, domainID *uint64, createdBy
 		}
 	}
 
+	s.FillShortURLOutcomes(outcomes)
 	return outcomes
 }
 
@@ -480,6 +499,7 @@ func (s *shortUrlService) BatchImport(items []ImportItem, domainID *uint64, crea
 		}
 	}
 
+	s.FillShortURLOutcomes(outcomes)
 	return outcomes
 }
 
@@ -587,6 +607,7 @@ func (s *shortUrlService) GetByID(id uint64) (*model.ShortUrl, error) {
 		return nil, err
 	}
 	rec.HasPassword = rec.PasswordHash != ""
+	s.FillShortURL(rec)
 	return rec, nil
 }
 
@@ -609,6 +630,7 @@ func (s *shortUrlService) Restore(id uint64) (*model.ShortUrl, error) {
 	}
 	s.invalidateCache(record.UID)
 	record.HasPassword = record.PasswordHash != ""
+	s.FillShortURL(record)
 	return record, nil
 }
 
@@ -717,6 +739,7 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 	// Invalidate cache
 	s.invalidateCache(record.UID)
 
+	s.FillShortURL(record)
 	return record, nil
 }
 
@@ -805,6 +828,7 @@ func (s *shortUrlService) List(page, perPage int, filters repository.ShortUrlFil
 	for i := range urls {
 		urls[i].HasPassword = urls[i].PasswordHash != ""
 	}
+	s.FillShortURLs(urls)
 	return urls, total, nil
 }
 
@@ -1315,6 +1339,88 @@ func PublicShortURL(uid string) string {
 	cfg := config.Get()
 	base := strings.TrimRight(cfg.Public.BaseURL, "/")
 	return base + "/" + uid
+}
+
+// absoluteShortURL resolves the copy-ready address of a single row: the row's own
+// bound domain when it has one, otherwise the deployment's public base URL.
+// A domain id that is not present in domains (deleted, or never bound) falls back
+// to the base URL rather than guessing a host.
+func absoluteShortURL(uid string, domainID *uint64, domains map[uint64]model.Domain, base string) string {
+	if domainID != nil {
+		if d, ok := domains[*domainID]; ok && d.Domain != "" {
+			scheme := d.Scheme
+			if scheme == "" {
+				scheme = "https"
+			}
+			return scheme + "://" + d.Domain + "/" + uid
+		}
+	}
+	return strings.TrimRight(base, "/") + "/" + uid
+}
+
+// domainsByID reads the bound domains once for a fill pass. Domain tables stay
+// small (a deployment binds a handful of hosts), so one query per list page is
+// cheaper than resolving each row and avoids the N+1 a per-record lookup would
+// introduce on 100-row batch responses. On a read error it returns what it has,
+// which degrades to the base URL rather than failing an otherwise valid listing.
+func (s *shortUrlService) domainsByID() map[uint64]model.Domain {
+	if s.domainRepo == nil {
+		return map[uint64]model.Domain{}
+	}
+	list, err := s.domainRepo.List(nil)
+	if err != nil {
+		return map[uint64]model.Domain{}
+	}
+	return domainsFromList(list)
+}
+
+// domainsFromList snapshots the domain table into the lookup the address builder
+// needs. Every fill path goes through here so the two services cannot diverge.
+func domainsFromList(list []model.Domain) map[uint64]model.Domain {
+	out := make(map[uint64]model.Domain, len(list))
+	for _, d := range list {
+		out[d.ID] = d
+	}
+	return out
+}
+
+// applyShortURLs fills the absolute address of every row in place.
+func applyShortURLs(urls []model.ShortUrl, domains map[uint64]model.Domain, base string) {
+	for i := range urls {
+		urls[i].ShortURL = absoluteShortURL(urls[i].UID, urls[i].DomainID, domains, base)
+	}
+}
+
+// FillShortURLs populates the absolute short_url of each row in place. Callers
+// are handler boundaries that return records to a client; the redirect path
+// (ResolveByUID / resolveAndCache) deliberately never calls this, because it does
+// not need the address and must not pay for a domain read.
+func (s *shortUrlService) FillShortURLs(urls []model.ShortUrl) {
+	if len(urls) == 0 {
+		return
+	}
+	applyShortURLs(urls, s.domainsByID(), config.Get().Public.BaseURL)
+}
+
+// FillShortURL is the single-record form of FillShortURLs. It assigns through
+// the pointer on purpose: wrapping the record in a value slice would fill a copy.
+func (s *shortUrlService) FillShortURL(record *model.ShortUrl) {
+	if record == nil {
+		return
+	}
+	record.ShortURL = absoluteShortURL(record.UID, record.DomainID, s.domainsByID(), config.Get().Public.BaseURL)
+}
+
+// FillShortURLOutcomes fills every record of a batch result with one domain read.
+func (s *shortUrlService) FillShortURLOutcomes(outcomes []BatchOutcome) {
+	domains := s.domainsByID()
+	base := config.Get().Public.BaseURL
+	for _, o := range outcomes {
+		if o.Record == nil {
+			continue
+		}
+		o.Record.ShortURL = absoluteShortURL(o.Record.UID, o.Record.DomainID, domains, base)
+	}
 }
 
 // sameUint64Ptr reports whether two *uint64 point to equal values. nil is

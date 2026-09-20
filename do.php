@@ -29,9 +29,12 @@ if (!empty($password_hash)) {
     if (!password_unlock_ok($uid)) {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             // 尝试限流：每个 IP + 短码 60 秒内最多 5 次，避免密码被离线暴力穷举。
-            // 复用前台限流器（Redis/文件双实现），限流不可用时放行以保证跳转可用。
-            if (function_exists('rate_limit') && !rate_limit('pwtry:' . $uid, 5, 60)) {
-                if (!headers_sent()) header('Retry-After: 60');
+            // 键里必须带 IP：只按 $uid 计数时，任何人 POST 5 次错密码就能让所有访客
+            // 60 秒内解不开这条短链（可循环维持），Go 侧 redirect.go 一直是 IP+uid。
+            // 限流器不可用时本分支选择拒绝（fail-closed）——与 api/batch 的跳转主路径
+            // 相反，因为「密码尝试」被拒不影响短链本身可用；#18 统一收口该差异。
+            if (function_exists('rate_limit') && !rate_limit('pwtry:' . real_ip() . ':' . $uid, 5, 60)) {
+                if (!headers_sent()) { http_response_code(429); header('Retry-After: 60'); }
                 echo password_page_html($uid, '尝试次数过多，请稍后再试');
                 exit;
             }

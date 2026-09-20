@@ -17,6 +17,12 @@ if (!isset($trusted_proxies) || !is_array($trusted_proxies)) $trusted_proxies = 
 if (!isset($rate_limit_dir) || !is_string($rate_limit_dir) || $rate_limit_dir === '') {
     $rate_limit_dir = ROOT . 'logs/ratelimit';
 }
+// 违规词库路径（#11）。留空则按默认候选顺序查找：/etc/dwz/violation_rules.json
+// （Docker 镜像内落点）→ 仓库内 backend/internal/pkg/data/ 原件（git clone / 开发）。
+// 只放在 web 根之外：词库一旦可被公开下载，等于把黑名单交给绕过方。
+if (!isset($violation_rules_file) || !is_string($violation_rules_file)) {
+    $violation_rules_file = '';
+}
 // Admin DB (dual-write target). Optional.
 if (!isset($admin_db_host)) $admin_db_host = '127.0.0.1';
 if (!isset($admin_db_port)) $admin_db_port = 3306;

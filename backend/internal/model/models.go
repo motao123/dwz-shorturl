@@ -137,6 +137,13 @@ type ShortUrl struct {
 	// serialised. HasPassword is computed for the UI (lock indicator).
 	PasswordHash string         `gorm:"size:255" json:"-"`
 	HasPassword  bool           `gorm:"-" json:"has_password"`
+	// ShortURL is the absolute, copy-ready address of this link. A link may live
+	// on its own bound domain, which the client cannot know from uid alone, so
+	// the service fills it in (see ShortUrlService.FillShortURLs). It is never
+	// guessed on the client: the admin UI used to fall back to a hard-coded
+	// third-party host, which made every copied link point at someone else's
+	// domain (#30).
+	ShortURL string `gorm:"-" json:"short_url"`
 	CreatedBy    *uint64        `json:"created_by"`
 	MemberID     *uint64        `gorm:"index" json:"member_id"`
 	Source       string         `gorm:"size:16;default:web;not null" json:"source"`

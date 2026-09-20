@@ -226,7 +226,7 @@ func (s *domainService) DecrementLinkCount(id uint64) error {
 }
 
 // isValidDomainName performs a lightweight format check on the host portion.
-// It accepts a bare hostname (e.g. 1.xk7.cn) without scheme/path/port.
+// It accepts a bare hostname (e.g. links.example.com) without scheme/path/port.
 func isValidDomainName(domain string) bool {
 	domain = strings.TrimSpace(strings.ToLower(domain))
 	if domain == "" || len(domain) > 253 {

@@ -52,6 +52,40 @@ if ! grep -q 'deploy/manifest.txt' "$ROOT/deploy.sh"; then
   fail=1
 fi
 
+# 违规词库（#11）：它刻意不在上面的清单里——manifest 描述的是「web 根下的前台
+# 文件」，而词库一旦被公开下载就等于把黑名单交给提交方。正因它走的是另一条
+# 通道，这里必须单独断言两条部署路径都带着它，否则又会退化成静默降级。
+RULES_SRC="backend/internal/pkg/data/violation_rules.json"
+if [ ! -f "$ROOT/$RULES_SRC" ]; then
+  echo "违规词库源文件不存在：$RULES_SRC" >&2
+  fail=1
+fi
+if ! grep -q "$RULES_SRC" "$DOCKERFILE"; then
+  echo "Dockerfile.web 未把违规词库带进镜像，公开入口合规拦截会退化成 3 域/5 词（#11）" >&2
+  fail=1
+fi
+if ! grep -q "$RULES_SRC" "$ROOT/deploy.sh"; then
+  echo "deploy.sh 未上传违规词库，宝塔/裸机部署的合规拦截会退化（#11）" >&2
+  fail=1
+fi
+
+# 运行时不得内嵌上游维护者的域名（#20）。这类值一旦出现在默认配置、外发邮件、
+# 建库脚本或示例里，每一个下游部署都会把自己的用户送到作者的域上——
+# public.base_url 的默认值与续期邮件里的会员中心链接都栽过。
+# docs/ 与 site/ 是作者本人的文档与产品站，不在禁止之列。
+# 用 -F 是按字面匹配：`.` 在正则里是通配符，会把公共库名 `1_xk7_cn` 也算命中，
+# 而那个下划线标识符改名等于给存量部署做一次建库迁移，属另一回事（另立条目跟踪）。
+UPSTREAM_HOST="1.xk7.cn"
+HITS="$(grep -rlFI --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=docs \
+  --exclude-dir=site --exclude-dir=.zcode --exclude-dir=dist --exclude-dir=vendor \
+  --exclude='*_test.go' --exclude='*.md' --exclude='check_manifest.sh' \
+  -- "$UPSTREAM_HOST" "$ROOT" 2>/dev/null || true)"
+if [ -n "$HITS" ]; then
+  echo "运行时文件里仍出现上游维护者域名 $UPSTREAM_HOST（#20），请改为配置驱动或中性占位：" >&2
+  printf '  %s\n' $HITS >&2
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "部署清单一致性检查失败" >&2
   exit 1

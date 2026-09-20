@@ -6,18 +6,18 @@
   <title>API 文档 - 短网址</title>
   <meta name="robots" content="index, follow, max-image-preview:large">
   <meta name="description" content="Imotao 短网址开放接口文档：单条与批量生成、API 密钥认证、跳转与统计接口的参数、示例与错误码。">
-  <link rel="canonical" href="https://1.xk7.cn/api.html">
+  <link rel="canonical" href="/api.html">
   <meta property="og:title" content="API 文档 - 短网址">
   <meta property="og:description" content="短网址服务 RESTful 接口：单条/批量生成、API 密钥调用、跳转与统计。">
   <meta property="og:type" content="website">
-  <meta property="og:image" content="https://1.xk7.cn/assets/og-cover.png">
+  <meta property="og:image" content="/assets/og-cover.png">
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="./assets/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="stylesheet" href="./assets/tokens.min.css?v=3366f25a">
   <link rel="stylesheet" href="./assets/api.min.css?v=80d5eec5">
   <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"首页","item":"https://1.xk7.cn/"},{"@type":"ListItem","position":2,"name":"API 文档","item":"https://1.xk7.cn/api.html"}]}
+  {"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"首页","item":"/"},{"@type":"ListItem","position":2,"name":"API 文档","item":"/api.html"}]}
   </script>
 </head>
 <body>
@@ -78,7 +78,7 @@
   </table>
 
   <h3>curl 示例</h3>
-  <pre><code>curl -X POST https://1.xk7.cn/api.php \
+  <pre><code>curl -X POST https://your-domain.com/api.php \
   -d "url=https://example.com/long-page" \
   -d "custom=mylink" \
   -d "expire=30"</code></pre>
@@ -88,7 +88,7 @@
   "code": "mylink",
   "msg": "success",
   "result": 1,
-  "short_url": "https://1.xk7.cn/mylink",
+  "short_url": "https://your-domain.com/mylink",
   "state": "created"
 }</code></pre>
 
@@ -116,7 +116,7 @@
 
   <h3>curl 示例</h3>
   <pre><code># 需先在浏览器登录会员（携带会话 Cookie），匿名调用返回 401
-curl -X POST https://1.xk7.cn/batch.php \
+curl -X POST https://your-domain.com/batch.php \
   --data-urlencode "urls=https://example.com/a
 https://example.com/b
 https://example.com/c"</code></pre>
@@ -127,7 +127,7 @@ https://example.com/c"</code></pre>
   {
     "url": "https://example.com/a",
     "code": "abc123",
-    "short_url": "https://1.xk7.cn/abc123",
+    "short_url": "https://your-domain.com/abc123",
     "msg": "success",
     "result": 1
   },
@@ -168,7 +168,7 @@ https://example.com/c"</code></pre>
   </table>
 
   <h3>curl 示例</h3>
-  <pre><code>curl -X POST https://1.xk7.cn/public/api/short-urls \
+  <pre><code>curl -X POST https://your-domain.com/public/api/short-urls \
   -H "X-API-Key: dwz_xxxxxxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com/long-page","custom":"mylink","expire_days":30}'</code></pre>
@@ -179,7 +179,7 @@ https://example.com/c"</code></pre>
   "msg": "success",
   "data": {
     "uid": "mylink",
-    "short_url": "https://1.xk7.cn/mylink",
+    "short_url": "https://your-domain.com/mylink",
     "long_url": "https://example.com/long-page",
     "expire_at": "2026-10-12T00:00:00Z",
     "created_at": "2026-09-12T02:00:00Z"
@@ -192,7 +192,7 @@ https://example.com/c"</code></pre>
   "code": 0,
   "msg": "success",
   "data": {
-    "results": [ { "index": 0, "uid": "abc123", "short_url": "https://1.xk7.cn/abc123" } ],
+    "results": [ { "index": 0, "uid": "abc123", "short_url": "https://your-domain.com/abc123" } ],
     "error_items": [ { "index": 1, "message": "url host not allowed" } ]
   }
 }</code></pre>

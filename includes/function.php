@@ -418,19 +418,42 @@ function create_short_url($DB, $longurl, $custom = null, $expire_days = 0, $doma
 // 违规规则的唯一来源：backend/internal/pkg/data/violation_rules.json。
 // Go 侧（internal/pkg/violation.go）通过 go:embed 读同一文件，PHP 侧在此加载，
 // 两边共用一份数据，从结构上杜绝「词库双实现漂移」。
-// 加载失败时退回内置最小集合并记日志，避免整个检测静默失效。
+//
+// 查找顺序（#11）：config.php 的 $violation_rules_file → /etc/dwz/violation_rules.json
+// （Docker 镜像落点）→ 仓库内原件（git clone / 开发机）。
+// 此前只认最后这一个路径，而 Docker 镜像与 deploy.sh 都不带 backend/，于是公开
+// 入口（api.php / batch.php）的合规拦截在完全没有可见信号的情况下退化成 3 域 / 5 词。
+// 词库刻意放在 web 根之外：黑名单一旦可被公开下载，等于把绕过方法交给提交方。
 $blocked_domain_suffixes = array();
 $blocked_keywords = array();
 
 (function () {
-    global $blocked_domain_suffixes, $blocked_keywords;
-    $rules_file = __DIR__ . "/../backend/internal/pkg/data/violation_rules.json";
+    global $blocked_domain_suffixes, $blocked_keywords, $violation_rules_file;
     $fallback_domains = array("bet365.com", "phishing.com", "malware.com");
     $fallback_keywords = array("casino", "gambling", "博彩", "赌场", "刷单返利");
-    $raw = @file_get_contents($rules_file);
-    $data = $raw === false ? null : json_decode($raw, true);
+    $candidates = array();
+    if (is_string($violation_rules_file) && $violation_rules_file !== '') {
+        $candidates[] = $violation_rules_file;
+    }
+    $candidates[] = '/etc/dwz/violation_rules.json';
+    $candidates[] = __DIR__ . "/../backend/internal/pkg/data/violation_rules.json";
+    $data = null;
+    foreach ($candidates as $path) {
+        $raw = @file_get_contents($path);
+        if ($raw === false) continue;
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded)) { $data = $decoded; break; }
+    }
     if (!is_array($data)) {
-        error_log("[dwz] 违规规则文件不可用：" . $rules_file . "，已退回内置最小黑名单");
+        // 按进程去重：降级期间每个请求都写一行会把日志刷满，反而盖掉真正的线索。
+        static $warned = false;
+        if (!$warned) {
+            $warned = true;
+            error_log('[dwz] 违规词库不可用（已查找：' . implode(', ', $candidates) . '），'
+                . '退回内置最小黑名单，公开入口的合规拦截将明显弱于后台/Go 侧。'
+                . '修复：部署 backend/internal/pkg/data/violation_rules.json 到上述任一路径，'
+                . '或在 config.php 设置 $violation_rules_file。');
+        }
         $blocked_domain_suffixes = $fallback_domains;
         $blocked_keywords = $fallback_keywords;
         return;

@@ -194,9 +194,11 @@ type mockDomainRepo struct {
 	decrCnt int
 	incrIDs []uint64
 	decrIDs []uint64
+	// domains backs List so the short_url filling path can be exercised (#30).
+	domains []model.Domain
 }
 
-func (m *mockDomainRepo) List(*int8) ([]model.Domain, error)     { return nil, nil }
+func (m *mockDomainRepo) List(*int8) ([]model.Domain, error) { return m.domains, nil }
 func (m *mockDomainRepo) FindByID(id uint64) (*model.Domain, error) {
 	// Tests exercise domain counting, so any requested domain is active.
 	return &model.Domain{ID: id, Status: 1}, nil

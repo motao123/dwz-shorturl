@@ -387,8 +387,11 @@ func (s *CronService) remindExpiring() {
 			}
 			fmt.Fprintf(&b, "· %s（%s）到期时间：%s\n", l.LongURL, l.UID, exp)
 		}
-		b.WriteString("\n登录会员中心可一键续期：https://1.xk7.cn/member/\n")
-		b.WriteString("—— 短网址")
+		// 会员中心链接只在配置了站点地址时才写：硬编码域名会把运维的用户送到别人的站（#20）。
+		if base := emailBaseURL(); base != "" {
+			fmt.Fprintf(&b, "\n登录会员中心可一键续期：%s/member/\n", base)
+		}
+		b.WriteString("\n—— 短网址")
 
 		if err := s.email.Send(g.Email, subject, b.String()); err != nil {
 			s.logger.Error("expiry reminder email failed",

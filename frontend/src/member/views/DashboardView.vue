@@ -56,8 +56,9 @@ const list = useListPage<MemberLink>({
       String(params.keyword ?? '').trim(),
       String(params.status ?? '')
     ).then((res) => {
-      // 会员接口返回 { list, total }，这里补齐短链地址后再交给列表状态
-      return { list: res.list.map((l) => ({ ...l, short_url: buildShortUrl(l.uid) })), total: res.total }
+      // 后端已按各行绑定的域名下发 short_url（#30）。这里只在缺失时退回同源拼接，
+      // 不再无条件覆盖：覆盖会把绑定自有域名的短链显示成站点默认域名。
+      return { list: res.list.map((l) => ({ ...l, short_url: l.short_url || buildShortUrl(l.uid) })), total: res.total }
     }),
   errorMessage: '加载失败',
   pagerLayout: ({ isTablet }) => (isTablet ? 'prev, pager, next' : 'total, prev, pager, next'),

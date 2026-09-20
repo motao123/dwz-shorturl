@@ -4,7 +4,9 @@ import { DocumentCopy, CopyDocument } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus/es/components/message/index'
 import { copyText } from '@/utils/clipboard'
 
-const baseUrl = 'https://1.xk7.cn'
+// 示例里的站点地址取当前部署自身的源：管理台本来就挂在运维自己的域上，
+// 写死上游域名会让每一条被复制出去的 curl 命令都打到第三方的站点（#20）。
+const baseUrl = typeof location === 'undefined' ? 'https://your-domain.com' : location.origin
 const activeTab = ref<'create' | 'errors'>('create')
 
 const curlExample = `# 创建短链（需 API 密钥）

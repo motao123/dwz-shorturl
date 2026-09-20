@@ -36,8 +36,8 @@ import {
 import {
   SHORT_URL_STATUS,
   URL_CATEGORIES,
-  buildShortUrl,
-  categoryName
+  categoryName,
+  shortUrlOf
 } from '@/utils/constants'
 import { copyText } from '@/utils/clipboard'
 import { useListPage } from '@/composables/useListPage'
@@ -169,9 +169,14 @@ function handleSortChange({ prop, order }: { prop: string | null; order: string 
 /* ---------------- 行操作 ---------------- */
 
 async function handleCopy(row: ShortUrl) {
+  const url = shortUrlOf(row)
+  if (!url) {
+    ElMessage.error('后端未返回该短链的完整地址，请刷新后重试')
+    return
+  }
   try {
-    await copyText(buildShortUrl(row.uid))
-    ElMessage.success(`已复制：${buildShortUrl(row.uid)}`)
+    await copyText(url)
+    ElMessage.success(`已复制：${url}`)
   } catch {
     ElMessage.error('复制失败，请手动复制')
   }
@@ -481,7 +486,7 @@ function formatExpire(row: ShortUrl): string {
           <el-table-column label="短码" min-width="150">
             <template #default="{ row }">
               <div class="uid-cell">
-                <a :href="row.short_url || buildShortUrl(row.uid)" target="_blank" rel="noopener" class="uid mono">
+                <a :href="shortUrlOf(row)" target="_blank" rel="noopener" class="uid mono">
                   {{ row.uid }}
                 </a>
                 <el-tooltip v-if="row.has_password" content="此链接已设置访问密码" placement="top">
@@ -547,7 +552,7 @@ function formatExpire(row: ShortUrl): string {
             <template #default="{ row }">
               <div class="ops">
                 <el-tooltip content="访问短链" placement="top">
-                  <a class="mini-btn" aria-label="访问短链" :href="buildShortUrl(row.uid)" target="_blank" rel="noopener">
+                  <a class="mini-btn" aria-label="访问短链" :href="shortUrlOf(row)" target="_blank" rel="noopener">
                     <el-icon :size="13"><Position /></el-icon>
                   </a>
                 </el-tooltip>

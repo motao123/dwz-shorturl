@@ -2,23 +2,23 @@
 # ============================================================
 # DWZ 短网址系统 - 统一部署脚本
 # 用法:
-#   DWZ_SERVER=1.xk7.cn DWZ_USER=root DWZ_SSH_KEY=~/.ssh/id_rsa ./deploy.sh
+#   DWZ_SERVER=links.example.com DWZ_USER=root DWZ_SSH_KEY=~/.ssh/id_rsa ./deploy.sh
 # 或（用密码时安装 sshpass）:
-#   DWZ_SERVER=1.xk7.cn DWZ_USER=root DWZ_PASS='xxx' ./deploy.sh
+#   DWZ_SERVER=links.example.com DWZ_USER=root DWZ_PASS='xxx' ./deploy.sh
 #
 # 环境变量:
 #   DWZ_SERVER  服务器 IP/域名
 #   DWZ_USER    SSH 用户（默认 root）
 #   DWZ_PASS    密码（可选，需要 sshpass）
 #   DWZ_SSH_KEY 私钥路径（可选）
-#   DWZ_WEB_DIR 网站根目录（默认 /data/www/wwwroot/1.xk7.cn）
+#   DWZ_WEB_DIR 网站根目录（默认按 DWZ_SERVER 推导：/data/www/wwwroot/$DWZ_SERVER）
 #   DWZ_APP_DIR 后端目录（默认 /www/server/dwz-admin）
 # ============================================================
 set -euo pipefail
 
 SERVER="${DWZ_SERVER:?需要设置 DWZ_SERVER}"
 USER="${DWZ_USER:-root}"
-WEB_DIR="${DWZ_WEB_DIR:-/data/www/wwwroot/1.xk7.cn}"
+WEB_DIR="${DWZ_WEB_DIR:-/data/www/wwwroot/${SERVER}}"
 APP_DIR="${DWZ_APP_DIR:-/www/server/dwz-admin}"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
@@ -83,6 +83,11 @@ for d in $DIRS; do UPLOAD_DIRS+=("$ROOT/$d"); done
 
 "${SCP[@]}" "${SSH_ARGS[@]}" "$ROOT/backend/dist/dwz-admin-linux" "$DEST:$APP_DIR/dwz-admin-linux.tmp"
 
+# 违规词库（#11）。它不在 deploy/manifest.txt 里，也不该在：清单描述的是「web 根
+# 下的前台文件」，而词库一旦被公开下载就等于把黑名单交给提交方。所以单独上传到
+# $APP_DIR，再由下面的远端步骤装到 PHP 默认查找路径 /etc/dwz/。
+"${SCP[@]}" "${SSH_ARGS[@]}" "$ROOT/backend/internal/pkg/data/violation_rules.json" "$DEST:$APP_DIR/violation_rules.json"
+
 echo "==> 4/4 上传前端 dist 并重启后端"
 "${SSH[@]}" "${SSH_ARGS[@]}" "$DEST" "rm -rf /tmp/dwz-dist && mkdir -p /tmp/dwz-dist"
 "${SCP[@]}" "${SSH_ARGS[@]}" -r "$ROOT/frontend/dist/." "$DEST:/tmp/dwz-dist/"
@@ -91,6 +96,17 @@ echo "==> 4/4 上传前端 dist 并重启后端"
   mv '$APP_DIR/dwz-admin-linux' '$APP_DIR/dwz-admin-linux.bak'
   mv '$APP_DIR/dwz-admin-linux.tmp' '$APP_DIR/dwz-admin-linux'
   chmod +x '$APP_DIR/dwz-admin-linux' && chown www:www '$APP_DIR/dwz-admin-linux'
+  # 违规词库装到 PHP 前台的默认查找路径（#11）。0644 是刻意的：它必须能被 php-fpm
+  # 进程读到，同时保持在 web 根之外，任何人无法通过 URL 把它下载走。
+  # 本脚本没有 set -e，装不上不会自动中断部署，所以这里显式把结果打出来。
+  mkdir -p /etc/dwz
+  if cp '$APP_DIR/violation_rules.json' /etc/dwz/violation_rules.json 2>/dev/null; then
+    chmod 0644 /etc/dwz/violation_rules.json
+    echo '违规词库已就位：/etc/dwz/violation_rules.json'
+  else
+    echo '!! 违规词库未就位（$APP_DIR/violation_rules.json 缺失或无权限）' >&2
+    echo '!! 公开 api.php / batch.php 的合规拦截会退化成内置 3 域名 / 5 关键词，见审计 #11' >&2
+  fi
   systemctl restart dwz-admin.service
   rm -rf '$WEB_DIR/admin'/* '$WEB_DIR/member'/*
   cp -r /tmp/dwz-dist/* '$WEB_DIR/admin/'

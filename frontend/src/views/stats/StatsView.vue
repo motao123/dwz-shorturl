@@ -12,7 +12,7 @@ import type { ComposeOption } from 'echarts/core'
 import type { LineSeriesOption, BarSeriesOption } from 'echarts/charts'
 import type { GridComponentOption, TooltipComponentOption } from 'echarts/components'
 import { getTrend, getTop, getRecent, getCountries, getReferrerTypes, type TrendGranularity, type RecentUrl, type TrendPoint } from '@/api/stats'
-import { buildShortUrl, SOURCE_LABELS } from '@/utils/constants'
+import { SOURCE_LABELS, shortUrlOf } from '@/utils/constants'
 import { copyText } from '@/utils/clipboard'
 import { useChartTheme } from '@/composables/useChartTheme'
 
@@ -276,9 +276,14 @@ function handleFilterChange() {
   loadTop()
 }
 
-async function handleCopy(uid: string) {
+async function handleCopy(row: RecentUrl) {
+  const url = shortUrlOf(row)
+  if (!url) {
+    ElMessage.error('后端未返回该短链的完整地址，请刷新后重试')
+    return
+  }
   try {
-    await copyText(buildShortUrl(uid))
+    await copyText(url)
     ElMessage.success('已复制短链')
   } catch {
     ElMessage.error('复制失败')
@@ -361,7 +366,7 @@ onMounted(() => {
             <tbody>
               <tr v-for="row in recentRows" :key="row.id">
                 <td>
-                  <a :href="buildShortUrl(row.uid)" target="_blank" rel="noopener" class="mono recent__uid">
+                  <a :href="shortUrlOf(row)" target="_blank" rel="noopener" class="mono recent__uid">
                     {{ row.uid }}
                   </a>
                 </td>
@@ -371,7 +376,7 @@ onMounted(() => {
                 <td class="mono recent__clicks">{{ row.clicks.toLocaleString() }}</td>
                 <td class="mono recent__time">{{ dayjs(row.created_at).format('MM-DD HH:mm') }}</td>
                 <td>
-                  <button class="mini-btn" aria-label="复制短链" title="复制" @click="handleCopy(row.uid)">
+                  <button class="mini-btn" aria-label="复制短链" title="复制" @click="handleCopy(row)">
                     <el-icon :size="12"><DocumentCopy /></el-icon>
                   </button>
                 </td>

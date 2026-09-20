@@ -26,6 +26,13 @@ Options -Indexes
 # 方案 B（兜底，共享虚拟主机默认启用）：走同目录的 api_proxy.php 用 curl
 # 转发到本机 Go 后端。仅多一次 PHP 往返，功能与 nginx 反代一致。
 # 若 Go 后端不在 127.0.0.1:8080，请设置环境变量 DWZ_BACKEND（见 api_proxy.php）。
+
+# 目录索引必须让 index.php 先于 index.html (#19)：首页的 SEO 校验码、百度统计、GA
+# 与站点地址都是 index.php 在运行时注入的，Apache 默认的 index.html 优先顺序会让
+# index.php 根本不被执行——后台填了配置也毫无效果，且这个问题只在 Apache 部署下
+# 出现，Docker 路径一直是好的，极难察觉。
+DirectoryIndex index.php index.html
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteRule ^(admin/api|member/api|public/api|health)(/.*)?$ api_proxy.php [L,QSA]

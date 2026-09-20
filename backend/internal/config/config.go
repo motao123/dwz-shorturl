@@ -124,7 +124,12 @@ func Init(path string) error {
 		v.SetDefault("jwt.member_secret", "")
 		v.SetDefault("jwt.access_expiry", "2h")
 		v.SetDefault("jwt.refresh_expiry", "168h")
-		v.SetDefault("public.base_url", "https://1.xk7.cn")
+		// No default public origin: it used to be the upstream maintainer's own
+		// domain, so every install that forgot to set it minted short links (and
+		// expiry-email links) pointing at someone else's site (#20). Empty means
+		// "not configured": callers then emit relative addresses, and the server
+		// warns at startup.
+		v.SetDefault("public.base_url", "")
 		v.SetDefault("cors.allowed_origins", []string{})
 		v.SetDefault("log.level", "info")
 		v.SetDefault("log.file", "")
