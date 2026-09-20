@@ -47,11 +47,13 @@
     - name: test-gate
       runner:
         cpus: 4
-      # 备份→恢复演练需要 DinD 起一个真 MySQL：用假数据或纯静态检查都不足以
-      # 证明"备份能恢复"，那正是本批要修的东西。
+      # 备份→恢复演练要跑真 MySQL：用假数据或纯静态检查都不足以证明"备份能恢复"，
+      # 那正是本批要修的东西。MySQL 直接在 stage 容器内起（见该 stage 说明），
+      # 因为 DinD 容器在**别的 netns** 里，脚本连 127.0.0.1:3306 永远没人应答。
+      # services: docker 仍然需要，因为 drill 镜像是 docker CLI 镜像。
       services:
         - docker
-      # 流水线级默认构建环境 = drill 镜像（docker CLI + bash/gzip + mysql 客户端）。
+      # 流水线级默认构建环境 = drill 镜像（docker CLI + bash/gzip + mysql 服务端/客户端）。
       # 只有「备份→恢复演练」stage 用默认环境；其余 stage 各自声明 image 覆盖。
       # 必须放在 pipeline 级：Stage 不支持 docker.build，只有 image。
       docker:
@@ -123,10 +125,9 @@
             echo "XFF 赋值方式检查通过"
         # --- 备份→恢复演练（真 MySQL，端到端）---------------------------------
         # 这是本批唯一"不是静态检查"的门禁，也是最该有的一条：备份的价值只由
-        # "能恢复"定义，而"能恢复"只有把 dump 真的导进一个库才知道。用 DinD 起
-        # 一个 mysql:8.0，跑 deploy/backup.sh 出 dump，再跑 deploy/restore.sh --check
-        # 导入临时库比对表数量 —— 失败即说明备份链路坏了。
-        # 需要 docker service（见本 pipeline 的 services）。
+        # "能恢复"定义，而"能恢复"只有把 dump 真的导进一个库才知道。在本 stage
+        # 容器内直接启动一个真 mysqld，跑 deploy/backup.sh 出 dump，再跑
+        # deploy/restore.sh --check 导入临时库比对表数量 —— 失败即说明备份链路坏了。
         - name: 备份→恢复演练
           # 注意：这里**不能**写 stage/job 级的 docker.build —— Stage 只支持 image，
           # job 级的 docker 键会被静默忽略（平台校验器也不报错），于是本 stage 会退回
@@ -136,47 +137,110 @@
           # 本 stage 不写 image，即继承该默认环境；其它 stage 各自用 image 覆盖。
           script: |
             set -e
-            # 起一个临时 MySQL（host 网络，容器名固定）：备份/恢复脚本位于本 stage
-            # 容器内，必须能从 127.0.0.1:3306 直连，所以**不做端口映射**。
-            # 原因：本 Runner 的 docker daemon 跑在 WSL2 里（stage 日志里 docker 时间戳是
-            # UTC，宿主是 CST），DinD 的 -p 端口发布走的是 WSL2 的 NAT 代理，从 stage
-            # 容器访问 127.0.0.1:<映射端口> 会 115/EINPROGRESS 被拒（实测：同参数在
-            # userland-proxy 下必失败，`docker exec` 进容器内连 127.0.0.1 反而正常）。
-            # host 网络下没有 NAT 这一跳，脚本连的就是 MySQL 自己监听的地址。
-            docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true
-            cleanup_drill() { docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true; }
-            trap cleanup_drill EXIT
-            docker run -d --name dwz-drill-mysql --network host \
-              -e MYSQL_ROOT_PASSWORD=drillroot mysql:8.0 \
-              --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+            # 运行期预检：镜像里必须同时有 mysqld 与 mysqldump。CNB 以 dockerfile 声明
+            # 构建环境时按内容缓存镜像，缓存命中就沿用旧层 —— 依赖包改了、镜像没跟着
+            # 更新时，backup.sh 只会抛一句没头没尾的 "command not found"。这里先自证
+            # 环境，缺什么直接红并打印诊断。
+            echo "--- 演练环境自检"
+            for bin in mysql mysqladmin mysqldump mysqld mariadb-install-db gzip bash; do
+              if ! command -v "$bin" >/dev/null 2>&1; then
+                echo "演练环境缺少 $bin：镜像未按 deploy/docker/drill/Dockerfile 重建"
+                exit 1
+              fi
+            done
+            mysql --version
+            mysqld --version
+            # 只看 `command -v find` 不够：Alpine 的 BusyBox find 也存在，但不支持
+            # `-printf`，而 deploy/backup.sh 的旧档轮转正靠 `find ... -printf '%T@ %p'`
+            # 按 mtime 取最近 KEEP 份 —— 缺 GNU findutils 时这一步会以非 0 退出，
+            # 把一份**已经备份成功**的运行整体判失败。所以直接探真实的 -printf 调用。
+            if ! find . -maxdepth 0 -printf '' >/dev/null 2>&1; then
+              echo "演练环境缺少 GNU findutils：find 不支持 -printf（BusyBox find）"
+              echo "镜像未按 deploy/docker/drill/Dockerfile 重建"
+              exit 1
+            fi
+
+            # **不通过容器跑 MySQL，也不做端口映射/容器名解析**：在本 stage 容器内
+            # 直接起一个 mysqld —— 备份/恢复脚本就在这个容器里执行，连
+            # 127.0.0.1:3306 必须由它自己监听。
+            #
+            # 为什么不能用 DinD 容器方案（三轮 CI 实测结论，别再回退）：
+            #   1) `-p 33061:3306` + 从 stage 容器连 127.0.0.1:33061 → 2002 (115 EINPROGRESS)；
+            #   2) 改用 `--network host`（容器内 127.0.0.1:3306 可达）后仍失败：
+            #      CNB 构建容器有**自己的 netns**，它看到的 127.0.0.1 是它自己，
+            #      MySQL 绑在 daemon 宿主 netns 上，两边对不上。
+            # 一句话：MySQL 在别的 netns 里，脚本连 127.0.0.1 就永远没人应答。
+            echo "=== 启动 MySQL（stage 容器内）"
+            mkdir -p /run/mysqld /var/lib/mysql /tmp/mysql-logs
+
+            # 初始化数据目录。**必须用 mariadb-install-db，不能照抄 MySQL 的
+            # `mysqld --initialize-insecure`**：drill 镜像里装的是 MariaDB（Alpine
+            # 的 `mariadb` 包没有 `mysql-server`），而 MariaDB 10.11 的 mysqld
+            # **不认 `--initialize-insecure`** —— 直接报
+            #   [ERROR] mysqld: unknown option '--initialize-insecure' 并 Aborting。
+            # 这正是本 PR 上一轮 CI 的错误根因（本机 MariaDB 10.11 已复现同一句）。
+            #   --auth-root-authentication-method=normal → root 建为普通口令账号，
+            #   与 MySQL 的 initialize-insecure 语义等价：先无口令，再立刻设口令。
+            if [ ! -d /var/lib/mysql/mysql ]; then
+              echo "初始化数据目录（约 10-30s）..."
+              mariadb-install-db --user=mysql --datadir=/var/lib/mysql \
+                --auth-root-authentication-method=normal
+            fi
+            # /var/lib/mysql 由 initdb 自己落 mysql 属主；这里只补运行期目录。
+            chown -R mysql:mysql /run/mysqld /tmp/mysql-logs
+            # `--skip-networking=0`：MariaDB 在这个最小容器里必须显式打开 TCP 监听，
+            # 否则脚本连 127.0.0.1:3306 会拿到 2002（连接被拒）。
+            nohup mysqld --user=mysql --datadir=/var/lib/mysql \
+              --skip-networking=0 \
+              --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
+              --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
+              >/tmp/mysql-logs/mysqld.log 2>&1 &
             echo "等待 MySQL 就绪..."
+            READY=0
             for i in $(seq 1 60); do
-              if docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent >/dev/null 2>&1; then echo "就绪(${i}s)"; break; fi
+              if mysqladmin --socket=/run/mysqld/mysqld.sock -uroot ping >/dev/null 2>&1; then echo "就绪(${i}s)"; READY=1; break; fi
               sleep 2
             done
-            docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent
+            if [ "$READY" -ne 1 ]; then
+              echo "MySQL 未能在 120s 内就绪"
+              tail -n 50 /tmp/mysql-logs/mysqld.log
+              exit 1
+            fi
 
-            # 自证连通性：**宿主侧进程**（就是 backup.sh/restore.sh 所处的位置）能直连。
-            # 这条断言把"容器内 healthy"与"脚本真的连得上"区分开 —— 上一轮 CI 的失败
-            # 正是这两者不一致（容器内 ping 通、宿主连不上），却拖到 backup.sh 才暴露。
-            echo "--- 宿主到 MySQL 连通性自检"
+            # 建 root 账号并设口令。必须**同时设 root@localhost 与 root@127.0.0.1**：
+            # 客户端连 127.0.0.1 时服务端默认会反向解析成 'localhost'，只建
+            # root@127.0.0.1 会得到 "Access denied for user 'root'@'localhost'"。
+            # 用 `SET PASSWORD` 而不是 `ALTER USER ... IDENTIFIED BY`：后者在
+            # MariaDB 10.11 上对 root@localhost 会报
+            #   ERROR 1396 (HY000): Operation ALTER USER failed for 'root'@'localhost'
+            # （auth-root-authentication-method=normal 时 root 走 mysql_native_password）。
+            mysql --socket=/run/mysqld/mysqld.sock -uroot -e "
+              CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY 'drillroot';
+              GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
+              SET PASSWORD FOR 'root'@'localhost' = PASSWORD('drillroot');
+              SET PASSWORD FOR 'root'@'127.0.0.1' = PASSWORD('drillroot');
+              FLUSH PRIVILEGES;"
+
+            # 自证连通性：备份/恢复脚本所处位置用 TCP 直连。
+            # 这条断言把"服务端起来了"与"脚本真的连得上"分开 —— 前几轮 CI 的失败
+            # 都是两者不一致，却拖到 backup.sh 才以一句 2002 暴露。
+            echo "--- 到 MySQL 连通性自检"
             for i in $(seq 1 30); do
               if MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP -N -B -e 'SELECT 1' >/dev/null 2>&1; then
-                echo "宿主侧连通 OK（127.0.0.1:3306）"; break
+                echo "TCP 连通 OK（127.0.0.1:3306）"; break
               fi
               if [ "$i" -eq 30 ]; then
-                echo "宿主侧连不上 127.0.0.1:3306"
-                docker ps -a --filter name=dwz-drill-mysql
-                docker logs --tail 30 dwz-drill-mysql 2>&1 || true
+                echo "连不上 127.0.0.1:3306"
+                tail -n 50 /tmp/mysql-logs/mysqld.log
                 exit 1
               fi
               sleep 2
             done
 
             # 建两个库并灌入真实 schema（用仓库里的迁移文件，不用假数据）。
-            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot -e "CREATE DATABASE dwz_admin CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE DATABASE dwz_public CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_admin < backend/migrations/schema.sql
-            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_public < backend/migrations/php/add_webhook_queue.sql
+            MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP -e "CREATE DATABASE dwz_admin CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE DATABASE dwz_public CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+            MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP dwz_admin < backend/migrations/schema.sql
+            MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP dwz_public < backend/migrations/php/add_webhook_queue.sql
 
             export DB_HOST=127.0.0.1 DB_PORT=3306
             export DB_ADMIN_USER=root DB_ADMIN_PASS=drillroot DB_ADMIN_NAME=dwz_admin
@@ -276,11 +340,13 @@ master:
     - name: test-gate
       runner:
         cpus: 4
-      # 备份→恢复演练需要 DinD 起一个真 MySQL：用假数据或纯静态检查都不足以
-      # 证明"备份能恢复"，那正是本批要修的东西。
+      # 备份→恢复演练要跑真 MySQL：用假数据或纯静态检查都不足以证明"备份能恢复"，
+      # 那正是本批要修的东西。MySQL 直接在 stage 容器内起（见该 stage 说明），
+      # 因为 DinD 容器在**别的 netns** 里，脚本连 127.0.0.1:3306 永远没人应答。
+      # services: docker 仍然需要，因为 drill 镜像是 docker CLI 镜像。
       services:
         - docker
-      # 流水线级默认构建环境 = drill 镜像（docker CLI + bash/gzip + mysql 客户端）。
+      # 流水线级默认构建环境 = drill 镜像（docker CLI + bash/gzip + mysql 服务端/客户端）。
       # 只有「备份→恢复演练」stage 用默认环境；其余 stage 各自声明 image 覆盖。
       # 必须放在 pipeline 级：Stage 不支持 docker.build，只有 image。
       docker:
@@ -347,10 +413,9 @@ master:
             echo "XFF 赋值方式检查通过"
         # --- 备份→恢复演练（真 MySQL，端到端）---------------------------------
         # 这是本批唯一"不是静态检查"的门禁，也是最该有的一条：备份的价值只由
-        # "能恢复"定义，而"能恢复"只有把 dump 真的导进一个库才知道。用 DinD 起
-        # 一个 mysql:8.0，跑 deploy/backup.sh 出 dump，再跑 deploy/restore.sh --check
-        # 导入临时库比对表数量 —— 失败即说明备份链路坏了。
-        # 需要 docker service（见本 pipeline 的 services）。
+        # "能恢复"定义，而"能恢复"只有把 dump 真的导进一个库才知道。在本 stage
+        # 容器内直接启动一个真 mysqld，跑 deploy/backup.sh 出 dump，再跑
+        # deploy/restore.sh --check 导入临时库比对表数量 —— 失败即说明备份链路坏了。
         - name: 备份→恢复演练
           # 注意：这里**不能**写 stage/job 级的 docker.build —— Stage 只支持 image，
           # job 级的 docker 键会被静默忽略（平台校验器也不报错），于是本 stage 会退回
@@ -360,47 +425,110 @@ master:
           # 本 stage 不写 image，即继承该默认环境；其它 stage 各自用 image 覆盖。
           script: |
             set -e
-            # 起一个临时 MySQL（host 网络，容器名固定）：备份/恢复脚本位于本 stage
-            # 容器内，必须能从 127.0.0.1:3306 直连，所以**不做端口映射**。
-            # 原因：本 Runner 的 docker daemon 跑在 WSL2 里（stage 日志里 docker 时间戳是
-            # UTC，宿主是 CST），DinD 的 -p 端口发布走的是 WSL2 的 NAT 代理，从 stage
-            # 容器访问 127.0.0.1:<映射端口> 会 115/EINPROGRESS 被拒（实测：同参数在
-            # userland-proxy 下必失败，`docker exec` 进容器内连 127.0.0.1 反而正常）。
-            # host 网络下没有 NAT 这一跳，脚本连的就是 MySQL 自己监听的地址。
-            docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true
-            cleanup_drill() { docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true; }
-            trap cleanup_drill EXIT
-            docker run -d --name dwz-drill-mysql --network host \
-              -e MYSQL_ROOT_PASSWORD=drillroot mysql:8.0 \
-              --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+            # 运行期预检：镜像里必须同时有 mysqld 与 mysqldump。CNB 以 dockerfile 声明
+            # 构建环境时按内容缓存镜像，缓存命中就沿用旧层 —— 依赖包改了、镜像没跟着
+            # 更新时，backup.sh 只会抛一句没头没尾的 "command not found"。这里先自证
+            # 环境，缺什么直接红并打印诊断。
+            echo "--- 演练环境自检"
+            for bin in mysql mysqladmin mysqldump mysqld mariadb-install-db gzip bash; do
+              if ! command -v "$bin" >/dev/null 2>&1; then
+                echo "演练环境缺少 $bin：镜像未按 deploy/docker/drill/Dockerfile 重建"
+                exit 1
+              fi
+            done
+            mysql --version
+            mysqld --version
+            # 只看 `command -v find` 不够：Alpine 的 BusyBox find 也存在，但不支持
+            # `-printf`，而 deploy/backup.sh 的旧档轮转正靠 `find ... -printf '%T@ %p'`
+            # 按 mtime 取最近 KEEP 份 —— 缺 GNU findutils 时这一步会以非 0 退出，
+            # 把一份**已经备份成功**的运行整体判失败。所以直接探真实的 -printf 调用。
+            if ! find . -maxdepth 0 -printf '' >/dev/null 2>&1; then
+              echo "演练环境缺少 GNU findutils：find 不支持 -printf（BusyBox find）"
+              echo "镜像未按 deploy/docker/drill/Dockerfile 重建"
+              exit 1
+            fi
+
+            # **不通过容器跑 MySQL，也不做端口映射/容器名解析**：在本 stage 容器内
+            # 直接起一个 mysqld —— 备份/恢复脚本就在这个容器里执行，连
+            # 127.0.0.1:3306 必须由它自己监听。
+            #
+            # 为什么不能用 DinD 容器方案（三轮 CI 实测结论，别再回退）：
+            #   1) `-p 33061:3306` + 从 stage 容器连 127.0.0.1:33061 → 2002 (115 EINPROGRESS)；
+            #   2) 改用 `--network host`（容器内 127.0.0.1:3306 可达）后仍失败：
+            #      CNB 构建容器有**自己的 netns**，它看到的 127.0.0.1 是它自己，
+            #      MySQL 绑在 daemon 宿主 netns 上，两边对不上。
+            # 一句话：MySQL 在别的 netns 里，脚本连 127.0.0.1 就永远没人应答。
+            echo "=== 启动 MySQL（stage 容器内）"
+            mkdir -p /run/mysqld /var/lib/mysql /tmp/mysql-logs
+
+            # 初始化数据目录。**必须用 mariadb-install-db，不能照抄 MySQL 的
+            # `mysqld --initialize-insecure`**：drill 镜像里装的是 MariaDB（Alpine
+            # 的 `mariadb` 包没有 `mysql-server`），而 MariaDB 10.11 的 mysqld
+            # **不认 `--initialize-insecure`** —— 直接报
+            #   [ERROR] mysqld: unknown option '--initialize-insecure' 并 Aborting。
+            # 这正是本 PR 上一轮 CI 的错误根因（本机 MariaDB 10.11 已复现同一句）。
+            #   --auth-root-authentication-method=normal → root 建为普通口令账号，
+            #   与 MySQL 的 initialize-insecure 语义等价：先无口令，再立刻设口令。
+            if [ ! -d /var/lib/mysql/mysql ]; then
+              echo "初始化数据目录（约 10-30s）..."
+              mariadb-install-db --user=mysql --datadir=/var/lib/mysql \
+                --auth-root-authentication-method=normal
+            fi
+            # /var/lib/mysql 由 initdb 自己落 mysql 属主；这里只补运行期目录。
+            chown -R mysql:mysql /run/mysqld /tmp/mysql-logs
+            # `--skip-networking=0`：MariaDB 在这个最小容器里必须显式打开 TCP 监听，
+            # 否则脚本连 127.0.0.1:3306 会拿到 2002（连接被拒）。
+            nohup mysqld --user=mysql --datadir=/var/lib/mysql \
+              --skip-networking=0 \
+              --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
+              --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
+              >/tmp/mysql-logs/mysqld.log 2>&1 &
             echo "等待 MySQL 就绪..."
+            READY=0
             for i in $(seq 1 60); do
-              if docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent >/dev/null 2>&1; then echo "就绪(${i}s)"; break; fi
+              if mysqladmin --socket=/run/mysqld/mysqld.sock -uroot ping >/dev/null 2>&1; then echo "就绪(${i}s)"; READY=1; break; fi
               sleep 2
             done
-            docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent
+            if [ "$READY" -ne 1 ]; then
+              echo "MySQL 未能在 120s 内就绪"
+              tail -n 50 /tmp/mysql-logs/mysqld.log
+              exit 1
+            fi
 
-            # 自证连通性：**宿主侧进程**（就是 backup.sh/restore.sh 所处的位置）能直连。
-            # 这条断言把"容器内 healthy"与"脚本真的连得上"区分开 —— 上一轮 CI 的失败
-            # 正是这两者不一致（容器内 ping 通、宿主连不上），却拖到 backup.sh 才暴露。
-            echo "--- 宿主到 MySQL 连通性自检"
+            # 建 root 账号并设口令。必须**同时设 root@localhost 与 root@127.0.0.1**：
+            # 客户端连 127.0.0.1 时服务端默认会反向解析成 'localhost'，只建
+            # root@127.0.0.1 会得到 "Access denied for user 'root'@'localhost'"。
+            # 用 `SET PASSWORD` 而不是 `ALTER USER ... IDENTIFIED BY`：后者在
+            # MariaDB 10.11 上对 root@localhost 会报
+            #   ERROR 1396 (HY000): Operation ALTER USER failed for 'root'@'localhost'
+            # （auth-root-authentication-method=normal 时 root 走 mysql_native_password）。
+            mysql --socket=/run/mysqld/mysqld.sock -uroot -e "
+              CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY 'drillroot';
+              GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
+              SET PASSWORD FOR 'root'@'localhost' = PASSWORD('drillroot');
+              SET PASSWORD FOR 'root'@'127.0.0.1' = PASSWORD('drillroot');
+              FLUSH PRIVILEGES;"
+
+            # 自证连通性：备份/恢复脚本所处位置用 TCP 直连。
+            # 这条断言把"服务端起来了"与"脚本真的连得上"分开 —— 前几轮 CI 的失败
+            # 都是两者不一致，却拖到 backup.sh 才以一句 2002 暴露。
+            echo "--- 到 MySQL 连通性自检"
             for i in $(seq 1 30); do
               if MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP -N -B -e 'SELECT 1' >/dev/null 2>&1; then
-                echo "宿主侧连通 OK（127.0.0.1:3306）"; break
+                echo "TCP 连通 OK（127.0.0.1:3306）"; break
               fi
               if [ "$i" -eq 30 ]; then
-                echo "宿主侧连不上 127.0.0.1:3306"
-                docker ps -a --filter name=dwz-drill-mysql
-                docker logs --tail 30 dwz-drill-mysql 2>&1 || true
+                echo "连不上 127.0.0.1:3306"
+                tail -n 50 /tmp/mysql-logs/mysqld.log
                 exit 1
               fi
               sleep 2
             done
 
             # 建两个库并灌入真实 schema（用仓库里的迁移文件，不用假数据）。
-            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot -e "CREATE DATABASE dwz_admin CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE DATABASE dwz_public CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_admin < backend/migrations/schema.sql
-            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_public < backend/migrations/php/add_webhook_queue.sql
+            MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP -e "CREATE DATABASE dwz_admin CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE DATABASE dwz_public CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+            MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP dwz_admin < backend/migrations/schema.sql
+            MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP dwz_public < backend/migrations/php/add_webhook_queue.sql
 
             export DB_HOST=127.0.0.1 DB_PORT=3306
             export DB_ADMIN_USER=root DB_ADMIN_PASS=drillroot DB_ADMIN_NAME=dwz_admin
