@@ -1,0 +1,50 @@
+# dwz-shorturl 告警规则：只覆盖「真正需要有人处理」的三件事。
+#
+# 刻意保持精简——指标导出本身就是最小实现，配套的告警也应如此，避免一上来
+# 就堆满没人看的规则（那和没有告警是一样的效果）。
+#
+# 指标含义见 backend/internal/handler/metrics.go。
+
+groups:
+  - name: dwz-shorturl
+    rules:
+      # 1) 进程不可达：跳转、后台、API 全部受影响，最高优先级。
+      - alert: DwzBackendDown
+        expr: up{job="dwz-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "dwz 后端无法抓取（进程可能已挂）"
+          description: "Prometheus 连续 1 分钟抓不到 {{ $labels.instance }}，检查容器/进程状态与端口监听。"
+
+      # 2) 点击队列打满：说明写库速度跟不上点击速度，此时点击正在被丢弃，
+      #    统计数据会少记，属于数据准确性问题，必须立刻处理。
+      - alert: DwzClickQueueDropping
+        expr: increase(dwz_clicks_dropped_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "点击事件正在被丢弃（队列已满）"
+          description: "过去 5 分钟有 {{ $value | printf \"%.0f\" }} 个点击因队列满被丢弃，统计数据将偏低。检查数据库写入延迟与 dwz_click_queue_capacity/待处理量。"
+
+      # 3) 数据库不可达：进程还活着但核心功能已不可用，/health 也会变红。
+      - alert: DwzDatabaseDown
+        expr: dwz_db_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "dwz 后端无法连接数据库"
+          description: "dwz_db_up 已为 0 超过 1 分钟，短链跳转与后台均不可用，检查 MySQL 连接与凭据。"
+
+      # 4) Redis 不可达：限流会 fail-open、缓存与队列退化，属于功能性降级。
+      - alert: DwzRedisDown
+        expr: dwz_redis_up == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "dwz 后端无法连接 Redis"
+          description: "dwz_redis_up 已为 0 超过 2 分钟：限流将退化为不限流、后台登录锁定失效，请检查 Redis 服务。"

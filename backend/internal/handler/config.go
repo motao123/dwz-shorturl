@@ -61,7 +61,7 @@ func isSensitiveConfigKey(key string) bool {
 func (h *ConfigHandler) BatchUpdate(c *gin.Context) {
 	var req BatchUpdateConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "configs array is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "configs 数组不能为空")
 		return
 	}
 

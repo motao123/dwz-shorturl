@@ -6,6 +6,10 @@
 #   # 等 init 容器跑完，浏览器打开 http://<主机>/admin/
 #   # 账号 = ADMIN_USERNAME，密码 = ADMIN_PASSWORD（.env 里那个）
 #
+# 这是「单库模式」（管理表与公共表同库，init 容器全自动）。
+# 需要管理库/公共库分离时用 deploy/docker-compose.yml（分库模式，两者都维护，
+# 不是新旧关系），选择依据见 README.md 的「单库 vs 分库」对照表。
+#
 # 与 deploy/docker-compose.yml 的区别：
 #   1. 只有一个 MySQL 库：管理表（short_urls/users/...）与公共表
 #      （wjoy_log/members/...）同库，不需要建两个库、也没有跨库权限问题

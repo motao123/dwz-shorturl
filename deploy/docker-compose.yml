@@ -1,3 +1,16 @@
+# ============================================================
+# dwz-shorturl 分库部署（管理库 + 公共库分离）
+#
+# 与仓库根目录的 docker-compose.yml 是**两种不同模式**，不是新旧版本，
+# 两者都在维护：
+#   - 根目录 docker-compose.yml  → 单库模式，init 容器全自动，推荐绝大多数场景
+#   - 本文件                     → 分库模式，适合已有独立两库 / 多站点共用公共库
+# 选择依据见 README.md 的「单库 vs 分库」对照表。
+#
+# 用法：
+#   cp deploy/.env.example deploy/.env
+#   docker compose -f deploy/docker-compose.yml up -d
+# ============================================================
 version: "3.9"
 
 services:

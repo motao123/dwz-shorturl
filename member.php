@@ -6,10 +6,21 @@
 include __DIR__ . '/includes/api.inc.php';
 include __DIR__ . '/includes/auth.php';
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    if (!headers_sent()) { http_response_code(405); header('Allow: POST'); header('Content-Type: application/json; charset=utf-8'); }
-    echo json_encode(array('code' => 0, 'msg' => 'method not allowed', 'result' => 10010));
+// 读取类 action 允许 GET：默认会话查询与 my_links 都是幂等的只读操作。
+// 此前一律要求 POST，导致浏览器直接访问 /member.php、或任何 GET 调用都拿到
+// 405，既不符合 HTTP 语义也不便于排障。写操作（register/login/logout）仍必须是 POST。
+$method = isset($_SERVER['REQUEST_METHOD']) ? strtoupper((string)$_SERVER['REQUEST_METHOD']) : 'GET';
+$preAction = isset($_REQUEST['action']) && is_string($_REQUEST['action']) ? trim($_REQUEST['action']) : '';
+$readOnlyActions = array('', 'session', 'me', 'my_links');
+
+if ($method === 'OPTIONS') {
+    if (!headers_sent()) { http_response_code(204); header('Allow: GET, POST, OPTIONS'); }
     exit();
+}
+
+if ($method !== 'POST') {
+    if ($method !== 'GET' && $method !== 'HEAD') member_method_not_allowed();
+    if (!in_array($preAction, $readOnlyActions, true)) member_method_not_allowed();
 }
 if (!headers_sent()) {
     header('Content-Type: application/json; charset=utf-8');
@@ -18,7 +29,8 @@ if (!headers_sent()) {
     header('Pragma: no-cache');
 }
 
-$action = isset($_POST['action']) && is_string($_POST['action']) ? trim($_POST['action']) : '';
+// 从 $_REQUEST 取 action：GET 用 query string，POST 用表单，两者都能命中。
+$action = $preAction;
 
 /* CSRF 防护：登录/注册/登出需要先获取 token（GET /me） */
 $csrf = isset($_POST['csrf']) && is_string($_POST['csrf']) ? trim($_POST['csrf']) : '';
@@ -120,6 +132,17 @@ member_result(1, 'ok', 1, 200, array(
     // 引导（体验层）；api.php 的 401 拦截是真正的后端兜底。
     'require_registration' => member_only_create_enabled(),
 ));
+
+// 统一的 405 响应：带上 Allow 头并指明允许的方法，便于调用方排障。
+function member_method_not_allowed() {
+    if (!headers_sent()) {
+        http_response_code(405);
+        header('Allow: GET, POST');
+        header('Content-Type: application/json; charset=utf-8');
+    }
+    echo json_encode(array('code' => 0, 'msg' => 'method not allowed', 'result' => 10010));
+    exit();
+}
 
 function member_result($code, $msg, $result, $status = 200, $data = null) {
     global $DB;

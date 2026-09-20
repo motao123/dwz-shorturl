@@ -100,7 +100,7 @@ func (h *ShortUrlHandler) CheckLink(c *gin.Context) {
 func (h *ShortUrlHandler) Create(c *gin.Context) {
 	var req CreateShortUrlRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "url is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "url 不能为空")
 		return
 	}
 
@@ -150,7 +150,7 @@ func (h *ShortUrlHandler) dispatchCreated(record *model.ShortUrl) {
 func (h *ShortUrlHandler) CreatePublic(c *gin.Context) {
 	var req CreateShortUrlRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "url is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "url 不能为空")
 		return
 	}
 
@@ -183,7 +183,7 @@ type batchResultRow struct {
 func (h *ShortUrlHandler) BatchCreatePublic(c *gin.Context) {
 	var req BatchCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "urls array is required (1-100 items)")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "urls 数组不能为空（1-100 条）")
 		return
 	}
 
@@ -222,7 +222,7 @@ func (h *ShortUrlHandler) BatchCreatePublic(c *gin.Context) {
 func (h *ShortUrlHandler) BatchCreate(c *gin.Context) {
 	var req BatchCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "urls array is required (1-100 items)")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "urls 数组不能为空（1-100 条）")
 		return
 	}
 
@@ -399,7 +399,7 @@ type BatchUpdateRequest struct {
 func (h *ShortUrlHandler) BatchUpdate(c *gin.Context) {
 	var req BatchUpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "ids is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "ids 不能为空")
 		return
 	}
 	updated, err := h.svc.BatchUpdate(req.IDs, req.Status, req.ExpireDays)
@@ -468,7 +468,7 @@ func (h *ShortUrlHandler) Delete(c *gin.Context) {
 func (h *ShortUrlHandler) BatchDelete(c *gin.Context) {
 	var req BatchDeleteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "ids array is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "ids 数组不能为空")
 		return
 	}
 

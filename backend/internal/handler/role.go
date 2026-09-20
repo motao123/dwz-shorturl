@@ -109,7 +109,7 @@ func (h *RoleHandler) SetPermissions(c *gin.Context) {
 
 	var req SetPermissionsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "permission_ids is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "permission_ids 不能为空")
 		return
 	}
 

@@ -13,6 +13,8 @@ import (
 type Counter interface {
 	IncrBy(ctx context.Context, key string, n int64) (int64, error)
 	Expire(ctx context.Context, key string, ttl time.Duration) (bool, error)
+	Delete(ctx context.Context, key string) error
+	Get(ctx context.Context, key string) (int64, error)
 }
 
 type redisCounter struct {
@@ -25,6 +27,18 @@ func (c redisCounter) IncrBy(ctx context.Context, key string, n int64) (int64, e
 
 func (c redisCounter) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	return c.rdb.Expire(ctx, key, ttl).Result()
+}
+
+func (c redisCounter) Delete(ctx context.Context, key string) error {
+	return c.rdb.Del(ctx, key).Err()
+}
+
+func (c redisCounter) Get(ctx context.Context, key string) (int64, error) {
+	n, err := c.rdb.Get(ctx, key).Int64()
+	if err == redis.Nil {
+		return 0, nil
+	}
+	return n, err
 }
 
 // RateLimiter implements a fixed-window rate limiter over a shared counter
@@ -84,4 +98,24 @@ func (r *RateLimiter) AllowN(ctx context.Context, key string, max, cost int, win
 		return false, rerr
 	}
 	return false, nil
+}
+
+// Reset clears the counter for key, discarding whatever budget has been spent
+// in the current window. It backs the "clear the failure count on successful
+// login" half of account-level lockout: without it a legitimate user who failed
+// a few times would keep those failures around for the rest of the window.
+func (r *RateLimiter) Reset(ctx context.Context, key string) error {
+	return r.counter.Delete(ctx, "rl:"+key)
+}
+
+// Count returns the number of tokens spent for key in the current window
+// without consuming any. It backs read-only checks such as "is this account
+// locked?" where a plain Allow would charge the caller for merely looking.
+// A missing key reports 0.
+func (r *RateLimiter) Count(ctx context.Context, key string) (int, error) {
+	n, err := r.counter.Get(ctx, "rl:"+key)
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }

@@ -35,7 +35,7 @@ type RunTaskRequest struct {
 func (h *MonitorHandler) RunTask(c *gin.Context) {
 	var req RunTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "task name is required")
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "请填写任务名")
 		return
 	}
 	ok, err := h.svc.RunTask(req.Name)

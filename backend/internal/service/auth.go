@@ -1,17 +1,40 @@
 package service
 
 import (
+	"context"
 	"errors"
+	"strings"
+	"time"
 
 	"dwz-admin/internal/model"
 	"dwz-admin/internal/pkg"
 	"dwz-admin/internal/repository"
 )
 
+// User-facing auth errors. Returned verbatim to the browser (the login handler
+// forwards err.Error() into the JSON envelope), so they are in Chinese to match
+// the admin UI — they used to be English while every surrounding message was
+// Chinese.
 var (
-	ErrInvalidCredentials = errors.New("invalid username or password")
-	ErrUserDisabled       = errors.New("user account is disabled")
-	ErrUserNotFound       = errors.New("user not found")
+	ErrInvalidCredentials = errors.New("用户名或密码错误")
+	ErrUserDisabled       = errors.New("账号已被禁用")
+	ErrUserNotFound       = errors.New("用户不存在")
+	// ErrAccountLocked is returned while a username is in its lockout window.
+	ErrAccountLocked = errors.New("账号尝试次数过多已临时锁定，请稍后再试")
+)
+
+// Account-level lockout policy for the admin login endpoint.
+//
+// The per-IP limiter in the router only slows an attacker who keeps one IP:
+// rotating across a handful of addresses lets them try max-1 times from each and
+// never trip it. Locking on the *username* is what actually bounds a brute-force
+// run against a known account. The frontend member login has had this since the
+// beginning (see includes/auth.php member_login), so the highest-privilege entry
+// point was the one left unprotected.
+const (
+	adminLoginMaxFailures = 8
+	adminLoginLockWindow  = 15 * time.Minute
+	adminLoginKeyPrefix   = "admin-login-fail:"
 )
 
 type LoginResult struct {
@@ -43,15 +66,44 @@ type AuthService interface {
 type authService struct {
 	userRepo repository.UserRepo
 	roleRepo repository.RoleRepo
+	// limiter backs account-level failure counting. Nil disables lockout so
+	// unit tests and a Redis-less deployment keep working.
+	limiter *pkg.RateLimiter
 }
 
-func NewAuthService(userRepo repository.UserRepo, roleRepo repository.RoleRepo) AuthService {
+// NewAuthService returns the concrete service so callers can chain options
+// (WithLoginLimiter); it still satisfies AuthService.
+func NewAuthService(userRepo repository.UserRepo, roleRepo repository.RoleRepo) *authService {
 	return &authService{userRepo: userRepo, roleRepo: roleRepo}
 }
 
+// WithLoginLimiter enables account-level lockout on the service. Passing nil
+// leaves the login path unchanged.
+func (s *authService) WithLoginLimiter(l *pkg.RateLimiter) *authService {
+	s.limiter = l
+	return s
+}
+
+// loginFailKey namespaces the failure counter by lower-cased username so
+// "Admin" and "admin" cannot be used to get two independent budgets.
+func loginFailKey(username string) string {
+	return adminLoginKeyPrefix + strings.ToLower(strings.TrimSpace(username))
+}
+
 func (s *authService) Login(username, password, totpCode, ip string) (*LoginResult, error) {
+	ctx := context.Background()
+
+	// Account-level lockout, checked before the password is compared so a locked
+	// account costs no bcrypt work (and cannot be probed for timing).
+	if s.locked(ctx, username) {
+		return nil, ErrAccountLocked
+	}
+
 	user, err := s.userRepo.FindByUsername(username)
 	if err != nil {
+		// Unknown username still burns a count so the endpoint cannot be used to
+		// enumerate which usernames exist via lockout behaviour alone.
+		s.noteFailure(ctx, username)
 		return nil, ErrInvalidCredentials
 	}
 
@@ -60,19 +112,26 @@ func (s *authService) Login(username, password, totpCode, ip string) (*LoginResu
 	}
 
 	if !pkg.CheckPassword(user.PasswordHash, password) {
+		s.noteFailure(ctx, username)
 		return nil, ErrInvalidCredentials
 	}
 
 	// 2FA: accounts with an enrolled TOTP secret must present a valid code.
 	if user.TotpSecret != "" {
 		if !pkg.ValidateTotp(totpCode, user.TotpSecret) {
+			// A wrong TOTP is a failed login: count it, otherwise a valid
+			// password alone would let an attacker brute-force the 6 digits.
+			s.noteFailure(ctx, username)
 			// 区分「未提供/错误」两种：未提供时前端展示验证码输入框。
 			if totpCode == "" {
 				return nil, pkg.ErrTotpRequired
 			}
-			return nil, errors.New("totp code invalid")
+			return nil, errors.New("两步验证码不正确")
 		}
 	}
+
+	// Successful login clears the accumulated failures for this account.
+	s.resetFailures(ctx, username)
 
 	roles, err := s.userRepo.GetRoles(user.ID)
 	if err != nil {
@@ -100,15 +159,47 @@ func (s *authService) Login(username, password, totpCode, ip string) (*LoginResu
 	}, nil
 }
 
+// locked reports whether the username has exhausted its failure budget.
+//
+// It reads the current failure count without consuming budget (a plain Allow
+// would make every attempt — successful or not — eat into the allowance).
+// Fail-open on limiter errors: a Redis outage must not lock every admin out.
+func (s *authService) locked(ctx context.Context, username string) bool {
+	if s.limiter == nil {
+		return false
+	}
+	n, err := s.limiter.Count(ctx, loginFailKey(username))
+	if err != nil {
+		return false
+	}
+	return n >= adminLoginMaxFailures
+}
+
+// noteFailure records one failed attempt for the username.
+func (s *authService) noteFailure(ctx context.Context, username string) {
+	if s.limiter == nil {
+		return
+	}
+	_, _ = s.limiter.Allow(ctx, loginFailKey(username), adminLoginMaxFailures, adminLoginLockWindow)
+}
+
+// resetFailures clears the failure counter after a successful login.
+func (s *authService) resetFailures(ctx context.Context, username string) {
+	if s.limiter == nil {
+		return
+	}
+	_ = s.limiter.Reset(ctx, loginFailKey(username))
+}
+
 func (s *authService) Refresh(refreshToken string) (*LoginResult, error) {
 	claims, err := pkg.ParseToken(refreshToken)
 	if err != nil {
-		return nil, errors.New("invalid refresh token")
+		return nil, errors.New("refresh_token 无效或已过期")
 	}
 	// P1-4: only refresh-type tokens may be exchanged for a new pair; an access
 	// token replayed here would otherwise escalate its own lifetime.
 	if claims.TokenType != pkg.TokenTypeRefresh {
-		return nil, errors.New("invalid refresh token")
+		return nil, errors.New("refresh_token 无效或已过期")
 	}
 
 	user, err := s.userRepo.FindByID(claims.UserID)

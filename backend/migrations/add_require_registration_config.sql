@@ -1,3 +1,4 @@
+-- migrate: after schema.sql
 -- add_require_registration_config.sql
 -- 「仅注册使用」开关：开启后匿名访客无法通过 api.php 生成短链
 -- （batch.php 本就要求登录，不受影响）。管理员在 系统配置 中把

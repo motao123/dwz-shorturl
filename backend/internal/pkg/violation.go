@@ -1,18 +1,21 @@
 package pkg
 
 import (
+	_ "embed"
+	"encoding/json"
 	"net/url"
 	"strings"
+	"sync"
 )
 
 // ViolationStatus is the review state of a shortened URL.
 type ViolationStatus string
 
 const (
-	ViolationPending  ViolationStatus = "pending"  // detection not yet run
-	ViolationPassed   ViolationStatus = "passed"   // looks safe
-	ViolationReview   ViolationStatus = "review"   // suspicious, needs human review
-	ViolationBlocked  ViolationStatus = "blocked"  // clearly violating, do not serve
+	ViolationPending ViolationStatus = "pending" // detection not yet run
+	ViolationPassed  ViolationStatus = "passed"  // looks safe
+	ViolationReview  ViolationStatus = "review"  // suspicious, needs human review
+	ViolationBlocked ViolationStatus = "blocked" // clearly violating, do not serve
 )
 
 // ViolationResult carries the outcome of a synchronous violation check.
@@ -21,36 +24,51 @@ type ViolationResult struct {
 	Reason string
 }
 
-// blockedDomainSuffixes are exact-match or suffix-match domains that are banned
-// outright (gambling, scam, phishing, spam). Suffix match is against the
-// fully-qualified host, so "example.com" also matches "www.example.com".
-var blockedDomainSuffixes = []string{
-	// gambling / 菠菜
-	"bet365.com", "188bet.com", "bwin.com", "dafabet.com", "m88.com",
-	"18win.com", "betway.com", "w88.com", "fun88.com", "12bet.com",
-	"10bet.com", "365bet.com", "betflik.com", "ufa999.com", "pgslot.com",
-	"slotxo.com", "milton88.com", "boss888.com", "mgm888.com", "jackpot.com",
-	// scam / phishing / 仿冒
-	"phishing.com", "scam.com", "bitcoin-cash.cc", "secure-login-verify.com",
-	"account-verify.com", "paypal-verify.com", "appleid-verify.com",
-	// spam / malicious download
-	"malware.com", "trojan-download.com", "spam-site.com",
+// violationRulesJSON is the shared rule set, also read by the PHP frontend.
+// Embedding it makes the file part of the binary, so a deployment cannot end up
+// with Go and PHP disagreeing about what is blocked.
+//
+//go:embed data/violation_rules.json
+var violationRulesJSON []byte
+
+// violationRules mirrors testsrc/violation_rules.json.
+type violationRules struct {
+	DomainSuffixes []string `json:"domain_suffixes"`
+	Keywords       []string `json:"keywords"`
 }
 
-// blockedKeywords are case-insensitive substring rules fired on the full URL.
-// They catch obvious gambling / scam intent even when the domain is not listed.
-var blockedKeywords = []string{
-	// 菠菜 / gambling
-	"betting", "casino", "poker", "slot", "gambling", "老虎机", "百家乐",
-	"轮盘", "德州扑克", "棋牌充值", "博彩", "赌场", "网络赌博", "太阳城",
-	"澳门娱乐场", "六合彩", "外围赌", "重庆时时彩", "彩票投注",
-	// 仿冒 / phishing
-	"password reset please login", "verify your account immediately",
-	"登录验证您的账户", "您的账户已被冻结", "账户异常请立即验证",
-	// 恶意下载 / malware
-	"download-virus", "free-crack", "keygen", "盗版激活码",
-	// 诈骗 / scam
-	"刷单返利", "稳赚不赔", "高额回报", "保本保息", "先付后取",
+var (
+	rulesOnce             sync.Once
+	blockedDomainSuffixes []string
+	blockedKeywords       []string
+)
+
+// loadViolationRules parses the embedded rule set once. A parse failure is
+// panic-worthy: shipping a build whose compliance rules silently vanished would
+// be far worse than failing to start.
+func loadViolationRules() {
+	rulesOnce.Do(func() {
+		var r violationRules
+		if err := json.Unmarshal(violationRulesJSON, &r); err != nil {
+			panic("pkg: cannot parse embedded violation_rules.json: " + err.Error())
+		}
+		blockedDomainSuffixes = r.DomainSuffixes
+		blockedKeywords = r.Keywords
+	})
+}
+
+// BlockedDomainSuffixes returns the shared domain blacklist (exact or suffix
+// match). Exported so tests and ops tooling can assert both stacks agree.
+func BlockedDomainSuffixes() []string {
+	loadViolationRules()
+	return blockedDomainSuffixes
+}
+
+// BlockedKeywords returns the shared keyword blacklist (case-insensitive
+// substring match on the full URL).
+func BlockedKeywords() []string {
+	loadViolationRules()
+	return blockedKeywords
 }
 
 // CheckURLViolation performs a synchronous, rule-based violation check on a
@@ -60,6 +78,7 @@ var blockedKeywords = []string{
 //   - ViolationReview:  suspicious pattern, flag for human review.
 //   - ViolationPassed:  no obvious violation found.
 func CheckURLViolation(rawURL string) ViolationResult {
+	loadViolationRules()
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return ViolationResult{Status: ViolationBlocked, Reason: "url is invalid"}

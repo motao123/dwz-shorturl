@@ -171,6 +171,11 @@ func main() {
 	// Rate limiter (Redis-backed, shared across handlers)
 	rateLimiter := pkg.NewRateLimiter(rdb)
 
+	// Account-level lockout for admin login: the per-IP limiter in the router
+	// only bounds a single source address, so the username counter is what
+	// actually caps a distributed brute-force run against a known account.
+	authSvc.WithLoginLimiter(rateLimiter)
+
 	// Initialize handlers
 	handlers := &router.Handlers{
 		Auth:      handler.NewAuthHandler(authSvc, rdb),
@@ -188,6 +193,7 @@ func main() {
 		Monitor:   handler.NewMonitorHandler(monitorSvc),
 		Webhook:   handler.NewWebhookHandler(webhookSvc, auditSvc),
 		MemberApi: handler.NewMemberApiHandler(memberApiSvc),
+		Metrics:   handler.NewMetricsHandler(db, rdb, clickQueue),
 	}
 
 	// Permission loader function for RBAC middleware
