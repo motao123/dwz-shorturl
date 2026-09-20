@@ -11,11 +11,12 @@ import (
 )
 
 type MonitorHandler struct {
-	svc service.MonitorService
+	svc      service.MonitorService
+	auditSvc service.AuditService
 }
 
-func NewMonitorHandler(svc service.MonitorService) *MonitorHandler {
-	return &MonitorHandler{svc: svc}
+func NewMonitorHandler(svc service.MonitorService, auditSvc service.AuditService) *MonitorHandler {
+	return &MonitorHandler{svc: svc, auditSvc: auditSvc}
 }
 
 func (h *MonitorHandler) Status(c *gin.Context) {
@@ -43,6 +44,8 @@ func (h *MonitorHandler) RunTask(c *gin.Context) {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
 		return
 	}
+	// #25: 手工触发清理/维护任务会改动生产数据，事后要能查到是谁在何时跑的。
+	auditLog(c, h.auditSvc, "monitor", "monitor_task_run", 0, `{"task":`+strconv.Quote(req.Name)+`}`)
 	pkg.Success(c, gin.H{"task": req.Name, "ran": ok})
 }
 
@@ -90,5 +93,8 @@ func (h *MonitorHandler) EnsurePartitions(c *gin.Context) {
 		pkg.FailWithData(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error(), res)
 		return
 	}
+	// #25: 这是真跑 DDL 的分支（dry-run 在上面已提前返回），补分区/删分区都要留痕。
+	auditLog(c, h.auditSvc, "monitor", "monitor_partitions_ensure", 0,
+		`{"months":`+strconv.Itoa(months)+`}`)
 	pkg.Success(c, res)
 }

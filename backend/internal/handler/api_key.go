@@ -13,11 +13,12 @@ import (
 )
 
 type ApiKeyHandler struct {
-	svc service.ApiKeyService
+	svc      service.ApiKeyService
+	auditSvc service.AuditService
 }
 
-func NewApiKeyHandler(svc service.ApiKeyService) *ApiKeyHandler {
-	return &ApiKeyHandler{svc: svc}
+func NewApiKeyHandler(svc service.ApiKeyService, auditSvc service.AuditService) *ApiKeyHandler {
+	return &ApiKeyHandler{svc: svc, auditSvc: auditSvc}
 }
 
 type CreateApiKeyRequest struct {
@@ -52,6 +53,10 @@ func (h *ApiKeyHandler) Create(c *gin.Context) {
 		return
 	}
 
+	// #25: 发放密钥要留痕。只记 id/名称/前缀——result.ApiKey 与 result.PlainText
+	// 是明文密钥本身，写进审计表就等于把凭据复制到另一个可读位置。
+	auditLog(c, h.auditSvc, "api_key", "api_key_create", result.ID,
+		`{"name":`+strconv.Quote(result.Name)+`,"key_prefix":`+strconv.Quote(result.KeyPrefix)+`}`)
 	pkg.Success(c, result)
 }
 
@@ -83,6 +88,8 @@ func (h *ApiKeyHandler) Revoke(c *gin.Context) {
 		return
 	}
 
+	// #25: 吊销是会让集成方立刻 401 的破坏性动作，必须可追溯是谁做的。
+	auditLog(c, h.auditSvc, "api_key", "api_key_revoke", id, "")
 	pkg.Success(c, nil)
 }
 

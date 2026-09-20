@@ -55,7 +55,7 @@ if (count($lines) > $maxBatchUrls) {
         array('submitted' => $total, 'maximum' => $maxBatchUrls, 'excess' => $excess)
     );
 }
-if (!rate_limit(real_ip(), 100, 60, count($lines))) {
+if (!rate_limit_allows('batch:' . real_ip(), 100, 60, count($lines))) {
     if (!headers_sent()) header('Retry-After: 60');
     batch_error('请求过于频繁，请稍后再试', 10005, 429);
 }

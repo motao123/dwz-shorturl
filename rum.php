@@ -23,8 +23,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 require ROOT . 'config.php';
 require SYSTEM_ROOT . 'function.php';
 
-// 与匿名建链共用限流桶命名空间之外的独立桶：RUM 上报频率远低于建链
-if (function_exists('rate_limit') && !rate_limit('rum:' . real_ip(), 30, 60)) {
+// 独立命名空间的桶（#17）。遥测不是主旅程，但限流器故障时没必要多丢一份数据：
+// 用 rate_limit_allows 只在真正超限时丢弃（#18）。
+if (function_exists('rate_limit') && !rate_limit_allows('rum:' . real_ip(), 30, 60)) {
     http_response_code(204);
     exit;
 }

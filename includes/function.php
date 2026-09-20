@@ -227,13 +227,26 @@ function public_short_url($uid, $domain_id = null) {
     return $base . '/' . rawurlencode($uid);
 }
 
-function rate_limit($ip, $max = 20, $window = 60, $cost = 1) {
+/**
+ * 文件型限流。$key 是「用途命名空间 + 主体」的不透明串，例如 'api:1.2.3.4'、
+ * 'batch:1.2.3.4'、'pwtry:1.2.3.4:ab12cd'、'user:motao'。
+ * 不同用途必须带不同前缀：桶文件名只取 md5($key)，所以 #17 里匿名建链、会员注册、
+ * 会员登录三处都传裸 real_ip()，共用同一个桶，三条各不相同的限额互相挤占。
+ *
+ * 返回三态，调用方要显式决定故障时怎么取舍（#18）：
+ *   true  放行
+ *   false 超出限额
+ *   null  限流器自身不可用（目录不可写、拿不到锁等）
+ * 历史实现把故障也返回 false，于是 logs/ 没有写权限的新部署上，每一个访客都会
+ * 看到「请求过于频繁，请稍后再试」——一个冒充用户行为的系统故障，且无从绕行。
+ */
+function rate_limit($key, $max = 20, $window = 60, $cost = 1) {
     global $rate_limit_dir;
     $dir = isset($rate_limit_dir) && is_string($rate_limit_dir) && $rate_limit_dir !== '' ? $rate_limit_dir : ROOT . 'logs/ratelimit';
-    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) return false;
-    $fp = @fopen(rtrim($dir, '/\\') . '/' . md5((string)$ip) . '.rl', 'c+');
-    if (!$fp) return false;
-    if (!flock($fp, LOCK_EX)) { fclose($fp); return false; }
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) return null;
+    $fp = @fopen(rtrim($dir, '/\\') . '/' . md5((string)$key) . '.rl', 'c+');
+    if (!$fp) return null;
+    if (!flock($fp, LOCK_EX)) { fclose($fp); return null; }
     $now = time();
     // 机会式清理：每约 1/200 次调用扫一次目录，删除 24h 未修改的过期桶文件，
     // 避免每个 IP 一个文件在 IPv6/代理场景下无限膨胀耗尽 inode。
@@ -245,6 +258,26 @@ function rate_limit($ip, $max = 20, $window = 60, $cost = 1) {
     if ($allowed) $data['count'] += $cost;
     ftruncate($fp, 0); rewind($fp); fwrite($fp, json_encode($data)); fflush($fp);
     flock($fp, LOCK_UN); fclose($fp);
+    return $allowed;
+}
+
+/**
+ * 面向用户的主旅程入口用的包装：限流器自身故障时放行，并留一行可定位的日志（#18）。
+ * 限流是防滥用手段、不是鉴权因子，所以它坏掉时不该把所有人挡在站外——那正是
+ * 「logs/ 目录没写权限 → 全站 429」的成因。
+ *
+ * 账号锁定与密码尝试**不要**用它：那两类是安全控制，故障时应拒绝而非放行，
+ * 调用方直接写 `if (rate_limit(...) !== true)` 把 fail-closed 说清楚。
+ *
+ * @return bool  true 可以继续，false 已被限额挡住。
+ */
+function rate_limit_allows($key, $max = 20, $window = 60, $cost = 1) {
+    $allowed = rate_limit($key, $max, $window, $cost);
+    if ($allowed === null) {
+        error_log('[dwz] 限流器不可用：桶 ' . $key . ' 无法读写，本次按放行处理。'
+            . '请检查 $rate_limit_dir（默认 ROOT/logs/ratelimit）的写权限。');
+        return true;
+    }
     return $allowed;
 }
 

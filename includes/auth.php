@@ -90,7 +90,9 @@ function member_login($DB, $username, $password, $ip) {
     $username = trim((string)$username);
     // 账号级失败锁定：同一用户名 15 分钟内最多 8 次失败，成功后清零。
     // 复用 rate_limit 文件机制，key 为 user:<username>。
-    if (!rate_limit('user:' . strtolower($username), 8, 900)) {
+    // `!== true` 是刻意的 fail-closed：这是防撞库的安全控制，限流器故障时宁可拒绝，
+    // 不能静默失去锁定能力（#18；与 Go 侧 Redis fail-open 的差异由 #38 统一决策）。
+    if (rate_limit('user:' . strtolower($username), 8, 900) !== true) {
         return array('ok' => false, 'msg' => '尝试次数过多，账号已临时锁定，请 15 分钟后再试', 'code' => 10021);
     }
     $stmt = $DB->prepare('SELECT id, username, password_hash, status FROM members WHERE username=? LIMIT 1');

@@ -31,9 +31,13 @@ if (!empty($password_hash)) {
             // 尝试限流：每个 IP + 短码 60 秒内最多 5 次，避免密码被离线暴力穷举。
             // 键里必须带 IP：只按 $uid 计数时，任何人 POST 5 次错密码就能让所有访客
             // 60 秒内解不开这条短链（可循环维持），Go 侧 redirect.go 一直是 IP+uid。
-            // 限流器不可用时本分支选择拒绝（fail-closed）——与 api/batch 的跳转主路径
-            // 相反，因为「密码尝试」被拒不影响短链本身可用；#18 统一收口该差异。
-            if (function_exists('rate_limit') && !rate_limit('pwtry:' . real_ip() . ':' . $uid, 5, 60)) {
+            // 限流器不可用时本分支选择拒绝（fail-closed）：`!== true` 同时覆盖「超限」
+            // 与「故障」，不再依赖 false 的假值巧合。密码尝试属安全控制，被挡住不影响
+            // 短链本身可用，所以不走 #18 的放行原则。
+            $pwAllowed = function_exists('rate_limit')
+                ? rate_limit('pwtry:' . real_ip() . ':' . $uid, 5, 60)
+                : true;
+            if ($pwAllowed !== true) {
                 if (!headers_sent()) { http_response_code(429); header('Retry-After: 60'); }
                 echo password_page_html($uid, '尝试次数过多，请稍后再试');
                 exit;
@@ -109,6 +113,7 @@ function redirect_error($status, $message) {
         410 => array('⏳', '这个短链已过期', '链接的有效期已结束。请联系分享者重新生成一条。'),
         404 => array('🔍', '短链不存在', '这个短码没有对应的链接，可能输入有误或已被删除。'),
         500 => array('🛠️', '服务暂时不可用', '服务器出了点问题，请稍后重试。'),
+        503 => array('🛠️', '服务暂时不可用', '我们这边出了点问题，链接暂时没能打开。请稍后再试。'),
     );
     $page = isset($map[$status]) ? $map[$status] : array('⚠️', '链接暂时无法访问', '该链接当前不可访问。');
     if ($message === '短链已禁用') {
