@@ -1,3 +1,4 @@
+-- migrate: after add_domains.sql
 -- optimize_domain_indexes.sql
 -- DWZ-H-02: indexes matching the actual domain picker and filtered list queries.
 -- Idempotent: skips indexes that already exist.

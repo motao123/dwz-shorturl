@@ -231,19 +231,31 @@ async function handleSubmit() {
       userId = created?.id ?? 0
     }
 
-    // 同步角色；新建用户时角色绑定失败则回滚删除已创建的用户，避免孤儿账号
+    // 同步角色；新建用户时角色绑定失败则回滚删除已创建的用户，避免孤儿账号。
+    //
+    // P0 #1：编辑时绝不能无条件提交 role_ids。列表接口曾经不返回角色，
+    // 编辑弹窗因此永远以空角色集起编，保存时把该账号的角色全部删掉；
+    // 若目标是最后一个超管，后台会直接锁死。现在只在角色集合真正发生
+    // 变化时才调用分配接口，未变则完全跳过。
     if (userId) {
-      try {
-        await assignUserRoles(userId, form.role_ids)
-      } catch (roleErr) {
-        if (!isEdit.value && userId) {
-          try {
-            await removeUser(userId)
-          } catch {
-            /* 回滚失败仅提示，不掩盖原始错误 */
+      const original = [...(editingRow.value?.role_ids ?? [])].sort((a, b) => a - b)
+      const next = [...form.role_ids].sort((a, b) => a - b)
+      const rolesChanged = !isEdit.value || original.length !== next.length
+        || original.some((v, i) => v !== next[i])
+
+      if (rolesChanged) {
+        try {
+          await assignUserRoles(userId, form.role_ids)
+        } catch (roleErr) {
+          if (!isEdit.value && userId) {
+            try {
+              await removeUser(userId)
+            } catch {
+              /* 回滚失败仅提示，不掩盖原始错误 */
+            }
           }
+          throw roleErr
         }
-        throw roleErr
       }
     }
 

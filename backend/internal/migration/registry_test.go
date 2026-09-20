@@ -244,6 +244,48 @@ func TestRealRepoApplyOrderContract(t *testing.T) {
 	}
 }
 
+// TestEveryMigrationDeclaresItsPosition is the regression guard for the bug this
+// contract exists to prevent, caught a second time: a new migration was added
+// without a `-- migrate: after` directive and CI stayed green, because
+// TestRealRepoApplyOrderContract only asserts a handful of hard-coded pairs and
+// an unclassified file is quietly appended last.
+//
+// Every bundled migration must therefore either be listed in realBase or carry
+// an explicit directive. Adding a file without one now fails CI instead of
+// relying on a reviewer remembering.
+func TestEveryMigrationDeclaresItsPosition(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := Discover(root, realScopes(), realBase, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	declared := map[string]bool{}
+	for _, k := range realBase {
+		declared[k] = true
+	}
+
+	for _, f := range files {
+		if f.Override != "" {
+			continue
+		}
+		if declared[f.Key] {
+			continue
+		}
+		// php/ files are ordered by the base+append contract checked above; the
+		// rule below applies to the backend/migrations directory, which is where
+		// hand-added forward DDL lands.
+		if f.Scope != "backend/migrations" {
+			continue
+		}
+		t.Errorf("%s has no declared apply position: add '-- migrate: after <version>' "+
+			"as its first line, or add it to realBase in this test", f.Key)
+	}
+}
+
 // Every bundled migration must be reachable from the version key an older tool
 // would have recorded, otherwise an upgrade would re-run an already-applied
 // rewrite (or report a false pending entry for it).

@@ -83,6 +83,18 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 			}
 		}
 	}
+
+	// #7: also revoke the refresh token. Blacklisting only the access jti left a
+	// logged-out session able to mint a brand-new access token from the refresh
+	// token for up to refresh_expiry (7 days by default) — "log out" did not log
+	// the session out.
+	if h.rdb != nil {
+		if rt := c.Query("refresh_token"); rt != "" {
+			if jti, ttl, err := pkg.RefreshTokenIdentity(rt); err == nil && jti != "" && ttl > 0 {
+				h.rdb.Set(c.Request.Context(), "jwt:blacklist:"+jti, 1, ttl)
+			}
+		}
+	}
 	pkg.Success(c, nil)
 }
 

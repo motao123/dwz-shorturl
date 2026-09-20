@@ -110,8 +110,45 @@ function validate_long_url($url, $skip_dns = false) {
     if (!in_array(strtolower($parts['scheme']), array('http', 'https'), true)) return array(false, '链接格式不正确，请输入完整的 http(s) 地址', 10002);
     if (isset($parts['user']) || isset($parts['pass'])) return array(false, '链接格式不正确，请输入完整的 http(s) 地址', 10002);
     if (isset($parts['port']) && ($parts['port'] < 1 || $parts['port'] > 65535)) return array(false, '链接格式不正确，请输入完整的 http(s) 地址', 10002);
-    if (isPrivateHost($parts['host'], $skip_dns)) return array(false, '该地址不允许被缩短（内网/本机/云元数据地址）', 10004);
+    // 区分「域名解析不了」与「解析到内网/保留地址」两种失败。
+    // 原来两者共用一句「该地址不允许被缩短（内网/本机/云元数据地址）」，
+    // 用户少打一个字母（例如把 .com 打成 .con）就会被暗示在攻击内网，
+    // 只会反复重试或直接流失，拿不到任何可自助修复的信息。
+    $host_class = classify_host($parts['host'], $skip_dns);
+    if ($host_class === 'private') return array(false, '该地址不允许被缩短（内网/本机/云元数据地址）', 10004);
+    if ($host_class === 'unresolved') return array(false, '域名无法解析，请检查拼写是否正确', 10005);
     return array(true, '', 1);
+}
+
+// classify_host 返回 'private'（命中内网/保留/元数据地址）、
+// 'unresolved'（域名解析失败）或 'public'。
+// $skip_dns 为 true 时不解析（跳转热路径，服务端不会去访问目标）：
+// 此时无法判断解析结果，一律视为 public，除非是显式的元数据地址。
+function classify_host($host, $skip_dns = false) {
+    // 先按名字/字面量拒掉明显的本机地址（localhost、*.local、字面 IP 段）。
+    // 这一步不依赖 DNS，所以即使域名解析失败也能给出「private」。
+    $literal = strtolower(trim((string)$host, "[] \t"));
+    if ($literal === '' || $literal === 'localhost'
+        || substr($literal, -6) === '.local'
+        || $literal === '169.254.169.254' || substr($literal, -15) === '.169.254.169.254'
+        || $literal === 'metadata.google.internal' || substr($literal, -24) === 'metadata.google.internal') {
+        return 'private';
+    }
+    if (filter_var($literal, FILTER_VALIDATE_IP)) {
+        return isPrivateHost($literal, $skip_dns) ? 'private' : 'public';
+    }
+    if ($skip_dns) return 'public';
+
+    // 域名：先看能不能解析，解析不了是「拼写/网络」问题而不是攻击。
+    $ipv4 = @gethostbynamel($literal);
+    $v6 = array();
+    if (function_exists('dns_get_record') && defined('DNS_AAAA')) {
+        $recs = @dns_get_record($literal, DNS_AAAA);
+        if (is_array($recs)) foreach ($recs as $r) if (!empty($r['ipv6'])) $v6[] = $r['ipv6'];
+    }
+    if ((!is_array($ipv4) || !$ipv4) && !$v6) return 'unresolved';
+
+    return isPrivateHost($literal, false) ? 'private' : 'public';
 }
 
 // Reject the host if any address is private, reserved, or unresolved.
@@ -466,7 +503,11 @@ function sync_short_url_to_admin($uid, $longurl, $expire_at = null, $member_id =
     //   - expire_at：IFNULL 保留已有有效期，不覆盖永久/更长有效期。
     //   - status：仅当已过期（2）时复活为 1；管理员主动禁用（0）不被覆盖，
     //     避免 API 重复提交把人工下线的短链重新启用。
-    $stmt = $ADMIN_DB->prepare('INSERT INTO short_urls (uid, long_url, url_hash, expire_at, member_id, source, status, password_hash) VALUES (?,?,?,?,?,?,1,?) ON DUPLICATE KEY UPDATE long_url=VALUES(long_url), password_hash=VALUES(password_hash), status=IF(short_urls.status=2, VALUES(status), short_urls.status), expire_at=IFNULL(short_urls.expire_at, VALUES(expire_at))');
+    // A5：password_hash 为 null 表示「本次请求未提供密码」，绝不能理解成
+    // 「把密码清空」。原实现无条件 password_hash=VALUES(password_hash)，于是
+    // 匿名重复提交同一长链会把管理库副本的密码抹成 NULL，Go 跳转路径随后免密。
+    // 现在 null 走 IFNULL 保留旧值；只有真的提供了新密码才覆盖。
+    $stmt = $ADMIN_DB->prepare('INSERT INTO short_urls (uid, long_url, url_hash, expire_at, member_id, source, status, password_hash) VALUES (?,?,?,?,?,?,1,?) ON DUPLICATE KEY UPDATE long_url=VALUES(long_url), password_hash=IFNULL(VALUES(password_hash), short_urls.password_hash), status=IF(short_urls.status=2, VALUES(status), short_urls.status), expire_at=IFNULL(short_urls.expire_at, VALUES(expire_at))');
     if (!$stmt) return;
     mysqli_stmt_bind_param($stmt, 'ssssiss', $uid, $longurl, $hash, $expire_at, $member_id, $source, $password_hash);
     mysqli_stmt_execute($stmt);

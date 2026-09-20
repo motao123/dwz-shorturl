@@ -69,6 +69,9 @@ type authService struct {
 	// limiter backs account-level failure counting. Nil disables lockout so
 	// unit tests and a Redis-less deployment keep working.
 	limiter *pkg.RateLimiter
+	// tokenBlacklisted reports whether a jti was revoked at logout. Nil is
+	// treated as "nothing revoked".
+	tokenBlacklisted func(jti string) bool
 }
 
 // NewAuthService returns the concrete service so callers can chain options
@@ -79,6 +82,14 @@ func NewAuthService(userRepo repository.UserRepo, roleRepo repository.RoleRepo) 
 
 // WithLoginLimiter enables account-level lockout on the service. Passing nil
 // leaves the login path unchanged.
+// WithTokenBlacklist wires the revocation check used by Refresh, so a logged-out
+// refresh token cannot be exchanged for a fresh access token (#7). A nil check
+// keeps the service usable in tests and without Redis.
+func (s *authService) WithTokenBlacklist(fn func(jti string) bool) *authService {
+	s.tokenBlacklisted = fn
+	return s
+}
+
 func (s *authService) WithLoginLimiter(l *pkg.RateLimiter) *authService {
 	s.limiter = l
 	return s
@@ -199,6 +210,12 @@ func (s *authService) Refresh(refreshToken string) (*LoginResult, error) {
 	// P1-4: only refresh-type tokens may be exchanged for a new pair; an access
 	// token replayed here would otherwise escalate its own lifetime.
 	if claims.TokenType != pkg.TokenTypeRefresh {
+		return nil, errors.New("refresh_token 无效或已过期")
+	}
+	// #7: honour logout for refresh tokens too. Without this, blacklisting the
+	// access jti at logout still let the (unrevoked) refresh token mint a new
+	// access token for the rest of its 7-day lifetime.
+	if s.tokenBlacklisted != nil && claims.ID != "" && s.tokenBlacklisted(claims.ID) {
 		return nil, errors.New("refresh_token 无效或已过期")
 	}
 

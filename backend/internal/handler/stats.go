@@ -33,6 +33,18 @@ func (h *StatsHandler) Trend(c *gin.Context) {
 	granularity := c.DefaultQuery("granularity", "day")
 	dateFrom, dateTo := queryDateRange(c)
 
+	// #28: the dashboard sends `days: 7` and the handler used to ignore it, so a
+	// chart titled "近 7 日" actually plotted the entire history and scanned every
+	// partition. `days` is now honoured when no explicit range was given.
+	if dateFrom == nil && dateTo == nil {
+		if raw := c.Query("days"); raw != "" {
+			if d, err := strconv.Atoi(raw); err == nil && d > 0 && d <= 3650 {
+				from := time.Now().AddDate(0, 0, -d)
+				dateFrom = &from
+			}
+		}
+	}
+
 	result, err := h.svc.Trend(granularity, dateFrom, dateTo)
 	if err != nil {
 		pkg.Fail(c, http.StatusInternalServerError, pkg.CodeInternalError, "failed to get trend")

@@ -1,6 +1,12 @@
 -- Seed data for dwz-admin
--- Initial roles, permissions, and a placeholder admin user.
--- IMPORTANT: Replace the bcrypt hash in the INSERT below before deploying.
+-- Initial roles, permissions and system configs ONLY.
+--
+-- This file deliberately creates NO user account. A seeded administrator row
+-- either ships a public placeholder hash (a broken login for everyone who runs
+-- the seed) or a real hash (a credential committed to a public repository).
+-- Create the first administrator explicitly instead:
+--     go run ./cmd/createadmin --username admin --password '<your-password>'
+-- (deploy/docker/init.php does the same on the single-DB compose path.)
 
 USE dwz_admin;
 
@@ -13,6 +19,7 @@ INSERT INTO permissions (resource, action, description) VALUES
 ('short_urls', 'export', '导出短链'),
 ('stats', 'read', '查看统计数据'),
 ('stats', 'export', '导出统计数据'),
+('stats', 'update', '执行运维任务（清理/补分区）'),
 ('users', 'read', '查看用户列表'),
 ('users', 'create', '创建用户'),
 ('users', 'update', '编辑用户'),
@@ -57,16 +64,9 @@ INSERT INTO role_permissions (role_id, permission_id)
 SELECT 4, id FROM permissions
 WHERE action = 'read';
 
--- Default admin user
--- IMPORTANT: The password hash below is a PLACEHOLDER.
--- Replace it with `php -r "echo password_hash('your-password', PASSWORD_BCRYPT);"` or
--- `go run ./cmd/generate-hash` before deploying to production.
--- The default hash corresponds to "admin123" and MUST be changed after first login.
-INSERT INTO users (username, email, password_hash, display_name, status) VALUES
-('admin', 'admin@localhost', 'REPLACE_WITH_YOUR_BCRYPT_HASH', '系统管理员', 1);
-
--- Assign super_admin role to admin user
-INSERT INTO user_roles (user_id, role_id) VALUES (1, 1);
+-- No administrator is seeded here. Run cmd/createadmin (or deploy/docker/init.php)
+-- with a password you choose; it assigns the super_admin role to the account it
+-- creates. See the header of this file for the exact command.
 
 -- Default system configs
 INSERT INTO system_configs (config_key, config_value, value_type, description, is_public) VALUES

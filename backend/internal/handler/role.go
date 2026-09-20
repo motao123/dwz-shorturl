@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"dwz-admin/internal/pkg"
 	"dwz-admin/internal/service"
@@ -30,8 +31,21 @@ type UpdateRoleRequest struct {
 	Description string `json:"description"`
 }
 
+// SetPermissionsRequest accepts the permission set in either of the two shapes
+// clients have used:
+//
+//	{"permission_ids": [1,2,3]}                    // canonical
+//	{"permissions": ["short_urls.read", "stats.read"]}  // what the admin UI sent
+//
+// The UI's tree is keyed by `resource.action` strings; the backend's join table
+// is keyed by numeric ids. Neither side was wrong on its own, but the contract
+// between them was: the UI sent `permissions` while the handler bound
+// `permission_ids` with binding:"required", so every save returned 400 ("保存权限
+// 失败") and the authorization feature was 100% unusable (#21). Accept both and
+// resolve names to ids server-side rather than forcing a flag day.
 type SetPermissionsRequest struct {
-	PermissionIDs []uint64 `json:"permission_ids" binding:"required"`
+	PermissionIDs []uint64 `json:"permission_ids"`
+	Permissions   []string `json:"permissions"`
 }
 
 func (h *RoleHandler) Create(c *gin.Context) {
@@ -109,12 +123,46 @@ func (h *RoleHandler) SetPermissions(c *gin.Context) {
 
 	var req SetPermissionsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "invalid request body")
+		return
+	}
+
+	ids := req.PermissionIDs
+	if len(ids) == 0 && len(req.Permissions) > 0 {
+		// Resolve `resource.action` names to ids; unknown names are rejected
+		// rather than silently dropped, so a typo cannot grant less than intended
+		// without anyone noticing.
+		all, err := h.svc.GetAllPermissions()
+		if err != nil {
+			pkg.Fail(c, http.StatusInternalServerError, pkg.CodeInternalError, "query failed")
+			return
+		}
+		byName := make(map[string]uint64, len(all))
+		for _, p := range all {
+			byName[p.Resource+"."+p.Action] = p.ID
+		}
+		for _, name := range req.Permissions {
+			// The UI's tree also carries resource parent nodes ("short_urls");
+			// they are not real permissions, so skip them.
+			if !strings.Contains(name, ".") {
+				continue
+			}
+			pid, ok := byName[name]
+			if !ok {
+				pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "未知权限点: "+name)
+				return
+			}
+			ids = append(ids, pid)
+		}
+	}
+
+	if len(ids) == 0 {
 		pkg.Fail(c, http.StatusBadRequest, pkg.CodeValidation, "permission_ids 不能为空")
 		return
 	}
 
-	if err := h.svc.SetPermissions(id, req.PermissionIDs); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+	if err := h.svc.SetPermissionsAs(actorID(c), id, ids); err != nil {
+		pkg.Fail(c, guardStatus(err), pkg.CodeForbidden, err.Error())
 		return
 	}
 

@@ -19,6 +19,14 @@ type User struct {
 	// Never serialised. TotpEnabled is computed for the UI.
 	TotpSecret  string         `gorm:"size:64" json:"-"`
 	TotpEnabled bool           `gorm:"-" json:"totp_enabled"`
+	// RoleIDs is the set of roles bound to this user. It is not a column on
+	// `users`; the repository loads it from user_roles. It exists so the API can
+	// return the current assignment: without it the admin UI received no roles at
+	// all, rendered an empty multi-select and then re-submitted that empty set,
+	// silently stripping every role from the edited account (P0 #1).
+	RoleIDs []uint64 `gorm:"-" json:"role_ids,omitempty"`
+	// RoleNames is the display counterpart of RoleIDs.
+	RoleNames []string `gorm:"-" json:"roles,omitempty"`
 	LastLoginAt *time.Time     `json:"last_login_at"`
 	LastLoginIP string         `gorm:"size:45" json:"last_login_ip"`
 	CreatedAt   time.Time      `json:"created_at"`
@@ -37,6 +45,11 @@ type Role struct {
 	IsSystem    int8      `gorm:"default:0;not null" json:"is_system"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	// Permissions is the role's permission codes as `resource.action` strings.
+	// Not a column: loaded on demand. The admin UI keys its permission tree by
+	// these strings, so returning them is what lets the edit dialog show the
+	// current grants (and, before #21, what it silently never received).
+	Permissions []string `gorm:"-" json:"permissions,omitempty"`
 }
 
 func (Role) TableName() string { return "roles" }
