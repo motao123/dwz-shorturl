@@ -302,10 +302,18 @@
       # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
         - name: 部署脚本与清单门禁
           # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
-          image: koalaman/shellcheck-alpine:stable
+          # ⚠️ 必须用 koalaman/shellcheck（Debian 底），**不能**用
+          # koalaman/shellcheck-alpine：后者只是 alpine + shellcheck，**没有 bash**，
+          # 而本 stage 要跑 `bash -n` 与 `bash deploy/check_manifest.sh`
+          # （check_manifest.sh 用了 pipefail 与 <(...) 进程替换，非 bash 不可）。
+          # 用 alpine 版会直接 `sh: bash: not found` 退出 127 —— 本 stage 的红灯根因。
+          image: koalaman/shellcheck:stable
           script: |
             set -e
-            # 该镜像基于 alpine，已内置 shellcheck，无需现场安装。
+            # 该镜像基于 Debian，已内置 shellcheck 与 bash，无需现场安装。
+            # 仍显式自证 bash 存在：镜像换 base 时不该靠"想当然"。
+            command -v bash >/dev/null \
+              || { echo "镜像缺少 bash，无法执行 bash -n / check_manifest.sh"; exit 1; }
             for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
               echo "--- bash -n $f"
               bash -n "$f"
@@ -644,10 +652,18 @@ master:
       # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
         - name: 部署脚本与清单门禁
           # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
-          image: koalaman/shellcheck-alpine:stable
+          # ⚠️ 必须用 koalaman/shellcheck（Debian 底），**不能**用
+          # koalaman/shellcheck-alpine：后者只是 alpine + shellcheck，**没有 bash**，
+          # 而本 stage 要跑 `bash -n` 与 `bash deploy/check_manifest.sh`
+          # （check_manifest.sh 用了 pipefail 与 <(...) 进程替换，非 bash 不可）。
+          # 用 alpine 版会直接 `sh: bash: not found` 退出 127 —— 本 stage 的红灯根因。
+          image: koalaman/shellcheck:stable
           script: |
             set -e
-            # 该镜像基于 alpine，已内置 shellcheck，无需现场安装。
+            # 该镜像基于 Debian，已内置 shellcheck 与 bash，无需现场安装。
+            # 仍显式自证 bash 存在：镜像换 base 时不该靠"想当然"。
+            command -v bash >/dev/null \
+              || { echo "镜像缺少 bash，无法执行 bash -n / check_manifest.sh"; exit 1; }
             for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
               echo "--- bash -n $f"
               bash -n "$f"
