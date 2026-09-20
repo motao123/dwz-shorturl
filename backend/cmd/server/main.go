@@ -142,7 +142,7 @@ func main() {
 	roleSvc := service.NewRoleService(roleRepo)
 	statsSvc := service.NewStatsService(shortUrlRepo, db)
 	configSvc := service.NewConfigService(configRepo).WithRuntimeConfig(runtimeCfg)
-	auditSvc := service.NewAuditService(auditRepo)
+	auditSvc := service.NewAuditService(auditRepo).WithLogger(zapLogger)
 	// #40: the API-key service needs the super_admin resolver so its ownership
 	// guard can let a super_admin manage any key while still refusing everybody
 	// else. Without it the guard stays strict (owner-only), which is safe.
@@ -208,14 +208,14 @@ func main() {
 		User:      handler.NewUserHandler(userSvc, auditSvc),
 		Role:      handler.NewRoleHandler(roleSvc, auditSvc),
 		Stats:     handler.NewStatsHandler(statsSvc),
-		Config:    handler.NewConfigHandler(configSvc),
+		Config:    handler.NewConfigHandler(configSvc, auditSvc),
 		Audit:     handler.NewAuditHandler(auditSvc),
-		ApiKey:    handler.NewApiKeyHandler(apiKeySvc),
+		ApiKey:    handler.NewApiKeyHandler(apiKeySvc, auditSvc),
 		Redirect:  handler.NewRedirectHandler(shortUrlSvc, rdb, db, zapLogger, clickQueue),
 		Domain:    handler.NewDomainHandler(domainSvc, auditSvc),
 		Member:    handler.NewMemberHandler(memberSvc, auditSvc),
 		Violation: handler.NewViolationHandler(violationSvc, auditSvc),
-		Monitor:   handler.NewMonitorHandler(monitorSvc),
+		Monitor:   handler.NewMonitorHandler(monitorSvc, auditSvc),
 		Webhook:   handler.NewWebhookHandler(webhookSvc, auditSvc),
 		MemberApi: handler.NewMemberApiHandler(memberApiSvc),
 		Metrics:   handler.NewMetricsHandler(db, publicDB, rdb, cfg.Redis.Addr != "", clickQueue),

@@ -40,6 +40,14 @@ require SYSTEM_ROOT . 'db.class.php';
 $DB = new DB($host, $user, $pwd, $dbname, $port);
 if (empty($DB->link)) {
     error_log('Database connection failed: ' . $DB->connect_error);
+    // 跳转端点在数据库故障时要回品牌化错误页，而不是一屏裸 JSON（#34）：访客点开的
+    // 是别人分享的短链，裸 JSON 既没有身份、也没有回首页的出口。
+    // redirect_error() 只在 do.php 里定义，而 PHP 在编译整个入口文件时就完成顶层函数
+    // 声明，所以它在下面的 include 之前就已存在——接口端点（api/batch/member）没有这个
+    // 函数，仍然按 JSON 返回。这是刻意的按名耦合，别把它当成通用钩子到处定义。
+    if (function_exists('redirect_error')) {
+        redirect_error(503, '服务暂时不可用，请稍后重试');
+    }
     if (!headers_sent()) {
         http_response_code(503);
         header('Content-Type: application/json; charset=utf-8');

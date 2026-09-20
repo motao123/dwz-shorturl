@@ -41,7 +41,8 @@ if (in_array($action, array('register', 'login', 'logout'), true)) {
 }
 
 if ($action === 'register') {
-    if (!rate_limit(real_ip(), 10, 3600)) member_result(0, '注册过于频繁，请稍后再试', 10005, 429);
+    // #17：注册与登录此前都传裸 real_ip()，和匿名建链共用同一个桶，三条限额互相挤占。
+    if (!rate_limit_allows('member.register:' . real_ip(), 10, 3600)) member_result(0, '注册过于频繁，请稍后再试', 10005, 429);
     // 注册必须明示同意协议与隐私政策（合规要求，前端勾选框 + 后端兜底校验）
     $agree = isset($_POST['agree']) && (string)$_POST['agree'] === '1';
     if (!$agree) member_result(0, '请先阅读并同意《用户协议》与《隐私政策》', 10021, 400);
@@ -60,7 +61,7 @@ if ($action === 'register') {
 }
 
 if ($action === 'login') {
-    if (!rate_limit(real_ip(), 20, 60)) member_result(0, '请求过于频繁，请稍后再试', 10005, 429);
+    if (!rate_limit_allows('member.login:' . real_ip(), 20, 60)) member_result(0, '请求过于频繁，请稍后再试', 10005, 429);
     $username = isset($_POST['username']) ? trim($_POST['username']) : '';
     $password = isset($_POST['password']) ? $_POST['password'] : '';
     $r = member_login($DB, $username, $password, real_ip());

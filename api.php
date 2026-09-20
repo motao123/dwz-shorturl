@@ -42,7 +42,8 @@ if (member_id() > 0) {
 
 // B11：限流必须在任何昂贵的校验（validate_long_url 含 DNS 解析）之前执行，
 // 否则攻击者可用解析开销打满请求，导致限流失效。
-if (!rate_limit(real_ip(), system_config_int('shorturl.anon_rate_max', 20), system_config_int('shorturl.anon_rate_window', 60))) {
+// 'api:' 前缀（#17）：会员注册/登录此前也传裸 real_ip()，三条不同的限额共用同一个桶。
+if (!rate_limit_allows('api:' . real_ip(), system_config_int('shorturl.anon_rate_max', 20), system_config_int('shorturl.anon_rate_window', 60))) {
     if (!headers_sent()) header('Retry-After: 60');
     api_result(0, '请求过于频繁，请稍后再试', 10005, 429);
 }

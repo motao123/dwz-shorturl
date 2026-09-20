@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -12,11 +13,12 @@ import (
 )
 
 type ConfigHandler struct {
-	svc service.ConfigService
+	svc      service.ConfigService
+	auditSvc service.AuditService
 }
 
-func NewConfigHandler(svc service.ConfigService) *ConfigHandler {
-	return &ConfigHandler{svc: svc}
+func NewConfigHandler(svc service.ConfigService, auditSvc service.AuditService) *ConfigHandler {
+	return &ConfigHandler{svc: svc, auditSvc: auditSvc}
 }
 
 type BatchUpdateConfigRequest struct {
@@ -108,5 +110,21 @@ func (h *ConfigHandler) BatchUpdate(c *gin.Context) {
 		return
 	}
 
+	// #25: 全局参数变更必须留痕。detail 只写被改的键名与数量，绝不写值——参数目录里
+	// 含 SMTP 口令与各类密钥，写进审计表等于把密钥二次落盘到一个更宽可读的位置。
+	auditLog(c, h.auditSvc, "config", "config_batch_update", 0, configChangeDetail(req.Configs))
 	pkg.Success(c, nil)
+}
+
+// configChangeDetail records which keys an edit touched, never their values.
+func configChangeDetail(items []ConfigItem) string {
+	keys := make([]string, 0, len(items))
+	for _, it := range items {
+		keys = append(keys, it.ConfigKey)
+	}
+	encoded, err := json.Marshal(map[string]any{"count": len(items), "keys": keys})
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }

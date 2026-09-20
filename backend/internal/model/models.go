@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"time"
 
 	"gorm.io/gorm"
@@ -190,7 +191,11 @@ type AuditLog struct {
 	Action     string     `gorm:"size:64;not null" json:"action"`
 	Resource   string     `gorm:"size:64" json:"resource"`
 	ResourceID string     `gorm:"size:64" json:"resource_id"`
-	Detail     string     `gorm:"type:json" json:"detail"`
+	// Detail is a JSON snapshot of what the action changed. It is a pointer so an
+	// action without a snapshot stores SQL NULL: the column is typed json, and
+	// writing "" into it fails at the DB level, which used to silently swallow
+	// the whole audit row (#24).
+	Detail     *json.RawMessage `gorm:"type:json" json:"detail"`
 	IP         string     `gorm:"size:45;not null" json:"ip"`
 	UserAgent  string     `gorm:"size:255" json:"user_agent"`
 	CreatedAt  time.Time  `json:"created_at"`
