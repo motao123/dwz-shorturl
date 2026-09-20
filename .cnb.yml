@@ -68,13 +68,27 @@
             php -v
             fail=0
             # 逐个文件校验；find 排除依赖与产物目录，避免检查第三方代码。
-            while IFS= read -r f; do
-              out=$(php -l "$f" 2>&1) || { echo "$out"; fail=1; }
-            done < <(find . -name '*.php' \
+            # 注意：CNB 阶段脚本默认由 /bin/sh(dash) 执行，不能用 <(...) 这类
+            # bash 专有进程替换（会报 Syntax error: redirection unexpected，
+            # 返回码 2，导致后续阶段全部跳过）。因此先把文件列表写入临时文件，
+            # 再用普通重定向逐行读取。
+            files=$(mktemp)
+            find . -name '*.php' \
               -not -path './node_modules/*' \
               -not -path './frontend/node_modules/*' \
-              -not -path './vendor/*')
-            [ "$fail" -eq 0 ] || { echo "PHP 语法检查失败"; exit 1; }
+              -not -path './vendor/*' > "$files"
+            while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              if ! out=$(php -l "$f" 2>&1); then
+                echo "$out"
+                fail=1
+              fi
+            done < "$files"
+            rm -f "$files"
+            if [ "$fail" -ne 0 ]; then
+              echo "PHP 语法检查失败"
+              exit 1
+            fi
             echo "PHP 语法检查通过"
 
         # --- 前端：单测 + 构建 -----------------------------------------------
@@ -113,13 +127,28 @@ master:
             set -e
             php -v
             fail=0
-            while IFS= read -r f; do
-              out=$(php -l "$f" 2>&1) || { echo "$out"; fail=1; }
-            done < <(find . -name '*.php' \
+            # 逐个文件校验；find 排除依赖与产物目录，避免检查第三方代码。
+            # 注意：CNB 阶段脚本默认由 /bin/sh(dash) 执行，不能用 <(...) 这类
+            # bash 专有进程替换（会报 Syntax error: redirection unexpected，
+            # 返回码 2，导致后续阶段全部跳过）。因此先把文件列表写入临时文件，
+            # 再用普通重定向逐行读取。
+            files=$(mktemp)
+            find . -name '*.php' \
               -not -path './node_modules/*' \
               -not -path './frontend/node_modules/*' \
-              -not -path './vendor/*')
-            [ "$fail" -eq 0 ] || { echo "PHP 语法检查失败"; exit 1; }
+              -not -path './vendor/*' > "$files"
+            while IFS= read -r f; do
+              [ -n "$f" ] || continue
+              if ! out=$(php -l "$f" 2>&1); then
+                echo "$out"
+                fail=1
+              fi
+            done < "$files"
+            rm -f "$files"
+            if [ "$fail" -ne 0 ]; then
+              echo "PHP 语法检查失败"
+              exit 1
+            fi
             echo "PHP 语法检查通过"
 
         - name: 前端单测与构建
