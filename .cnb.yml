@@ -168,7 +168,7 @@
             fi
             echo "截断 dump 已被正确拒绝"
 
-            echo "--- 残档防护 B：目录里最"新"的 dump 是残档时，必须跳过它用完整的那个"
+            echo "--- 残档防护 B：目录里最新的 dump 是残档时，必须跳过它用完整的那个"
             # 造一个 mtime 最新的截断残档，放在与完整 dump 同一个目录。
             cp /tmp/truncated.sql.gz "$BACKUP_DIR/dwz_admin-20990101-000000.sql.gz"
             touch "$BACKUP_DIR/dwz_admin-20990101-000000.sql.gz"
@@ -354,7 +354,7 @@ master:
             fi
             echo "截断 dump 已被正确拒绝"
 
-            echo "--- 残档防护 B：目录里最"新"的 dump 是残档时，必须跳过它用完整的那个"
+            echo "--- 残档防护 B：目录里最新的 dump 是残档时，必须跳过它用完整的那个"
             # 造一个 mtime 最新的截断残档，放在与完整 dump 同一个目录。
             cp /tmp/truncated.sql.gz "$BACKUP_DIR/dwz_admin-20990101-000000.sql.gz"
             touch "$BACKUP_DIR/dwz_admin-20990101-000000.sql.gz"

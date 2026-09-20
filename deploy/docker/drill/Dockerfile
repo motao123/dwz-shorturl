@@ -10,7 +10,12 @@
 # 自带 mysql 客户端的镜像都没有 docker CLI）。所以用一个专用 Dockerfile 预装，
 # 而不是在流水线里 apk add —— 后者每次运行都要联网装包，且会被平台校验器提示
 # "手动安装系统依赖"。
+#
+# 注意：Alpine 的 mysql-client 包只提供 `mysql` 交互客户端，**不含 `mysqldump`**，
+# 装了它 backup.sh 仍会报 "mysqldump: command not found"（本批 CI 首次真跑就踩到）。
+# 必须用 mariadb-client：它同时提供 mysql / mysqladmin / mysqldump/mariadb-dump，
+# 且与 MySQL 8.0 服务端协议兼容。deploy/docker/Dockerfile.entrypoint 也是这么装的。
 # ============================================================
 FROM docker:27-cli
 
-RUN apk add --no-cache bash gzip mysql-client coreutils
+RUN apk add --no-cache bash gzip mariadb-client coreutils
