@@ -20,6 +20,176 @@
 # 所有分支的 PR 都执行（含 master 与 auto/* 等特性分支）
 "**":
   pull_request:
+    # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
+    # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
+    # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
+    # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
+    # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
+    #
+    # 独立成一条 pipeline 的原因：CNB 的构建环境（docker.build）是 **pipeline 级**
+    # 字段，pipeline 内所有 stage 共用同一个默认环境；stage/job 级写 docker 会被
+    # 静默忽略（Stage 只支持 image）。test-gate 需要 drill 镜像（真 MySQL），
+    # 本门禁需要 gate 镜像（bash + shellcheck + grep），二者依赖不兼容，只能拆开。
+    #
+    # 环境镜像见 deploy/docker/gate/Dockerfile；两轮红灯的确切根因见该 stage 注释。
+    - name: deploy-gate
+      runner:
+        cpus: 2
+      docker:
+        build:
+          dockerfile: deploy/docker/gate/Dockerfile
+      stages:
+        - name: 部署脚本与清单门禁
+          # 构建环境由 test-gate 之外的独立 pipeline 提供：
+          #   pipeline 级 docker.build → deploy/docker/gate/Dockerfile
+          #   （alpine:3.22 + bash + shellcheck + grep + git + coreutils）
+          #
+          # ⚠️ 不要在这里写 image: 第三方 shellcheck 镜像。本 stage 连红两轮的根因：
+          #
+          #   koalaman/shellcheck-alpine:stable
+          #     → alpine-minirootfs + shellcheck，有 sh/grep，但**没有 bash**
+          #       → `bash -n` 报 `sh: bash: not found`，返回码 127。
+          #
+          #   koalaman/shellcheck:stable
+          #     → **FROM scratch**，整个镜像只有一个文件 /bin/shellcheck
+          #       （2 层，共 ~3.8MB；Entrypoint=["/bin/shellcheck"]）。
+          #       没有 sh / bash / env / grep / coreutils —— 平台用 `sh -c <script>`
+          #       起 stage，容器 init 阶段即失败：
+          #         exec: "sh": executable file not found in $PATH   (127)
+          #       注意 `docker pull` 是成功的（日志里 code 0），
+          #       失败发生在 runc create，报错看起来和"镜像不存在"完全不像。
+          #
+          # 结论：不依赖任何第三方镜像的 shell 布局，自建镜像（见该 Dockerfile）。
+          # 也**不**在 stage 里现场下载 shellcheck 二进制：那会把 CI 网络
+          # （github.com release / npm registry 任一不通即红）变成门禁的单点依赖，
+          # 且每次构建都要等下载。镜像预装是构建期一次性成本，运行期零网络。
+          script: |
+            set -e
+            # 镜像自证：本 stage 依赖 sh/bash/shellcheck/grep/git，缺一个都跑不动。
+            # 本 stage 连红两轮都源于"镜像里没有预期的命令"，故逐项点名断言，
+            # 让失败信息直接指出缺的是哪个，而不是卡在起容器阶段或半路 shellcheck。
+            for bin in sh bash shellcheck grep git; do
+              command -v "$bin" >/dev/null \
+                || { echo "门禁镜像缺少 $bin，无法执行本 stage"; exit 1; }
+            done
+            bash --version | head -1
+            shellcheck --version | grep -E '^version:'
+            for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
+              echo "--- bash -n $f"
+              bash -n "$f"
+              echo "--- shellcheck $f"
+              # 只看 warning 及以上：ops/one_click_migrate.sh 有若干历史 info
+              # 级提示（SC2015/SC2016），不属本批范围，不该卡住部署门禁；
+              # 真正的 warning/error 仍然会红。
+              shellcheck --severity=warning "$f"
+            done
+
+            # 部署清单与 Dockerfile.web 必须一致（否则静默漏文件）。
+            echo "--- 部署清单一致性"
+            bash deploy/check_manifest.sh
+
+            # 防回退：Dockerfile.entrypoint 不得再 COPY 仓库里不存在的
+            # backend/dist/migrate-docker（#9 的根因）。必须由构建阶段现编。
+            # 只匹配真正的 COPY 指令，注释里提到该路径不算违规。
+            echo "--- 一键部署构建可行性断言"
+            if grep -E '^[[:space:]]*COPY[[:space:]]+backend/dist/migrate-docker' deploy/docker/Dockerfile.entrypoint; then
+              echo "Dockerfile.entrypoint 仍依赖不存在的 backend/dist/migrate-docker，docker build 必失败"
+              exit 1
+            fi
+            grep -Eq 'go build .* -o /out/migrate ./cmd/migrate' deploy/docker/Dockerfile.entrypoint \
+              || { echo "Dockerfile.entrypoint 缺少 migrate 构建阶段"; exit 1; }
+
+            # .dockerignore 必须存在（#61：防止把本机真配置烤进镜像）。
+            echo "--- .dockerignore 存在性"
+            test -f .dockerignore || { echo "缺少根 .dockerignore"; exit 1; }
+            test -f backend/.dockerignore || { echo "缺少 backend/.dockerignore"; exit 1; }
+
+            # 演练环境依赖断言：「备份→恢复演练」镜像必须装对包且装全。
+            # Alpine 的 mysql-client 只给 `mysql`，不含 `mysqldump`（该 stage 第一次
+            # 真跑就因此红了）；演练改为容器内直起 mysqld 后还需要服务端包。
+            # 这条静态断言把同类改动拦在更前面，不必等下一次真跑。
+            echo "--- 演练环境依赖断言"
+            drill_dockerfile='deploy/docker/drill/Dockerfile'
+            grep -q 'mariadb-client' "$drill_dockerfile" \
+              || { echo "$drill_dockerfile 必须安装 mariadb-client（mysql-client 不含 mysqldump）"; exit 1; }
+            if grep -E '^[[:space:]]*RUN[^#]*apk add[^#]*mysql-client' "$drill_dockerfile"; then
+              echo "$drill_dockerfile 使用了 mysql-client：Alpine 下不含 mysqldump，backup.sh 必失败"
+              exit 1
+            fi
+            grep -Eq '^[[:space:]]*RUN[^#]*apk add[^#]* mariadb([[:space:]\\]|$)' "$drill_dockerfile" \
+              || { echo "$drill_dockerfile 必须安装 mariadb 服务端（演练要在容器内直起 mysqld）"; exit 1; }
+            for bin in mysqldump mysqld mariadb-install-db mysql mysqladmin; do
+              grep -q "command -v $bin" "$drill_dockerfile" \
+                || { echo "$drill_dockerfile 缺少 $bin 的构建期预检（command -v $bin）"; exit 1; }
+            done
+
+            # 跨平台 find 断言：backup.sh / restore.sh 会在 Alpine(busybox) 与
+            # Debian(GNU) 两种 find 下跑 —— 演练 stage 用 drill 镜像（Alpine），
+            # 生产容器同样是 Alpine。busybox find **不支持 GNU 专属的 -printf**，
+            # 用了会 "find: unrecognized: -printf" 非 0 退出；脚本里那句
+            # 2>/dev/null 又把报错吞了，于是备份明明成功却静默收尾失败
+            # （CI「备份→恢复演练」stage 的真实失败根因）。
+            # 统一用 `-exec stat -c '%Y %n' {} +`：GNU/busybox 语义一致。
+            echo "--- 跨平台 find 兼容性断言（禁止 GNU 专属 -printf）"
+            for f in deploy/backup.sh deploy/restore.sh; do
+              if grep -nE '(^|[^-[:alnum:]])-printf([[:space:]=]|$)' "$f" \
+                   | grep -vE '^[0-9]+:[[:space:]]*#'; then
+                echo "$f 使用了 GNU 专属的 find -printf：busybox find 不认，Alpine 下必失败"
+                echo "（改用 -exec stat -c '%Y %n' {} +）"
+                exit 1
+              fi
+            done
+
+            # 防回退：门禁不得再依赖第三方 shellcheck 镜像（两个 tag 各缺一半工具链，
+            # 详见本 stage 头部注释），也不得退回"运行期现下 shellcheck"的写法。
+            echo "--- 门禁镜像防回退断言"
+            # 注意：两条断言的正则文本本身也写在 .cnb.yml 里，会匹配到自己。
+            # 因此把匹配串拆成变量拼接，且只扫「非注释 + 非本 stage 脚本」的行：
+            # 脚本内的行必然包含 'grep -' 或变量名，用列表跳过。
+            sc_img='^[[:space:]]*image:[[:space:]]*koalaman/shell'"check"
+            sc_dl='releases/download/.*shell'"check"'|npm i -g shell'"check"
+            if grep -nE "$sc_img" .cnb.yml | grep -vE '^[0-9]+:[[:space:]]*#'; then
+              echo ".cnb.yml 仍指定 koalaman/shellcheck 镜像：该镜像缺 sh 或 bash，stage 必 127"
+              echo "（改用 pipeline 级 docker.build → deploy/docker/gate/Dockerfile）"
+              exit 1
+            fi
+            if grep -nE "$sc_dl" .cnb.yml \
+                 | grep -vE '^[0-9]+:[[:space:]]*#' \
+                 | grep -vE 'sc_dl=|releases/download/\.\*shell|npm i -g shell'; then
+              echo ".cnb.yml 在运行期现下 shellcheck：CI 网络不可达即红，应改为镜像预装"
+              echo "（见 deploy/docker/gate/Dockerfile）"
+              exit 1
+            fi
+            grep -q 'deploy/docker/gate/Dockerfile' .cnb.yml \
+              || { echo ".cnb.yml 未引用 deploy/docker/gate/Dockerfile（门禁环境必须单一来源）"; exit 1; }
+            test -f deploy/docker/gate/Dockerfile \
+              || { echo "缺少 deploy/docker/gate/Dockerfile"; exit 1; }
+            # 演练 stage 的 TCP 可达性断言（防回退）：Alpine 的 mariadb 包在
+            # /etc/my.cnf.d/mariadb-server.cnf 里默认写死 skip-networking，只开 unix
+            # socket（日志 `port: 0`），脚本用 -h127.0.0.1 -P3306 必然连不上。
+            # 必须在 mysqld 命令行显式 `--skip-networking=0` 覆盖配置文件才有效
+            # （`--port=3306` 单独放着不管用）。这条断言把该开关钉住，
+            # 避免有人"顺手清理参数"时又让门禁红回 origin 状态。
+            echo "--- 演练 stage TCP 可达性断言"
+            # 只取「备份→恢复演练」stage 的 script 段。注意不能直接匹配
+            # '- name: 备份→恢复演练' —— 本断言的正则文本本身就写在 .cnb.yml 里，
+            # 会先匹配到自己那行（然后误取下一个 stage 的 script）。
+            # 用「行首 8 空格 + '- name: 备份→恢复演练'」锚定真正的 stage 声明，
+            # 并跳过本 stage 自身（含 '演练 stage TCP 可达性断言' 标记的行）。
+            stage_net="$(awk '
+              /^        - name: 备份→恢复演练/ { f=1; next }
+              f && /script: \|/ { g=1; next }
+              g && /^        - name:/ { exit }
+              g { print }
+            ' .cnb.yml)"
+            # 只认「mysqld 命令行里真的带了 --skip-networking=0」——
+            # 本 stage 的注释里也提到过这个开关，直接 grep 字面量会匹配到注释而漏检。
+            printf '%s\n' "$stage_net" | grep -nE '^[[:space:]]*nohup[[:space:]]+mysqld.*--skip-networking=0' \
+              || { echo "演练 stage 未在 mysqld 命令行显式 --skip-networking=0：Alpine mariadb 默认关 TCP，备份/恢复必连不上"; exit 1; }
+            printf '%s\n' "$stage_net" | grep -q 'port: 3306' \
+              || { echo "演练 stage 缺少 TCP 端口自证（socket 就绪不代表 TCP 在听）"; exit 1; }
+
+            echo "部署门禁通过"
     - name: dependency-risk-check
       # 扫描为轻量任务，降低规格以节省资源
       runner:
@@ -49,8 +219,8 @@
         cpus: 4
       # 备份→恢复演练要跑真 MySQL：用假数据或纯静态检查都不足以证明"备份能恢复"，
       # 那正是本批要修的东西。MySQL 直接在 stage 容器内起（见该 stage 说明），
-      # 因为 DinD 容器在**别的 netns** 里，脚本连 127.0.0.1:3306 永远没人应答。
-      # services: docker 仍然需要，因为 drill 镜像是 docker CLI 镜像。
+      # 否则脚本连不上 127.0.0.1:3306；services: docker 仍然需要，因为 drill 镜像
+      # 是 docker CLI 镜像，且构建环境声明在 docker.build 下。
       services:
         - docker
       # 流水线级默认构建环境 = drill 镜像（docker CLI + bash/gzip + mysql 服务端/客户端）。
@@ -140,58 +310,73 @@
             # 运行期预检：镜像里必须同时有 mysqld 与 mysqldump。CNB 以 dockerfile 声明
             # 构建环境时按内容缓存镜像，缓存命中就沿用旧层 —— 依赖包改了、镜像没跟着
             # 更新时，backup.sh 只会抛一句没头没尾的 "command not found"。这里先自证
-            # 环境，缺什么直接红并打印诊断。
+            # 环境，缺什么直接红并打印诊断（DRILL_ENV_REV 已 +1 表示依赖变更）。
             echo "--- 演练环境自检"
             for bin in mysql mysqladmin mysqldump mysqld mariadb-install-db gzip bash; do
               if ! command -v "$bin" >/dev/null 2>&1; then
                 echo "演练环境缺少 $bin：镜像未按 deploy/docker/drill/Dockerfile 重建"
+                echo "（该镜像被缓存时不会自动跟着 Dockerfile 变化重建；确认 DRILL_ENV_REV 已 +1）"
                 exit 1
               fi
             done
             mysql --version
             mysqld --version
-            # 只看 `command -v find` 不够：Alpine 的 BusyBox find 也存在，但不支持
-            # `-printf`，而 deploy/backup.sh 的旧档轮转正靠 `find ... -printf '%T@ %p'`
-            # 按 mtime 取最近 KEEP 份 —— 缺 GNU findutils 时这一步会以非 0 退出，
-            # 把一份**已经备份成功**的运行整体判失败。所以直接探真实的 -printf 调用。
-            if ! find . -maxdepth 0 -printf '' >/dev/null 2>&1; then
-              echo "演练环境缺少 GNU findutils：find 不支持 -printf（BusyBox find）"
-              echo "镜像未按 deploy/docker/drill/Dockerfile 重建"
-              exit 1
-            fi
+            echo "演练环境自检通过"
 
-            # **不通过容器跑 MySQL，也不做端口映射/容器名解析**：在本 stage 容器内
-            # 直接起一个 mysqld —— 备份/恢复脚本就在这个容器里执行，连
-            # 127.0.0.1:3306 必须由它自己监听。
+            # 这里**不通过容器跑 MySQL，也不做任何端口映射/容器名解析**，
+            # 而是在本 stage 容器内直接起一个 mysqld —— 因为备份/恢复脚本就在
+            # 这个容器里执行，连 127.0.0.1:3306 必须由它自己监听。
             #
-            # 为什么不能用 DinD 容器方案（三轮 CI 实测结论，别再回退）：
-            #   1) `-p 33061:3306` + 从 stage 容器连 127.0.0.1:33061 → 2002 (115 EINPROGRESS)；
-            #   2) 改用 `--network host`（容器内 127.0.0.1:3306 可达）后仍失败：
-            #      CNB 构建容器有**自己的 netns**，它看到的 127.0.0.1 是它自己，
-            #      MySQL 绑在 daemon 宿主 netns 上，两边对不上。
-            # 一句话：MySQL 在别的 netns 里，脚本连 127.0.0.1 就永远没人应答。
+            # 为什么会走到这一步（三轮 CI 实测结论，别再回退成容器方案）：
+            #   1) `-p 33061:3306` + 从容器连 127.0.0.1:33061 → 2002 (115 EINPROGRESS)；
+            #   2) 改用 `--network host`（容器内 127.0.0.1:3306 可达）后，
+            #      stage 容器**不是** host netns（CNB 构建容器有自己的 netns），
+            #      它看到的 127.0.0.1 是它自己，所以仍然连不上。
+            # 一句话：MySQL 在别的 netns 里，"连 127.0.0.1 由谁监听"就对不上。
+            # 容器内直起 mysqld 则天然满足脚本的连接方式，也不再需要 docker-in-docker
+            # 拉 mysql 镜像（少一次 ~25s 的镜像拉取）。
+            # 说明：这与生产部署方式无关（生产是 docker compose），只是把 MySQL 放在
+            # 与脚本同一个 netns 里，保证演练测的是备份/恢复链路本身。
             echo "=== 启动 MySQL（stage 容器内）"
             mkdir -p /run/mysqld /var/lib/mysql /tmp/mysql-logs
+            chown -R mysql:mysql /run/mysqld /var/lib/mysql /tmp/mysql-logs
+            # root@127.0.0.1 需要 TCP 登录（--protocol=TCP 走的就是 TCP，不走 socket）。
+            # 只创建 root@localhost 会得到 "Access denied for user 'root'@'127.0.0.1'"。
+            mysql_create_root() {
+              mysql --socket=/run/mysqld/mysqld.sock -uroot -e "
+                CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY 'drillroot';
+                GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
+                ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('drillroot');
+                FLUSH PRIVILEGES;"
+            }
+            # 初始化数据目录。必须按**服务端 flavor** 分流：
+            #   - MariaDB（Alpine 的 `mariadb` 包，本镜像就是它）**没有**
+            #     `--initialize-insecure` —— 那是 MySQL 8 专属参数，用了会
+            #     "unknown option '--initialize-insecure'" 后立即 Abort
+            #     （实测该 stage 0.4s 红）。MariaDB 用 `mariadb-install-db`。
+            #   - MySQL 才用 `--initialize-insecure`。
+            # 判据取 `mysqld --version` 的实际输出，不再靠"包名想当然"。
+            init_datadir() {
+              [ -d /var/lib/mysql/mysql ] && return 0
+              echo "初始化数据目录（约 20-30s）..."
+              if mysqld --version 2>&1 | grep -qi 'mariadb'; then
+                echo "检测到 MariaDB 服务端，使用 mariadb-install-db"
+                mariadb-install-db --user=mysql --datadir=/var/lib/mysql --skip-test-db >/dev/null
+              else
+                echo "检测到 MySQL 服务端，使用 --initialize-insecure"
+                mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql
+              fi
+            }
 
-            # 初始化数据目录。**必须用 mariadb-install-db，不能照抄 MySQL 的
-            # `mysqld --initialize-insecure`**：drill 镜像里装的是 MariaDB（Alpine
-            # 的 `mariadb` 包没有 `mysql-server`），而 MariaDB 10.11 的 mysqld
-            # **不认 `--initialize-insecure`** —— 直接报
-            #   [ERROR] mysqld: unknown option '--initialize-insecure' 并 Aborting。
-            # 这正是本 PR 上一轮 CI 的错误根因（本机 MariaDB 10.11 已复现同一句）。
-            #   --auth-root-authentication-method=normal → root 建为普通口令账号，
-            #   与 MySQL 的 initialize-insecure 语义等价：先无口令，再立刻设口令。
-            if [ ! -d /var/lib/mysql/mysql ]; then
-              echo "初始化数据目录（约 10-30s）..."
-              mariadb-install-db --user=mysql --datadir=/var/lib/mysql \
-                --auth-root-authentication-method=normal
-            fi
-            # /var/lib/mysql 由 initdb 自己落 mysql 属主；这里只补运行期目录。
-            chown -R mysql:mysql /run/mysqld /tmp/mysql-logs
-            # `--skip-networking=0`：MariaDB 在这个最小容器里必须显式打开 TCP 监听，
-            # 否则脚本连 127.0.0.1:3306 会拿到 2002（连接被拒）。
-            nohup mysqld --user=mysql --datadir=/var/lib/mysql \
-              --skip-networking=0 \
+            init_datadir
+            # ⚠️ Alpine 的 mariadb 包在 /etc/my.cnf.d/mariadb-server.cnf 里**默认写死
+            # \`skip-networking\`**（Alpine aports main/mariadb/APKBUILD 里可查）——
+            # 于是 mysqld 只开 unix socket，TCP 完全不监听。日志里表现为
+            # "ready for connections ... port: 0"，而 socket ping 却是通的：
+            # 第 6 轮 CI 就是这样 —— 初始化过了、socket 就绪了，宿主侧 TCP 自检
+            # 却连不上 127.0.0.1:3306，白白耗掉 60s 才失败。
+            # 命令行显式 \`--skip-networking=0\` 覆盖配置文件里的开关，强制开 TCP。
+            nohup mysqld --skip-networking=0 --user=mysql --datadir=/var/lib/mysql \
               --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
               --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
               >/tmp/mysql-logs/mysqld.log 2>&1 &
@@ -206,31 +391,27 @@
               tail -n 50 /tmp/mysql-logs/mysqld.log
               exit 1
             fi
+            # TCP 端口自证：socket 通了**不代表** TCP 在听。Alpine 的 mariadb 默认
+            # 带了 skip-networking，socket ping 照样 OK 但 TCP 是 0 端口。这里直接
+            # 断言端口已监听，把问题定位到"没开 TCP"这一层，而不是拖到 60s 超时后
+            # 只留一句"宿主侧连不上 127.0.0.1:3306"。
+            if ! grep -qiE 'port:[[:space:]]*3306' /tmp/mysql-logs/mysqld.log; then
+              echo "mysqld 未监听 TCP 3306（日志无 'port: 3306'，多半是被 skip-networking 关了）"
+              grep -iE 'port:|networking' /tmp/mysql-logs/mysqld.log | tail -5
+              exit 1
+            fi
+            mysql_create_root
 
-            # 建 root 账号并设口令。必须**同时设 root@localhost 与 root@127.0.0.1**：
-            # 客户端连 127.0.0.1 时服务端默认会反向解析成 'localhost'，只建
-            # root@127.0.0.1 会得到 "Access denied for user 'root'@'localhost'"。
-            # 用 `SET PASSWORD` 而不是 `ALTER USER ... IDENTIFIED BY`：后者在
-            # MariaDB 10.11 上对 root@localhost 会报
-            #   ERROR 1396 (HY000): Operation ALTER USER failed for 'root'@'localhost'
-            # （auth-root-authentication-method=normal 时 root 走 mysql_native_password）。
-            mysql --socket=/run/mysqld/mysqld.sock -uroot -e "
-              CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY 'drillroot';
-              GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
-              SET PASSWORD FOR 'root'@'localhost' = PASSWORD('drillroot');
-              SET PASSWORD FOR 'root'@'127.0.0.1' = PASSWORD('drillroot');
-              FLUSH PRIVILEGES;"
-
-            # 自证连通性：备份/恢复脚本所处位置用 TCP 直连。
-            # 这条断言把"服务端起来了"与"脚本真的连得上"分开 —— 前几轮 CI 的失败
+            # 自证连通性：**宿主侧进程**（backup.sh/restore.sh 所处位置）用 TCP 直连。
+            # 这条断言把"服务端起来了"与"脚本真的连得上"分开 —— 前两轮 CI 的失败
             # 都是两者不一致，却拖到 backup.sh 才以一句 2002 暴露。
-            echo "--- 到 MySQL 连通性自检"
+            echo "--- 宿主到 MySQL 连通性自检"
             for i in $(seq 1 30); do
               if MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP -N -B -e 'SELECT 1' >/dev/null 2>&1; then
-                echo "TCP 连通 OK（127.0.0.1:3306）"; break
+                echo "宿主侧连通 OK（127.0.0.1:3306）"; break
               fi
               if [ "$i" -eq 30 ]; then
-                echo "连不上 127.0.0.1:3306"
+                echo "宿主侧连不上 127.0.0.1:3306"
                 tail -n 50 /tmp/mysql-logs/mysqld.log
                 exit 1
               fi
@@ -252,6 +433,13 @@
             # 显式断言备份成功且真的产出了两份非空 dump。
             # #55 教训：backup.sh 历史上会把失败当成功返回 0，只靠 "脚本没报错"
             # 判定备份成功等于没验；这里用产物存在性做二次兜底。
+            #
+            # ⚠️ 第 7 轮真跑曾在这里"两库都备份成功、然后没有然后了"并返回 1：
+            # backup.sh 末尾的备份轮转用了 GNU 专属的 `find -printf`，而本 stage 的
+            # drill 镜像是 **Alpine**，busybox `find` 不认 `-printf` → 非 0 退出，
+            # 报错又被脚本里的 2>/dev/null 吞掉。已改为 `find … -exec stat -c '%Y %n' {} +`
+            # （GNU/busybox 语义一致），并在部署门禁加了禁止 `-printf` 的静态断言。
+            # 所以：**本 stage 的脚本必须同时兼容 GNU 与 busybox 工具链**。
             bash deploy/backup.sh
             ls -la "$BACKUP_DIR"
             for f in "$BACKUP_DIR"/dwz_admin-*.sql.gz "$BACKUP_DIR"/dwz_public-*.sql.gz; do
@@ -277,27 +465,84 @@
             bash deploy/restore.sh --admin-only --check
             echo "残档已被跳过，演练用的是完整 dump"
 
-        # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
-        # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
-        # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
-        # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
-        # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
-        - name: 部署脚本与清单门禁
-          # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
-          image: koalaman/shellcheck-alpine:stable
+        # --- 前端：单测 + 构建 -----------------------------------------------
+        # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
+        - name: 前端单测与构建
+          image: node:24
           script: |
             set -e
-            # 该镜像基于 alpine，已内置 shellcheck，无需现场安装。
+            cd frontend
+            npm ci --no-audit --no-fund
+            npm test
+            npm run build
+
+# 直接推送到 master（含合入后的结果）也要跑测试门禁：
+# PR 门禁只覆盖「提 PR 的路径」，直接 push 或合并后的 master 需要一个兜底，
+# 否则红灯仍然可能只存在于 master 而无人知晓。
+master:
+  push:
+    # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
+    # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
+    # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
+    # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
+    # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
+    #
+    # 独立成一条 pipeline 的原因：CNB 的构建环境（docker.build）是 **pipeline 级**
+    # 字段，pipeline 内所有 stage 共用同一个默认环境；stage/job 级写 docker 会被
+    # 静默忽略（Stage 只支持 image）。test-gate 需要 drill 镜像（真 MySQL），
+    # 本门禁需要 gate 镜像（bash + shellcheck + grep），二者依赖不兼容，只能拆开。
+    #
+    # 环境镜像见 deploy/docker/gate/Dockerfile；两轮红灯的确切根因见该 stage 注释。
+    - name: deploy-gate
+      runner:
+        cpus: 2
+      docker:
+        build:
+          dockerfile: deploy/docker/gate/Dockerfile
+      stages:
+        - name: 部署脚本与清单门禁
+          # 构建环境由 test-gate 之外的独立 pipeline 提供：
+          #   pipeline 级 docker.build → deploy/docker/gate/Dockerfile
+          #   （alpine:3.22 + bash + shellcheck + grep + git + coreutils）
+          #
+          # ⚠️ 不要在这里写 image: 第三方 shellcheck 镜像。本 stage 连红两轮的根因：
+          #
+          #   koalaman/shellcheck-alpine:stable
+          #     → alpine-minirootfs + shellcheck，有 sh/grep，但**没有 bash**
+          #       → `bash -n` 报 `sh: bash: not found`，返回码 127。
+          #
+          #   koalaman/shellcheck:stable
+          #     → **FROM scratch**，整个镜像只有一个文件 /bin/shellcheck
+          #       （2 层，共 ~3.8MB；Entrypoint=["/bin/shellcheck"]）。
+          #       没有 sh / bash / env / grep / coreutils —— 平台用 `sh -c <script>`
+          #       起 stage，容器 init 阶段即失败：
+          #         exec: "sh": executable file not found in $PATH   (127)
+          #       注意 `docker pull` 是成功的（日志里 code 0），
+          #       失败发生在 runc create，报错看起来和"镜像不存在"完全不像。
+          #
+          # 结论：不依赖任何第三方镜像的 shell 布局，自建镜像（见该 Dockerfile）。
+          # 也**不**在 stage 里现场下载 shellcheck 二进制：那会把 CI 网络
+          # （github.com release / npm registry 任一不通即红）变成门禁的单点依赖，
+          # 且每次构建都要等下载。镜像预装是构建期一次性成本，运行期零网络。
+          script: |
+            set -e
+            # 镜像自证：本 stage 依赖 sh/bash/shellcheck/grep/git，缺一个都跑不动。
+            # 本 stage 连红两轮都源于"镜像里没有预期的命令"，故逐项点名断言，
+            # 让失败信息直接指出缺的是哪个，而不是卡在起容器阶段或半路 shellcheck。
+            for bin in sh bash shellcheck grep git; do
+              command -v "$bin" >/dev/null \
+                || { echo "门禁镜像缺少 $bin，无法执行本 stage"; exit 1; }
+            done
+            bash --version | head -1
+            shellcheck --version | grep -E '^version:'
             for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
               echo "--- bash -n $f"
               bash -n "$f"
-              if command -v shellcheck >/dev/null 2>&1; then
-                echo "--- shellcheck $f"
-                # 只看 warning 及以上：ops/one_click_migrate.sh 有若干历史 info
-                # 级提示（SC2015/SC2016），不属本批范围，不该卡住部署门禁；
-                # 真正的 warning/error 仍然会红。
-                shellcheck --severity=warning "$f"
-              fi
+              echo "--- shellcheck $f"
+              # 只看 warning 及以上：ops/one_click_migrate.sh 有若干历史 info
+              # 级提示（SC2015/SC2016），不属本批范围，不该卡住部署门禁；
+              # 真正的 warning/error 仍然会红。
+              shellcheck --severity=warning "$f"
             done
 
             # 部署清单与 Dockerfile.web 必须一致（否则静默漏文件）。
@@ -319,31 +564,100 @@
             echo "--- .dockerignore 存在性"
             test -f .dockerignore || { echo "缺少根 .dockerignore"; exit 1; }
             test -f backend/.dockerignore || { echo "缺少 backend/.dockerignore"; exit 1; }
+
+            # 演练环境依赖断言：「备份→恢复演练」镜像必须装对包且装全。
+            # Alpine 的 mysql-client 只给 `mysql`，不含 `mysqldump`（该 stage 第一次
+            # 真跑就因此红了）；演练改为容器内直起 mysqld 后还需要服务端包。
+            # 这条静态断言把同类改动拦在更前面，不必等下一次真跑。
+            echo "--- 演练环境依赖断言"
+            drill_dockerfile='deploy/docker/drill/Dockerfile'
+            grep -q 'mariadb-client' "$drill_dockerfile" \
+              || { echo "$drill_dockerfile 必须安装 mariadb-client（mysql-client 不含 mysqldump）"; exit 1; }
+            if grep -E '^[[:space:]]*RUN[^#]*apk add[^#]*mysql-client' "$drill_dockerfile"; then
+              echo "$drill_dockerfile 使用了 mysql-client：Alpine 下不含 mysqldump，backup.sh 必失败"
+              exit 1
+            fi
+            grep -Eq '^[[:space:]]*RUN[^#]*apk add[^#]* mariadb([[:space:]\\]|$)' "$drill_dockerfile" \
+              || { echo "$drill_dockerfile 必须安装 mariadb 服务端（演练要在容器内直起 mysqld）"; exit 1; }
+            for bin in mysqldump mysqld mariadb-install-db mysql mysqladmin; do
+              grep -q "command -v $bin" "$drill_dockerfile" \
+                || { echo "$drill_dockerfile 缺少 $bin 的构建期预检（command -v $bin）"; exit 1; }
+            done
+
+            # 跨平台 find 断言：backup.sh / restore.sh 会在 Alpine(busybox) 与
+            # Debian(GNU) 两种 find 下跑 —— 演练 stage 用 drill 镜像（Alpine），
+            # 生产容器同样是 Alpine。busybox find **不支持 GNU 专属的 -printf**，
+            # 用了会 "find: unrecognized: -printf" 非 0 退出；脚本里那句
+            # 2>/dev/null 又把报错吞了，于是备份明明成功却静默收尾失败
+            # （CI「备份→恢复演练」stage 的真实失败根因）。
+            # 统一用 `-exec stat -c '%Y %n' {} +`：GNU/busybox 语义一致。
+            echo "--- 跨平台 find 兼容性断言（禁止 GNU 专属 -printf）"
+            for f in deploy/backup.sh deploy/restore.sh; do
+              if grep -nE '(^|[^-[:alnum:]])-printf([[:space:]=]|$)' "$f" \
+                   | grep -vE '^[0-9]+:[[:space:]]*#'; then
+                echo "$f 使用了 GNU 专属的 find -printf：busybox find 不认，Alpine 下必失败"
+                echo "（改用 -exec stat -c '%Y %n' {} +）"
+                exit 1
+              fi
+            done
+
+            # 防回退：门禁不得再依赖第三方 shellcheck 镜像（两个 tag 各缺一半工具链，
+            # 详见本 stage 头部注释），也不得退回"运行期现下 shellcheck"的写法。
+            echo "--- 门禁镜像防回退断言"
+            # 注意：两条断言的正则文本本身也写在 .cnb.yml 里，会匹配到自己。
+            # 因此把匹配串拆成变量拼接，且只扫「非注释 + 非本 stage 脚本」的行：
+            # 脚本内的行必然包含 'grep -' 或变量名，用列表跳过。
+            sc_img='^[[:space:]]*image:[[:space:]]*koalaman/shell'"check"
+            sc_dl='releases/download/.*shell'"check"'|npm i -g shell'"check"
+            if grep -nE "$sc_img" .cnb.yml | grep -vE '^[0-9]+:[[:space:]]*#'; then
+              echo ".cnb.yml 仍指定 koalaman/shellcheck 镜像：该镜像缺 sh 或 bash，stage 必 127"
+              echo "（改用 pipeline 级 docker.build → deploy/docker/gate/Dockerfile）"
+              exit 1
+            fi
+            if grep -nE "$sc_dl" .cnb.yml \
+                 | grep -vE '^[0-9]+:[[:space:]]*#' \
+                 | grep -vE 'sc_dl=|releases/download/\.\*shell|npm i -g shell'; then
+              echo ".cnb.yml 在运行期现下 shellcheck：CI 网络不可达即红，应改为镜像预装"
+              echo "（见 deploy/docker/gate/Dockerfile）"
+              exit 1
+            fi
+            grep -q 'deploy/docker/gate/Dockerfile' .cnb.yml \
+              || { echo ".cnb.yml 未引用 deploy/docker/gate/Dockerfile（门禁环境必须单一来源）"; exit 1; }
+            test -f deploy/docker/gate/Dockerfile \
+              || { echo "缺少 deploy/docker/gate/Dockerfile"; exit 1; }
+            # 演练 stage 的 TCP 可达性断言（防回退）：Alpine 的 mariadb 包在
+            # /etc/my.cnf.d/mariadb-server.cnf 里默认写死 skip-networking，只开 unix
+            # socket（日志 `port: 0`），脚本用 -h127.0.0.1 -P3306 必然连不上。
+            # 必须在 mysqld 命令行显式 `--skip-networking=0` 覆盖配置文件才有效
+            # （`--port=3306` 单独放着不管用）。这条断言把该开关钉住，
+            # 避免有人"顺手清理参数"时又让门禁红回 origin 状态。
+            echo "--- 演练 stage TCP 可达性断言"
+            # 只取「备份→恢复演练」stage 的 script 段。注意不能直接匹配
+            # '- name: 备份→恢复演练' —— 本断言的正则文本本身就写在 .cnb.yml 里，
+            # 会先匹配到自己那行（然后误取下一个 stage 的 script）。
+            # 用「行首 8 空格 + '- name: 备份→恢复演练'」锚定真正的 stage 声明，
+            # 并跳过本 stage 自身（含 '演练 stage TCP 可达性断言' 标记的行）。
+            stage_net="$(awk '
+              /^        - name: 备份→恢复演练/ { f=1; next }
+              f && /script: \|/ { g=1; next }
+              g && /^        - name:/ { exit }
+              g { print }
+            ' .cnb.yml)"
+            # 只认「mysqld 命令行里真的带了 --skip-networking=0」——
+            # 本 stage 的注释里也提到过这个开关，直接 grep 字面量会匹配到注释而漏检。
+            printf '%s\n' "$stage_net" | grep -nE '^[[:space:]]*nohup[[:space:]]+mysqld.*--skip-networking=0' \
+              || { echo "演练 stage 未在 mysqld 命令行显式 --skip-networking=0：Alpine mariadb 默认关 TCP，备份/恢复必连不上"; exit 1; }
+            printf '%s\n' "$stage_net" | grep -q 'port: 3306' \
+              || { echo "演练 stage 缺少 TCP 端口自证（socket 就绪不代表 TCP 在听）"; exit 1; }
+
             echo "部署门禁通过"
-
-        # --- 前端：单测 + 构建 -----------------------------------------------
-        # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
-        - name: 前端单测与构建
-          image: node:24
-          script: |
-            set -e
-            cd frontend
-            npm ci --no-audit --no-fund
-            npm test
-            npm run build
-
-# 直接推送到 master（含合入后的结果）也要跑测试门禁：
-# PR 门禁只覆盖「提 PR 的路径」，直接 push 或合并后的 master 需要一个兜底，
-# 否则红灯仍然可能只存在于 master 而无人知晓。
-master:
-  push:
     - name: test-gate
       runner:
         cpus: 4
       # 备份→恢复演练要跑真 MySQL：用假数据或纯静态检查都不足以证明"备份能恢复"，
       # 那正是本批要修的东西。MySQL 直接在 stage 容器内起（见该 stage 说明），
-      # 因为 DinD 容器在**别的 netns** 里，脚本连 127.0.0.1:3306 永远没人应答。
-      # services: docker 仍然需要，因为 drill 镜像是 docker CLI 镜像。
+      # 否则脚本连不上 127.0.0.1:3306；services: docker 仍然需要，因为 drill 镜像
+      # 是 docker CLI 镜像，且构建环境声明在 docker.build 下。
       services:
         - docker
       # 流水线级默认构建环境 = drill 镜像（docker CLI + bash/gzip + mysql 服务端/客户端）。
@@ -428,58 +742,73 @@ master:
             # 运行期预检：镜像里必须同时有 mysqld 与 mysqldump。CNB 以 dockerfile 声明
             # 构建环境时按内容缓存镜像，缓存命中就沿用旧层 —— 依赖包改了、镜像没跟着
             # 更新时，backup.sh 只会抛一句没头没尾的 "command not found"。这里先自证
-            # 环境，缺什么直接红并打印诊断。
+            # 环境，缺什么直接红并打印诊断（DRILL_ENV_REV 已 +1 表示依赖变更）。
             echo "--- 演练环境自检"
             for bin in mysql mysqladmin mysqldump mysqld mariadb-install-db gzip bash; do
               if ! command -v "$bin" >/dev/null 2>&1; then
                 echo "演练环境缺少 $bin：镜像未按 deploy/docker/drill/Dockerfile 重建"
+                echo "（该镜像被缓存时不会自动跟着 Dockerfile 变化重建；确认 DRILL_ENV_REV 已 +1）"
                 exit 1
               fi
             done
             mysql --version
             mysqld --version
-            # 只看 `command -v find` 不够：Alpine 的 BusyBox find 也存在，但不支持
-            # `-printf`，而 deploy/backup.sh 的旧档轮转正靠 `find ... -printf '%T@ %p'`
-            # 按 mtime 取最近 KEEP 份 —— 缺 GNU findutils 时这一步会以非 0 退出，
-            # 把一份**已经备份成功**的运行整体判失败。所以直接探真实的 -printf 调用。
-            if ! find . -maxdepth 0 -printf '' >/dev/null 2>&1; then
-              echo "演练环境缺少 GNU findutils：find 不支持 -printf（BusyBox find）"
-              echo "镜像未按 deploy/docker/drill/Dockerfile 重建"
-              exit 1
-            fi
+            echo "演练环境自检通过"
 
-            # **不通过容器跑 MySQL，也不做端口映射/容器名解析**：在本 stage 容器内
-            # 直接起一个 mysqld —— 备份/恢复脚本就在这个容器里执行，连
-            # 127.0.0.1:3306 必须由它自己监听。
+            # 这里**不通过容器跑 MySQL，也不做任何端口映射/容器名解析**，
+            # 而是在本 stage 容器内直接起一个 mysqld —— 因为备份/恢复脚本就在
+            # 这个容器里执行，连 127.0.0.1:3306 必须由它自己监听。
             #
-            # 为什么不能用 DinD 容器方案（三轮 CI 实测结论，别再回退）：
-            #   1) `-p 33061:3306` + 从 stage 容器连 127.0.0.1:33061 → 2002 (115 EINPROGRESS)；
-            #   2) 改用 `--network host`（容器内 127.0.0.1:3306 可达）后仍失败：
-            #      CNB 构建容器有**自己的 netns**，它看到的 127.0.0.1 是它自己，
-            #      MySQL 绑在 daemon 宿主 netns 上，两边对不上。
-            # 一句话：MySQL 在别的 netns 里，脚本连 127.0.0.1 就永远没人应答。
+            # 为什么会走到这一步（三轮 CI 实测结论，别再回退成容器方案）：
+            #   1) `-p 33061:3306` + 从容器连 127.0.0.1:33061 → 2002 (115 EINPROGRESS)；
+            #   2) 改用 `--network host`（容器内 127.0.0.1:3306 可达）后，
+            #      stage 容器**不是** host netns（CNB 构建容器有自己的 netns），
+            #      它看到的 127.0.0.1 是它自己，所以仍然连不上。
+            # 一句话：MySQL 在别的 netns 里，"连 127.0.0.1 由谁监听"就对不上。
+            # 容器内直起 mysqld 则天然满足脚本的连接方式，也不再需要 docker-in-docker
+            # 拉 mysql 镜像（少一次 ~25s 的镜像拉取）。
+            # 说明：这与生产部署方式无关（生产是 docker compose），只是把 MySQL 放在
+            # 与脚本同一个 netns 里，保证演练测的是备份/恢复链路本身。
             echo "=== 启动 MySQL（stage 容器内）"
             mkdir -p /run/mysqld /var/lib/mysql /tmp/mysql-logs
+            chown -R mysql:mysql /run/mysqld /var/lib/mysql /tmp/mysql-logs
+            # root@127.0.0.1 需要 TCP 登录（--protocol=TCP 走的就是 TCP，不走 socket）。
+            # 只创建 root@localhost 会得到 "Access denied for user 'root'@'127.0.0.1'"。
+            mysql_create_root() {
+              mysql --socket=/run/mysqld/mysqld.sock -uroot -e "
+                CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY 'drillroot';
+                GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
+                ALTER USER 'root'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('drillroot');
+                FLUSH PRIVILEGES;"
+            }
+            # 初始化数据目录。必须按**服务端 flavor** 分流：
+            #   - MariaDB（Alpine 的 `mariadb` 包，本镜像就是它）**没有**
+            #     `--initialize-insecure` —— 那是 MySQL 8 专属参数，用了会
+            #     "unknown option '--initialize-insecure'" 后立即 Abort
+            #     （实测该 stage 0.4s 红）。MariaDB 用 `mariadb-install-db`。
+            #   - MySQL 才用 `--initialize-insecure`。
+            # 判据取 `mysqld --version` 的实际输出，不再靠"包名想当然"。
+            init_datadir() {
+              [ -d /var/lib/mysql/mysql ] && return 0
+              echo "初始化数据目录（约 20-30s）..."
+              if mysqld --version 2>&1 | grep -qi 'mariadb'; then
+                echo "检测到 MariaDB 服务端，使用 mariadb-install-db"
+                mariadb-install-db --user=mysql --datadir=/var/lib/mysql --skip-test-db >/dev/null
+              else
+                echo "检测到 MySQL 服务端，使用 --initialize-insecure"
+                mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql
+              fi
+            }
 
-            # 初始化数据目录。**必须用 mariadb-install-db，不能照抄 MySQL 的
-            # `mysqld --initialize-insecure`**：drill 镜像里装的是 MariaDB（Alpine
-            # 的 `mariadb` 包没有 `mysql-server`），而 MariaDB 10.11 的 mysqld
-            # **不认 `--initialize-insecure`** —— 直接报
-            #   [ERROR] mysqld: unknown option '--initialize-insecure' 并 Aborting。
-            # 这正是本 PR 上一轮 CI 的错误根因（本机 MariaDB 10.11 已复现同一句）。
-            #   --auth-root-authentication-method=normal → root 建为普通口令账号，
-            #   与 MySQL 的 initialize-insecure 语义等价：先无口令，再立刻设口令。
-            if [ ! -d /var/lib/mysql/mysql ]; then
-              echo "初始化数据目录（约 10-30s）..."
-              mariadb-install-db --user=mysql --datadir=/var/lib/mysql \
-                --auth-root-authentication-method=normal
-            fi
-            # /var/lib/mysql 由 initdb 自己落 mysql 属主；这里只补运行期目录。
-            chown -R mysql:mysql /run/mysqld /tmp/mysql-logs
-            # `--skip-networking=0`：MariaDB 在这个最小容器里必须显式打开 TCP 监听，
-            # 否则脚本连 127.0.0.1:3306 会拿到 2002（连接被拒）。
-            nohup mysqld --user=mysql --datadir=/var/lib/mysql \
-              --skip-networking=0 \
+            init_datadir
+            # ⚠️ Alpine 的 mariadb 包在 /etc/my.cnf.d/mariadb-server.cnf 里**默认写死
+            # \`skip-networking\`**（Alpine aports main/mariadb/APKBUILD 里可查）——
+            # 于是 mysqld 只开 unix socket，TCP 完全不监听。日志里表现为
+            # "ready for connections ... port: 0"，而 socket ping 却是通的：
+            # 第 6 轮 CI 就是这样 —— 初始化过了、socket 就绪了，宿主侧 TCP 自检
+            # 却连不上 127.0.0.1:3306，白白耗掉 60s 才失败。
+            # 命令行显式 \`--skip-networking=0\` 覆盖配置文件里的开关，强制开 TCP。
+            nohup mysqld --skip-networking=0 --user=mysql --datadir=/var/lib/mysql \
               --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
               --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
               >/tmp/mysql-logs/mysqld.log 2>&1 &
@@ -494,31 +823,27 @@ master:
               tail -n 50 /tmp/mysql-logs/mysqld.log
               exit 1
             fi
+            # TCP 端口自证：socket 通了**不代表** TCP 在听。Alpine 的 mariadb 默认
+            # 带了 skip-networking，socket ping 照样 OK 但 TCP 是 0 端口。这里直接
+            # 断言端口已监听，把问题定位到"没开 TCP"这一层，而不是拖到 60s 超时后
+            # 只留一句"宿主侧连不上 127.0.0.1:3306"。
+            if ! grep -qiE 'port:[[:space:]]*3306' /tmp/mysql-logs/mysqld.log; then
+              echo "mysqld 未监听 TCP 3306（日志无 'port: 3306'，多半是被 skip-networking 关了）"
+              grep -iE 'port:|networking' /tmp/mysql-logs/mysqld.log | tail -5
+              exit 1
+            fi
+            mysql_create_root
 
-            # 建 root 账号并设口令。必须**同时设 root@localhost 与 root@127.0.0.1**：
-            # 客户端连 127.0.0.1 时服务端默认会反向解析成 'localhost'，只建
-            # root@127.0.0.1 会得到 "Access denied for user 'root'@'localhost'"。
-            # 用 `SET PASSWORD` 而不是 `ALTER USER ... IDENTIFIED BY`：后者在
-            # MariaDB 10.11 上对 root@localhost 会报
-            #   ERROR 1396 (HY000): Operation ALTER USER failed for 'root'@'localhost'
-            # （auth-root-authentication-method=normal 时 root 走 mysql_native_password）。
-            mysql --socket=/run/mysqld/mysqld.sock -uroot -e "
-              CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY 'drillroot';
-              GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
-              SET PASSWORD FOR 'root'@'localhost' = PASSWORD('drillroot');
-              SET PASSWORD FOR 'root'@'127.0.0.1' = PASSWORD('drillroot');
-              FLUSH PRIVILEGES;"
-
-            # 自证连通性：备份/恢复脚本所处位置用 TCP 直连。
-            # 这条断言把"服务端起来了"与"脚本真的连得上"分开 —— 前几轮 CI 的失败
+            # 自证连通性：**宿主侧进程**（backup.sh/restore.sh 所处位置）用 TCP 直连。
+            # 这条断言把"服务端起来了"与"脚本真的连得上"分开 —— 前两轮 CI 的失败
             # 都是两者不一致，却拖到 backup.sh 才以一句 2002 暴露。
-            echo "--- 到 MySQL 连通性自检"
+            echo "--- 宿主到 MySQL 连通性自检"
             for i in $(seq 1 30); do
               if MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP -N -B -e 'SELECT 1' >/dev/null 2>&1; then
-                echo "TCP 连通 OK（127.0.0.1:3306）"; break
+                echo "宿主侧连通 OK（127.0.0.1:3306）"; break
               fi
               if [ "$i" -eq 30 ]; then
-                echo "连不上 127.0.0.1:3306"
+                echo "宿主侧连不上 127.0.0.1:3306"
                 tail -n 50 /tmp/mysql-logs/mysqld.log
                 exit 1
               fi
@@ -540,6 +865,13 @@ master:
             # 显式断言备份成功且真的产出了两份非空 dump。
             # #55 教训：backup.sh 历史上会把失败当成功返回 0，只靠 "脚本没报错"
             # 判定备份成功等于没验；这里用产物存在性做二次兜底。
+            #
+            # ⚠️ 第 7 轮真跑曾在这里"两库都备份成功、然后没有然后了"并返回 1：
+            # backup.sh 末尾的备份轮转用了 GNU 专属的 `find -printf`，而本 stage 的
+            # drill 镜像是 **Alpine**，busybox `find` 不认 `-printf` → 非 0 退出，
+            # 报错又被脚本里的 2>/dev/null 吞掉。已改为 `find … -exec stat -c '%Y %n' {} +`
+            # （GNU/busybox 语义一致），并在部署门禁加了禁止 `-printf` 的静态断言。
+            # 所以：**本 stage 的脚本必须同时兼容 GNU 与 busybox 工具链**。
             bash deploy/backup.sh
             ls -la "$BACKUP_DIR"
             for f in "$BACKUP_DIR"/dwz_admin-*.sql.gz "$BACKUP_DIR"/dwz_public-*.sql.gz; do
@@ -564,50 +896,6 @@ master:
             touch "$BACKUP_DIR/dwz_admin-20990101-000000.sql.gz"
             bash deploy/restore.sh --admin-only --check
             echo "残档已被跳过，演练用的是完整 dump"
-
-        # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
-        # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
-        # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
-        # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
-        # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
-        - name: 部署脚本与清单门禁
-          # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
-          image: koalaman/shellcheck-alpine:stable
-          script: |
-            set -e
-            # 该镜像基于 alpine，已内置 shellcheck，无需现场安装。
-            for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
-              echo "--- bash -n $f"
-              bash -n "$f"
-              if command -v shellcheck >/dev/null 2>&1; then
-                echo "--- shellcheck $f"
-                # 只看 warning 及以上：ops/one_click_migrate.sh 有若干历史 info
-                # 级提示（SC2015/SC2016），不属本批范围，不该卡住部署门禁；
-                # 真正的 warning/error 仍然会红。
-                shellcheck --severity=warning "$f"
-              fi
-            done
-
-            # 部署清单与 Dockerfile.web 必须一致（否则静默漏文件）。
-            echo "--- 部署清单一致性"
-            bash deploy/check_manifest.sh
-
-            # 防回退：Dockerfile.entrypoint 不得再 COPY 仓库里不存在的
-            # backend/dist/migrate-docker（#9 的根因）。必须由构建阶段现编。
-            # 只匹配真正的 COPY 指令，注释里提到该路径不算违规。
-            echo "--- 一键部署构建可行性断言"
-            if grep -E '^[[:space:]]*COPY[[:space:]]+backend/dist/migrate-docker' deploy/docker/Dockerfile.entrypoint; then
-              echo "Dockerfile.entrypoint 仍依赖不存在的 backend/dist/migrate-docker，docker build 必失败"
-              exit 1
-            fi
-            grep -Eq 'go build .* -o /out/migrate ./cmd/migrate' deploy/docker/Dockerfile.entrypoint \
-              || { echo "Dockerfile.entrypoint 缺少 migrate 构建阶段"; exit 1; }
-
-            # .dockerignore 必须存在（#61：防止把本机真配置烤进镜像）。
-            echo "--- .dockerignore 存在性"
-            test -f .dockerignore || { echo "缺少根 .dockerignore"; exit 1; }
-            test -f backend/.dockerignore || { echo "缺少 backend/.dockerignore"; exit 1; }
-            echo "部署门禁通过"
 
         # --- 前端：单测 + 构建 -----------------------------------------------
         # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。

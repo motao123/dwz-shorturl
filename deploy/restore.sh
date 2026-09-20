@@ -120,8 +120,14 @@ latest_valid_dump() {
       echo "$f"; return 0
     fi
     echo "==> 跳过不完整备份：$f" >&2
+  # ⚠️ 不用 `find -printf`：那是 GNU findutils 专属扩展，busybox 的 find 没有
+  # （Alpine 上直接 "find: unrecognized: -printf" 并返回非零，又被 2>/dev/null
+  # 吞掉），结果是"目录里明明有完整 dump 却一个候选都挑不出来"。
+  # 改用 `-exec stat -c '%Y %n' {} +`（POSIX 语义，busybox/GNU 一致）后统一
+  # `sort -rn`：跨批也全局有序，且 `%n` 落在最后一个字段，配合 `cut -d' ' -f2-`
+  # 能正确处理带空格的文件名。
   done < <(find "$RESTORE_DIR" -maxdepth 1 -type f -name "${prefix}-*.sql.gz" \
-             -printf '%T@ %p\n' 2>/dev/null | sort -rn | cut -d' ' -f2-)
+             -exec stat -c '%Y %n' {} + 2>/dev/null | sort -rn | cut -d' ' -f2-)
   return 1
 }
 
