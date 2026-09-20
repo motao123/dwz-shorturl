@@ -8,9 +8,9 @@
 # backup.sh 直接 "mysqldump: command not found"。这是 PR #48 首次真跑的根因。
 #
 # 该 stage 需要四样东西同时可用：
-#   1. mysql 服务端 —— 演练要在**本容器内**直起 mysqld（脚本连的就是它）
+#   1. mariadb 服务端 + mariadb-install-db —— 演练要在**本容器内**直起 mysqld（脚本连的就是它）
 #   2. mysql / mysqldump 客户端 —— deploy/backup.sh 与 restore.sh 本体
-#   3. bash + gzip —— 两个脚本依赖
+#   3. bash + gzip + **GNU findutils** —— 两个脚本依赖
 #   4. docker CLI / git / coreutils —— 流水线在默认环境里拉代码、跑通用命令
 #
 # 为什么不拉 mysql:8.0 容器跑 MySQL：容器化后 MySQL 落在**别的 netns**，
@@ -21,17 +21,35 @@
 # 必须用 `mariadb-client`：它同时提供 mysql / mysqladmin / mysqldump(mariadb-dump)，
 # 且与 MySQL 8.0 服务端协议兼容；服务端由 `mariadb` 包提供（Alpine 的 apk 源里
 # 没有 `mysql-server`）。deploy/docker/Dockerfile.entrypoint 的客户端也是这么装的。
+#
+# ⚠️ 镜像里是 **MariaDB**，不是 MySQL：数据目录初始化必须用 `mariadb-install-db`
+# （`mysql_install_db` 是其软链），**不能写 `mysqld --initialize-insecure`** ——
+# MariaDB 10.11 的 mysqld 不认这个选项，会 `unknown option` 直接 Aborting。
+# 构建期预检因此把 `mariadb-install-db` 一并断言，防止将来镜像里只剩 mysqld。
+#
+# ⚠️ **必须显式装 `findutils`**：Alpine 自带的是 BusyBox `find`，它**不实现
+# `-printf`**（直接 `find: unrecognized: -printf` 并以 1 退出）。而
+# deploy/backup.sh 的旧备份轮转正是用 `find ... -printf '%T@ %p\n'` 按 mtime
+# 取最近 KEEP 份 —— 在没有 GNU findutils 的镜像里，这一步会以非 0 退出，
+# 让一份**已经备份成功**的脚本整体判失败。`coreutils` 不含 find，别省这一行。
 # ============================================================
 FROM docker:27-cli
 
-# DRILL_ENV_REV: 2 —— 依赖有变必须 +1，便于在 CI 日志里确认跑的是哪一版镜像。
-LABEL cnb.drill.env.rev="2"
+# DRILL_ENV_REV: 4 —— 依赖有变必须 +1，便于在 CI 日志里确认跑的是哪一版镜像。
+#   1 → 2：补 mariadb 服务端
+#   2 → 3：补 mariadb-install-db 预检（MariaDB 不能照抄 MySQL 的 --initialize-insecure）
+#   3 → 4：补 findutils（backup.sh 轮转用 find -printf，BusyBox find 不支持）
+LABEL cnb.drill.env.rev="4"
 
-RUN apk add --no-cache bash gzip mariadb-client mariadb coreutils git \
+RUN apk add --no-cache bash gzip mariadb-client mariadb findutils coreutils git \
     # 构建期预检：装完立刻验证命令真的存在，把"包内容与预期不符"拦在构建期，
     # 而不是留到运行期才发现（第一轮 CI 红灯的根因就是 mysql-client 不含 mysqldump）。
     && command -v mysql >/dev/null \
     && command -v mysqladmin >/dev/null \
     && command -v mysqldump >/dev/null \
     && command -v mysqld >/dev/null \
-    && command -v gzip >/dev/null
+    && command -v mariadb-install-db >/dev/null \
+    && command -v gzip >/dev/null \
+    # GNU find 才认 -printf；这里用真实的 -printf 调用做预检，而不是只看
+    # `command -v find`（BusyBox 的 find 也存在，但功能不全，查不出来）。
+    && find / -maxdepth 0 -printf '' >/dev/null

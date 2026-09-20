@@ -142,7 +142,7 @@
             # 更新时，backup.sh 只会抛一句没头没尾的 "command not found"。这里先自证
             # 环境，缺什么直接红并打印诊断。
             echo "--- 演练环境自检"
-            for bin in mysql mysqladmin mysqldump mysqld gzip bash; do
+            for bin in mysql mysqladmin mysqldump mysqld mariadb-install-db gzip bash; do
               if ! command -v "$bin" >/dev/null 2>&1; then
                 echo "演练环境缺少 $bin：镜像未按 deploy/docker/drill/Dockerfile 重建"
                 exit 1
@@ -150,6 +150,15 @@
             done
             mysql --version
             mysqld --version
+            # 只看 `command -v find` 不够：Alpine 的 BusyBox find 也存在，但不支持
+            # `-printf`，而 deploy/backup.sh 的旧档轮转正靠 `find ... -printf '%T@ %p'`
+            # 按 mtime 取最近 KEEP 份 —— 缺 GNU findutils 时这一步会以非 0 退出，
+            # 把一份**已经备份成功**的运行整体判失败。所以直接探真实的 -printf 调用。
+            if ! find . -maxdepth 0 -printf '' >/dev/null 2>&1; then
+              echo "演练环境缺少 GNU findutils：find 不支持 -printf（BusyBox find）"
+              echo "镜像未按 deploy/docker/drill/Dockerfile 重建"
+              exit 1
+            fi
 
             # **不通过容器跑 MySQL，也不做端口映射/容器名解析**：在本 stage 容器内
             # 直接起一个 mysqld —— 备份/恢复脚本就在这个容器里执行，连
@@ -163,14 +172,26 @@
             # 一句话：MySQL 在别的 netns 里，脚本连 127.0.0.1 就永远没人应答。
             echo "=== 启动 MySQL（stage 容器内）"
             mkdir -p /run/mysqld /var/lib/mysql /tmp/mysql-logs
-            chown -R mysql:mysql /run/mysqld /var/lib/mysql /tmp/mysql-logs
 
-            # 初始化数据目录（得到无口令 root，随后立刻设口令）。
+            # 初始化数据目录。**必须用 mariadb-install-db，不能照抄 MySQL 的
+            # `mysqld --initialize-insecure`**：drill 镜像里装的是 MariaDB（Alpine
+            # 的 `mariadb` 包没有 `mysql-server`），而 MariaDB 10.11 的 mysqld
+            # **不认 `--initialize-insecure`** —— 直接报
+            #   [ERROR] mysqld: unknown option '--initialize-insecure' 并 Aborting。
+            # 这正是本 PR 上一轮 CI 的错误根因（本机 MariaDB 10.11 已复现同一句）。
+            #   --auth-root-authentication-method=normal → root 建为普通口令账号，
+            #   与 MySQL 的 initialize-insecure 语义等价：先无口令，再立刻设口令。
             if [ ! -d /var/lib/mysql/mysql ]; then
               echo "初始化数据目录（约 10-30s）..."
-              mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql
+              mariadb-install-db --user=mysql --datadir=/var/lib/mysql \
+                --auth-root-authentication-method=normal
             fi
+            # /var/lib/mysql 由 initdb 自己落 mysql 属主；这里只补运行期目录。
+            chown -R mysql:mysql /run/mysqld /tmp/mysql-logs
+            # `--skip-networking=0`：MariaDB 在这个最小容器里必须显式打开 TCP 监听，
+            # 否则脚本连 127.0.0.1:3306 会拿到 2002（连接被拒）。
             nohup mysqld --user=mysql --datadir=/var/lib/mysql \
+              --skip-networking=0 \
               --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
               --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
               >/tmp/mysql-logs/mysqld.log 2>&1 &
@@ -189,10 +210,15 @@
             # 建 root 账号并设口令。必须**同时设 root@localhost 与 root@127.0.0.1**：
             # 客户端连 127.0.0.1 时服务端默认会反向解析成 'localhost'，只建
             # root@127.0.0.1 会得到 "Access denied for user 'root'@'localhost'"。
+            # 用 `SET PASSWORD` 而不是 `ALTER USER ... IDENTIFIED BY`：后者在
+            # MariaDB 10.11 上对 root@localhost 会报
+            #   ERROR 1396 (HY000): Operation ALTER USER failed for 'root'@'localhost'
+            # （auth-root-authentication-method=normal 时 root 走 mysql_native_password）。
             mysql --socket=/run/mysqld/mysqld.sock -uroot -e "
               CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY 'drillroot';
               GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
-              ALTER USER 'root'@'localhost' IDENTIFIED BY 'drillroot';
+              SET PASSWORD FOR 'root'@'localhost' = PASSWORD('drillroot');
+              SET PASSWORD FOR 'root'@'127.0.0.1' = PASSWORD('drillroot');
               FLUSH PRIVILEGES;"
 
             # 自证连通性：备份/恢复脚本所处位置用 TCP 直连。
@@ -404,7 +430,7 @@ master:
             # 更新时，backup.sh 只会抛一句没头没尾的 "command not found"。这里先自证
             # 环境，缺什么直接红并打印诊断。
             echo "--- 演练环境自检"
-            for bin in mysql mysqladmin mysqldump mysqld gzip bash; do
+            for bin in mysql mysqladmin mysqldump mysqld mariadb-install-db gzip bash; do
               if ! command -v "$bin" >/dev/null 2>&1; then
                 echo "演练环境缺少 $bin：镜像未按 deploy/docker/drill/Dockerfile 重建"
                 exit 1
@@ -412,6 +438,15 @@ master:
             done
             mysql --version
             mysqld --version
+            # 只看 `command -v find` 不够：Alpine 的 BusyBox find 也存在，但不支持
+            # `-printf`，而 deploy/backup.sh 的旧档轮转正靠 `find ... -printf '%T@ %p'`
+            # 按 mtime 取最近 KEEP 份 —— 缺 GNU findutils 时这一步会以非 0 退出，
+            # 把一份**已经备份成功**的运行整体判失败。所以直接探真实的 -printf 调用。
+            if ! find . -maxdepth 0 -printf '' >/dev/null 2>&1; then
+              echo "演练环境缺少 GNU findutils：find 不支持 -printf（BusyBox find）"
+              echo "镜像未按 deploy/docker/drill/Dockerfile 重建"
+              exit 1
+            fi
 
             # **不通过容器跑 MySQL，也不做端口映射/容器名解析**：在本 stage 容器内
             # 直接起一个 mysqld —— 备份/恢复脚本就在这个容器里执行，连
@@ -425,14 +460,26 @@ master:
             # 一句话：MySQL 在别的 netns 里，脚本连 127.0.0.1 就永远没人应答。
             echo "=== 启动 MySQL（stage 容器内）"
             mkdir -p /run/mysqld /var/lib/mysql /tmp/mysql-logs
-            chown -R mysql:mysql /run/mysqld /var/lib/mysql /tmp/mysql-logs
 
-            # 初始化数据目录（得到无口令 root，随后立刻设口令）。
+            # 初始化数据目录。**必须用 mariadb-install-db，不能照抄 MySQL 的
+            # `mysqld --initialize-insecure`**：drill 镜像里装的是 MariaDB（Alpine
+            # 的 `mariadb` 包没有 `mysql-server`），而 MariaDB 10.11 的 mysqld
+            # **不认 `--initialize-insecure`** —— 直接报
+            #   [ERROR] mysqld: unknown option '--initialize-insecure' 并 Aborting。
+            # 这正是本 PR 上一轮 CI 的错误根因（本机 MariaDB 10.11 已复现同一句）。
+            #   --auth-root-authentication-method=normal → root 建为普通口令账号，
+            #   与 MySQL 的 initialize-insecure 语义等价：先无口令，再立刻设口令。
             if [ ! -d /var/lib/mysql/mysql ]; then
               echo "初始化数据目录（约 10-30s）..."
-              mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql
+              mariadb-install-db --user=mysql --datadir=/var/lib/mysql \
+                --auth-root-authentication-method=normal
             fi
+            # /var/lib/mysql 由 initdb 自己落 mysql 属主；这里只补运行期目录。
+            chown -R mysql:mysql /run/mysqld /tmp/mysql-logs
+            # `--skip-networking=0`：MariaDB 在这个最小容器里必须显式打开 TCP 监听，
+            # 否则脚本连 127.0.0.1:3306 会拿到 2002（连接被拒）。
             nohup mysqld --user=mysql --datadir=/var/lib/mysql \
+              --skip-networking=0 \
               --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
               --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
               >/tmp/mysql-logs/mysqld.log 2>&1 &
@@ -451,10 +498,15 @@ master:
             # 建 root 账号并设口令。必须**同时设 root@localhost 与 root@127.0.0.1**：
             # 客户端连 127.0.0.1 时服务端默认会反向解析成 'localhost'，只建
             # root@127.0.0.1 会得到 "Access denied for user 'root'@'localhost'"。
+            # 用 `SET PASSWORD` 而不是 `ALTER USER ... IDENTIFIED BY`：后者在
+            # MariaDB 10.11 上对 root@localhost 会报
+            #   ERROR 1396 (HY000): Operation ALTER USER failed for 'root'@'localhost'
+            # （auth-root-authentication-method=normal 时 root 走 mysql_native_password）。
             mysql --socket=/run/mysqld/mysqld.sock -uroot -e "
               CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY 'drillroot';
               GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
-              ALTER USER 'root'@'localhost' IDENTIFIED BY 'drillroot';
+              SET PASSWORD FOR 'root'@'localhost' = PASSWORD('drillroot');
+              SET PASSWORD FOR 'root'@'127.0.0.1' = PASSWORD('drillroot');
               FLUSH PRIVILEGES;"
 
             # 自证连通性：备份/恢复脚本所处位置用 TCP 直连。
