@@ -58,3 +58,37 @@ if [ "$fail" -ne 0 ]; then
 fi
 
 echo "部署清单一致性检查通过（文件 $(printf '%s\n' "$MAN_FILES" | wc -l | tr -d ' ') 个，目录 $(printf '%s\n' "$MAN_DIRS" | wc -l | tr -d ' ') 个）"
+
+# ------------------------------------------------------------
+# 流水线 stage 缩进一致性（防回退）
+#
+# 背景：PR #48 期间，`.cnb.yml` 里「部署脚本与清单门禁」stage 整个被缩进成了
+# 演练 stage 的续行 —— YAML 仍能解析（内容被当成上一条 script 的字符串），
+# 但这条门禁**从来没有真正跑过**，shellcheck / 清单一致性断言全部形同虚设，
+# 且平台校验器不报错。
+#
+# 断言方式：取所有 stage 名（缩进 > 4 的 `- name:` 行）的缩进宽度，必须唯一。
+# 流水线名（缩进 4）与 stage（缩进 8）是两种合法层级，所以只比较 >4 的那组；
+# 同一组内出现两种宽度即说明有条目被意外缩进（多为被续行吞并），直接失败。
+# ------------------------------------------------------------
+CNB_YML="$ROOT/.cnb.yml"
+if [ -f "$CNB_YML" ]; then
+  widths="$(grep -E '^[[:space:]]*- name: ' "$CNB_YML" \
+    | sed -E 's/^( *)- name: .*/\1/' \
+    | awk '{print length}' \
+    | awk '$1 > 4' \
+    | sort -u)"
+  width_count="$(printf '%s\n' "$widths" | grep -c . || true)"
+  if [ "$width_count" -gt 1 ]; then
+    echo ".cnb.yml 中 stage（'- name:'）存在多种缩进宽度，可能有 stage 被误缩进成续行：" >&2
+    grep -nE '^[[:space:]]*- name: ' "$CNB_YML" >&2
+    fail=1
+  fi
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "部署门禁检查失败" >&2
+  exit 1
+fi
+
+echo "流水线 stage 缩进一致性检查通过"
