@@ -20,6 +20,176 @@
 # 所有分支的 PR 都执行（含 master 与 auto/* 等特性分支）
 "**":
   pull_request:
+    # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
+    # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
+    # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
+    # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
+    # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
+    #
+    # 独立成一条 pipeline 的原因：CNB 的构建环境（docker.build）是 **pipeline 级**
+    # 字段，pipeline 内所有 stage 共用同一个默认环境；stage/job 级写 docker 会被
+    # 静默忽略（Stage 只支持 image）。test-gate 需要 drill 镜像（真 MySQL），
+    # 本门禁需要 gate 镜像（bash + shellcheck + grep），二者依赖不兼容，只能拆开。
+    #
+    # 环境镜像见 deploy/docker/gate/Dockerfile；两轮红灯的确切根因见该 stage 注释。
+    - name: deploy-gate
+      runner:
+        cpus: 2
+      docker:
+        build:
+          dockerfile: deploy/docker/gate/Dockerfile
+      stages:
+        - name: 部署脚本与清单门禁
+          # 构建环境由 test-gate 之外的独立 pipeline 提供：
+          #   pipeline 级 docker.build → deploy/docker/gate/Dockerfile
+          #   （alpine:3.22 + bash + shellcheck + grep + git + coreutils）
+          #
+          # ⚠️ 不要在这里写 image: 第三方 shellcheck 镜像。本 stage 连红两轮的根因：
+          #
+          #   koalaman/shellcheck-alpine:stable
+          #     → alpine-minirootfs + shellcheck，有 sh/grep，但**没有 bash**
+          #       → `bash -n` 报 `sh: bash: not found`，返回码 127。
+          #
+          #   koalaman/shellcheck:stable
+          #     → **FROM scratch**，整个镜像只有一个文件 /bin/shellcheck
+          #       （2 层，共 ~3.8MB；Entrypoint=["/bin/shellcheck"]）。
+          #       没有 sh / bash / env / grep / coreutils —— 平台用 `sh -c <script>`
+          #       起 stage，容器 init 阶段即失败：
+          #         exec: "sh": executable file not found in $PATH   (127)
+          #       注意 `docker pull` 是成功的（日志里 code 0），
+          #       失败发生在 runc create，报错看起来和"镜像不存在"完全不像。
+          #
+          # 结论：不依赖任何第三方镜像的 shell 布局，自建镜像（见该 Dockerfile）。
+          # 也**不**在 stage 里现场下载 shellcheck 二进制：那会把 CI 网络
+          # （github.com release / npm registry 任一不通即红）变成门禁的单点依赖，
+          # 且每次构建都要等下载。镜像预装是构建期一次性成本，运行期零网络。
+          script: |
+            set -e
+            # 镜像自证：本 stage 依赖 sh/bash/shellcheck/grep/git，缺一个都跑不动。
+            # 本 stage 连红两轮都源于"镜像里没有预期的命令"，故逐项点名断言，
+            # 让失败信息直接指出缺的是哪个，而不是卡在起容器阶段或半路 shellcheck。
+            for bin in sh bash shellcheck grep git; do
+              command -v "$bin" >/dev/null \
+                || { echo "门禁镜像缺少 $bin，无法执行本 stage"; exit 1; }
+            done
+            bash --version | head -1
+            shellcheck --version | grep -E '^version:'
+            for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
+              echo "--- bash -n $f"
+              bash -n "$f"
+              echo "--- shellcheck $f"
+              # 只看 warning 及以上：ops/one_click_migrate.sh 有若干历史 info
+              # 级提示（SC2015/SC2016），不属本批范围，不该卡住部署门禁；
+              # 真正的 warning/error 仍然会红。
+              shellcheck --severity=warning "$f"
+            done
+
+            # 部署清单与 Dockerfile.web 必须一致（否则静默漏文件）。
+            echo "--- 部署清单一致性"
+            bash deploy/check_manifest.sh
+
+            # 防回退：Dockerfile.entrypoint 不得再 COPY 仓库里不存在的
+            # backend/dist/migrate-docker（#9 的根因）。必须由构建阶段现编。
+            # 只匹配真正的 COPY 指令，注释里提到该路径不算违规。
+            echo "--- 一键部署构建可行性断言"
+            if grep -E '^[[:space:]]*COPY[[:space:]]+backend/dist/migrate-docker' deploy/docker/Dockerfile.entrypoint; then
+              echo "Dockerfile.entrypoint 仍依赖不存在的 backend/dist/migrate-docker，docker build 必失败"
+              exit 1
+            fi
+            grep -Eq 'go build .* -o /out/migrate ./cmd/migrate' deploy/docker/Dockerfile.entrypoint \
+              || { echo "Dockerfile.entrypoint 缺少 migrate 构建阶段"; exit 1; }
+
+            # .dockerignore 必须存在（#61：防止把本机真配置烤进镜像）。
+            echo "--- .dockerignore 存在性"
+            test -f .dockerignore || { echo "缺少根 .dockerignore"; exit 1; }
+            test -f backend/.dockerignore || { echo "缺少 backend/.dockerignore"; exit 1; }
+
+            # 演练环境依赖断言：「备份→恢复演练」镜像必须装对包且装全。
+            # Alpine 的 mysql-client 只给 `mysql`，不含 `mysqldump`（该 stage 第一次
+            # 真跑就因此红了）；演练改为容器内直起 mysqld 后还需要服务端包。
+            # 这条静态断言把同类改动拦在更前面，不必等下一次真跑。
+            echo "--- 演练环境依赖断言"
+            drill_dockerfile='deploy/docker/drill/Dockerfile'
+            grep -q 'mariadb-client' "$drill_dockerfile" \
+              || { echo "$drill_dockerfile 必须安装 mariadb-client（mysql-client 不含 mysqldump）"; exit 1; }
+            if grep -E '^[[:space:]]*RUN[^#]*apk add[^#]*mysql-client' "$drill_dockerfile"; then
+              echo "$drill_dockerfile 使用了 mysql-client：Alpine 下不含 mysqldump，backup.sh 必失败"
+              exit 1
+            fi
+            grep -Eq '^[[:space:]]*RUN[^#]*apk add[^#]* mariadb([[:space:]\\]|$)' "$drill_dockerfile" \
+              || { echo "$drill_dockerfile 必须安装 mariadb 服务端（演练要在容器内直起 mysqld）"; exit 1; }
+            for bin in mysqldump mysqld mariadb-install-db mysql mysqladmin; do
+              grep -q "command -v $bin" "$drill_dockerfile" \
+                || { echo "$drill_dockerfile 缺少 $bin 的构建期预检（command -v $bin）"; exit 1; }
+            done
+
+            # 跨平台 find 断言：backup.sh / restore.sh 会在 Alpine(busybox) 与
+            # Debian(GNU) 两种 find 下跑 —— 演练 stage 用 drill 镜像（Alpine），
+            # 生产容器同样是 Alpine。busybox find **不支持 GNU 专属的 -printf**，
+            # 用了会 "find: unrecognized: -printf" 非 0 退出；脚本里那句
+            # 2>/dev/null 又把报错吞了，于是备份明明成功却静默收尾失败
+            # （CI「备份→恢复演练」stage 的真实失败根因）。
+            # 统一用 `-exec stat -c '%Y %n' {} +`：GNU/busybox 语义一致。
+            echo "--- 跨平台 find 兼容性断言（禁止 GNU 专属 -printf）"
+            for f in deploy/backup.sh deploy/restore.sh; do
+              if grep -nE '(^|[^-[:alnum:]])-printf([[:space:]=]|$)' "$f" \
+                   | grep -vE '^[0-9]+:[[:space:]]*#'; then
+                echo "$f 使用了 GNU 专属的 find -printf：busybox find 不认，Alpine 下必失败"
+                echo "（改用 -exec stat -c '%Y %n' {} +）"
+                exit 1
+              fi
+            done
+
+            # 防回退：门禁不得再依赖第三方 shellcheck 镜像（两个 tag 各缺一半工具链，
+            # 详见本 stage 头部注释），也不得退回"运行期现下 shellcheck"的写法。
+            echo "--- 门禁镜像防回退断言"
+            # 注意：两条断言的正则文本本身也写在 .cnb.yml 里，会匹配到自己。
+            # 因此把匹配串拆成变量拼接，且只扫「非注释 + 非本 stage 脚本」的行：
+            # 脚本内的行必然包含 'grep -' 或变量名，用列表跳过。
+            sc_img='^[[:space:]]*image:[[:space:]]*koalaman/shell'"check"
+            sc_dl='releases/download/.*shell'"check"'|npm i -g shell'"check"
+            if grep -nE "$sc_img" .cnb.yml | grep -vE '^[0-9]+:[[:space:]]*#'; then
+              echo ".cnb.yml 仍指定 koalaman/shellcheck 镜像：该镜像缺 sh 或 bash，stage 必 127"
+              echo "（改用 pipeline 级 docker.build → deploy/docker/gate/Dockerfile）"
+              exit 1
+            fi
+            if grep -nE "$sc_dl" .cnb.yml \
+                 | grep -vE '^[0-9]+:[[:space:]]*#' \
+                 | grep -vE 'sc_dl=|releases/download/\.\*shell|npm i -g shell'; then
+              echo ".cnb.yml 在运行期现下 shellcheck：CI 网络不可达即红，应改为镜像预装"
+              echo "（见 deploy/docker/gate/Dockerfile）"
+              exit 1
+            fi
+            grep -q 'deploy/docker/gate/Dockerfile' .cnb.yml \
+              || { echo ".cnb.yml 未引用 deploy/docker/gate/Dockerfile（门禁环境必须单一来源）"; exit 1; }
+            test -f deploy/docker/gate/Dockerfile \
+              || { echo "缺少 deploy/docker/gate/Dockerfile"; exit 1; }
+            # 演练 stage 的 TCP 可达性断言（防回退）：Alpine 的 mariadb 包在
+            # /etc/my.cnf.d/mariadb-server.cnf 里默认写死 skip-networking，只开 unix
+            # socket（日志 `port: 0`），脚本用 -h127.0.0.1 -P3306 必然连不上。
+            # 必须在 mysqld 命令行显式 `--skip-networking=0` 覆盖配置文件才有效
+            # （`--port=3306` 单独放着不管用）。这条断言把该开关钉住，
+            # 避免有人"顺手清理参数"时又让门禁红回 origin 状态。
+            echo "--- 演练 stage TCP 可达性断言"
+            # 只取「备份→恢复演练」stage 的 script 段。注意不能直接匹配
+            # '- name: 备份→恢复演练' —— 本断言的正则文本本身就写在 .cnb.yml 里，
+            # 会先匹配到自己那行（然后误取下一个 stage 的 script）。
+            # 用「行首 8 空格 + '- name: 备份→恢复演练'」锚定真正的 stage 声明，
+            # 并跳过本 stage 自身（含 '演练 stage TCP 可达性断言' 标记的行）。
+            stage_net="$(awk '
+              /^        - name: 备份→恢复演练/ { f=1; next }
+              f && /script: \|/ { g=1; next }
+              g && /^        - name:/ { exit }
+              g { print }
+            ' .cnb.yml)"
+            # 只认「mysqld 命令行里真的带了 --skip-networking=0」——
+            # 本 stage 的注释里也提到过这个开关，直接 grep 字面量会匹配到注释而漏检。
+            printf '%s\n' "$stage_net" | grep -nE '^[[:space:]]*nohup[[:space:]]+mysqld.*--skip-networking=0' \
+              || { echo "演练 stage 未在 mysqld 命令行显式 --skip-networking=0：Alpine mariadb 默认关 TCP，备份/恢复必连不上"; exit 1; }
+            printf '%s\n' "$stage_net" | grep -q 'port: 3306' \
+              || { echo "演练 stage 缺少 TCP 端口自证（socket 就绪不代表 TCP 在听）"; exit 1; }
+
+            echo "部署门禁通过"
     - name: dependency-risk-check
       # 扫描为轻量任务，降低规格以节省资源
       runner:
@@ -295,103 +465,84 @@
             bash deploy/restore.sh --admin-only --check
             echo "残档已被跳过，演练用的是完整 dump"
 
-      # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
-      # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
-      # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
-      # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
-      # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
-        - name: 部署脚本与清单门禁
-          # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
-          # ⚠️ 选镜像的唯一硬约束是「镜像里必须有 /bin/sh」—— 平台用 `sh -c <script>`
-          # 起 stage，镜像少了解释器就会在起容器阶段直接红，
-          # 表现为：exec: "sh": executable file not found in $PATH（返回码 127）。
-          #
-          # 本轮红灯（cnb-26g-1k2vjn1he-002）就是踩了这个：
-          # 上一轮把 koalaman/shellcheck-alpine（无 bash，`sh: bash: not found` 127）
-          # 换成 koalaman/shellcheck:stable，以为 Debian 底必然规整，实际该镜像
-          # **只有 /bin/bash 一个解释器，没有 /bin/sh，也没有 /usr/bin/env**
-          # （本地 `tar -tf` 与 CNB 实测一致）；于是连 stage 脚本第一行都没跑到，
-          # 容器就起不来 —— 日志只有 docker: OCI runtime create failed ... exec: "sh"。
-          #
-          # 结论：**不要**依赖任何第三方镜像的 shell 布局，用官方 node（Debian 底，
-          # 自带 /bin/sh 与 bash）自己装 shellcheck 二进制。node:24 是官方镜像、
-          # 自带 sh/bash/curl/tar，且与本仓库其它 stage 用的是同一个 tag，可复用层。
+        # --- 前端：单测 + 构建 -----------------------------------------------
+        # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
+        - name: 前端单测与构建
           image: node:24
           script: |
             set -e
-            # shellcheck 用官方静态 tar 包，避免 apt/apk 装依赖污染镜像层；
-            # 版本钉死，保证门禁结果在不同时间点可复现。
-            # 当前 linux 静态包的最新稳定版就是 v0.10.0（不存在 v0.11/v0.12 这类
-            # 版本号，写错会 404）；npm 的 `shellcheck` 包是另一套版本号（latest 4.x），
-            # 所以 npm 兜底**不带版本**，交给其 dist-tags 决定。
-            SHELLCHECK_VERSION=v0.10.0
-            # 解释器自证：平台用 `sh -c` 起 stage，缺 sh 会连脚本都跑不到（见上方注释）。
-            command -v sh >/dev/null \
-              || { echo "镜像缺少 sh，无法执行 stage 脚本"; exit 1; }
-            test -f /tmp/sc-dl-ok || rm -rf /tmp/sc-dl
-            if ! command -v shellcheck >/dev/null 2>&1; then
-              echo "--- 安装 shellcheck $SHELLCHECK_VERSION"
-              arch=$(uname -m)
-              case "$arch" in
-                x86_64|amd64) sc_arch=x86_64 ;;
-                aarch64|arm64) sc_arch=aarch64 ;;
-                *) echo "不支持的架构：$arch"; exit 1 ;;
-              esac
-              mkdir -p /tmp/sc-dl
-              sc_ok=0
-              if command -v curl >/dev/null 2>&1; then
-                # alpine 的 curl 可能是无 HTTPS 后端的 busybox 版，失败即降级，
-                # 不再静默产出空文件（上一轮 `curl -o` 在无依赖下会拿到空 tar 包）。
-                if curl -fsSL --retry 3 -o /tmp/sc-dl/sc.tar.xz \
-                     "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.$sc_arch.tar.xz" && \
-                   [ -s /tmp/sc-dl/sc.tar.xz ]; then
-                  # 解 tar.xz **不依赖 xz 命令**：node 镜像自带 python3，
-                  # 用标准库 tarfile 读 lzma 即可（CI 镜像里连 xz 都没有，
-                  # 用 `tar -xJ` 会 "Cannot exec: No such file or directory"）。
-                  if command -v python3 >/dev/null 2>&1; then
-                    python3 -c "import tarfile,sys; tarfile.open(sys.argv[1]).extractall(sys.argv[2])" \
-                      /tmp/sc-dl/sc.tar.xz /tmp/sc-dl && sc_ok=1
-                  elif command -v xz >/dev/null 2>&1; then
-                    tar -xJf /tmp/sc-dl/sc.tar.xz -C /tmp/sc-dl && sc_ok=1
-                  elif command -v busybox >/dev/null 2>&1 && busybox --list 2>/dev/null | grep -qx unxz; then
-                    busybox unxz -c /tmp/sc-dl/sc.tar.xz > /tmp/sc-dl/sc.tar \
-                      && tar -xf /tmp/sc-dl/sc.tar -C /tmp/sc-dl && sc_ok=1
-                  else
-                    echo "无可用解压器（python3/xz/busybox unxz），跳过 tar.xz 通道"
-                  fi
-                else
-                  echo "curl 下载 shellcheck 失败，尝试 npm 兜底"
-                fi
-              fi
-              if [ "$sc_ok" -ne 1 ] && command -v npm >/dev/null 2>&1; then
-                # npm 上的 shellcheck 是"下载器"包，版本号与上游 release 不同步，
-                # 因此这里不钉版本，由它的 latest tag 决定（仍会拉到同源二进制）。
-                echo "--- npm 安装 shellcheck（备选源）"
-                npm i -g shellcheck --no-audit --no-fund && sc_ok=1
-              fi
-              [ "$sc_ok" -eq 1 ] \
-                || { echo "shellcheck 安装失败（github 与 npm 均不可用）"; exit 1; }
-              if [ -x "/tmp/sc-dl/shellcheck-$SHELLCHECK_VERSION/shellcheck" ]; then
-                install -m 0755 "/tmp/sc-dl/shellcheck-$SHELLCHECK_VERSION/shellcheck" /usr/local/bin/shellcheck
-              fi
-              rm -rf /tmp/sc-dl
-              touch /tmp/sc-dl-ok
-            fi
-            shellcheck --version | head -3
-            # 仍显式自证 bash 存在：本 stage 要跑 `bash -n` 与 `bash deploy/check_manifest.sh`
-            # （check_manifest.sh 用了 pipefail 与 <(...) 进程替换，非 bash 不可）。
-            command -v bash >/dev/null \
-              || { echo "镜像缺少 bash，无法执行 bash -n / check_manifest.sh"; exit 1; }
+            cd frontend
+            npm ci --no-audit --no-fund
+            npm test
+            npm run build
+
+# 直接推送到 master（含合入后的结果）也要跑测试门禁：
+# PR 门禁只覆盖「提 PR 的路径」，直接 push 或合并后的 master 需要一个兜底，
+# 否则红灯仍然可能只存在于 master 而无人知晓。
+master:
+  push:
+    # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
+    # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
+    # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
+    # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
+    # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
+    #
+    # 独立成一条 pipeline 的原因：CNB 的构建环境（docker.build）是 **pipeline 级**
+    # 字段，pipeline 内所有 stage 共用同一个默认环境；stage/job 级写 docker 会被
+    # 静默忽略（Stage 只支持 image）。test-gate 需要 drill 镜像（真 MySQL），
+    # 本门禁需要 gate 镜像（bash + shellcheck + grep），二者依赖不兼容，只能拆开。
+    #
+    # 环境镜像见 deploy/docker/gate/Dockerfile；两轮红灯的确切根因见该 stage 注释。
+    - name: deploy-gate
+      runner:
+        cpus: 2
+      docker:
+        build:
+          dockerfile: deploy/docker/gate/Dockerfile
+      stages:
+        - name: 部署脚本与清单门禁
+          # 构建环境由 test-gate 之外的独立 pipeline 提供：
+          #   pipeline 级 docker.build → deploy/docker/gate/Dockerfile
+          #   （alpine:3.22 + bash + shellcheck + grep + git + coreutils）
+          #
+          # ⚠️ 不要在这里写 image: 第三方 shellcheck 镜像。本 stage 连红两轮的根因：
+          #
+          #   koalaman/shellcheck-alpine:stable
+          #     → alpine-minirootfs + shellcheck，有 sh/grep，但**没有 bash**
+          #       → `bash -n` 报 `sh: bash: not found`，返回码 127。
+          #
+          #   koalaman/shellcheck:stable
+          #     → **FROM scratch**，整个镜像只有一个文件 /bin/shellcheck
+          #       （2 层，共 ~3.8MB；Entrypoint=["/bin/shellcheck"]）。
+          #       没有 sh / bash / env / grep / coreutils —— 平台用 `sh -c <script>`
+          #       起 stage，容器 init 阶段即失败：
+          #         exec: "sh": executable file not found in $PATH   (127)
+          #       注意 `docker pull` 是成功的（日志里 code 0），
+          #       失败发生在 runc create，报错看起来和"镜像不存在"完全不像。
+          #
+          # 结论：不依赖任何第三方镜像的 shell 布局，自建镜像（见该 Dockerfile）。
+          # 也**不**在 stage 里现场下载 shellcheck 二进制：那会把 CI 网络
+          # （github.com release / npm registry 任一不通即红）变成门禁的单点依赖，
+          # 且每次构建都要等下载。镜像预装是构建期一次性成本，运行期零网络。
+          script: |
+            set -e
+            # 镜像自证：本 stage 依赖 sh/bash/shellcheck/grep/git，缺一个都跑不动。
+            # 本 stage 连红两轮都源于"镜像里没有预期的命令"，故逐项点名断言，
+            # 让失败信息直接指出缺的是哪个，而不是卡在起容器阶段或半路 shellcheck。
+            for bin in sh bash shellcheck grep git; do
+              command -v "$bin" >/dev/null \
+                || { echo "门禁镜像缺少 $bin，无法执行本 stage"; exit 1; }
+            done
+            bash --version | head -1
+            shellcheck --version | grep -E '^version:'
             for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
               echo "--- bash -n $f"
               bash -n "$f"
-              if command -v shellcheck >/dev/null 2>&1; then
-                echo "--- shellcheck $f"
-                # 只看 warning 及以上：ops/one_click_migrate.sh 有若干历史 info
-                # 级提示（SC2015/SC2016），不属本批范围，不该卡住部署门禁；
-                # 真正的 warning/error 仍然会红。
-                shellcheck --severity=warning "$f"
-              fi
+              echo "--- shellcheck $f"
+              # 只看 warning 及以上：ops/one_click_migrate.sh 有若干历史 info
+              # 级提示（SC2015/SC2016），不属本批范围，不该卡住部署门禁；
+              # 真正的 warning/error 仍然会红。
+              shellcheck --severity=warning "$f"
             done
 
             # 部署清单与 Dockerfile.web 必须一致（否则静默漏文件）。
@@ -449,6 +600,31 @@
                 exit 1
               fi
             done
+
+            # 防回退：门禁不得再依赖第三方 shellcheck 镜像（两个 tag 各缺一半工具链，
+            # 详见本 stage 头部注释），也不得退回"运行期现下 shellcheck"的写法。
+            echo "--- 门禁镜像防回退断言"
+            # 注意：两条断言的正则文本本身也写在 .cnb.yml 里，会匹配到自己。
+            # 因此把匹配串拆成变量拼接，且只扫「非注释 + 非本 stage 脚本」的行：
+            # 脚本内的行必然包含 'grep -' 或变量名，用列表跳过。
+            sc_img='^[[:space:]]*image:[[:space:]]*koalaman/shell'"check"
+            sc_dl='releases/download/.*shell'"check"'|npm i -g shell'"check"
+            if grep -nE "$sc_img" .cnb.yml | grep -vE '^[0-9]+:[[:space:]]*#'; then
+              echo ".cnb.yml 仍指定 koalaman/shellcheck 镜像：该镜像缺 sh 或 bash，stage 必 127"
+              echo "（改用 pipeline 级 docker.build → deploy/docker/gate/Dockerfile）"
+              exit 1
+            fi
+            if grep -nE "$sc_dl" .cnb.yml \
+                 | grep -vE '^[0-9]+:[[:space:]]*#' \
+                 | grep -vE 'sc_dl=|releases/download/\.\*shell|npm i -g shell'; then
+              echo ".cnb.yml 在运行期现下 shellcheck：CI 网络不可达即红，应改为镜像预装"
+              echo "（见 deploy/docker/gate/Dockerfile）"
+              exit 1
+            fi
+            grep -q 'deploy/docker/gate/Dockerfile' .cnb.yml \
+              || { echo ".cnb.yml 未引用 deploy/docker/gate/Dockerfile（门禁环境必须单一来源）"; exit 1; }
+            test -f deploy/docker/gate/Dockerfile \
+              || { echo "缺少 deploy/docker/gate/Dockerfile"; exit 1; }
             # 演练 stage 的 TCP 可达性断言（防回退）：Alpine 的 mariadb 包在
             # /etc/my.cnf.d/mariadb-server.cnf 里默认写死 skip-networking，只开 unix
             # socket（日志 `port: 0`），脚本用 -h127.0.0.1 -P3306 必然连不上。
@@ -456,35 +632,25 @@
             # （`--port=3306` 单独放着不管用）。这条断言把该开关钉住，
             # 避免有人"顺手清理参数"时又让门禁红回 origin 状态。
             echo "--- 演练 stage TCP 可达性断言"
+            # 只取「备份→恢复演练」stage 的 script 段。注意不能直接匹配
+            # '- name: 备份→恢复演练' —— 本断言的正则文本本身就写在 .cnb.yml 里，
+            # 会先匹配到自己那行（然后误取下一个 stage 的 script）。
+            # 用「行首 8 空格 + '- name: 备份→恢复演练'」锚定真正的 stage 声明，
+            # 并跳过本 stage 自身（含 '演练 stage TCP 可达性断言' 标记的行）。
             stage_net="$(awk '
-              /- name: 备份→恢复演练/ { f=1 }
+              /^        - name: 备份→恢复演练/ { f=1; next }
               f && /script: \|/ { g=1; next }
               g && /^        - name:/ { exit }
               g { print }
             ' .cnb.yml)"
-            printf '%s\n' "$stage_net" | grep -q -- '--skip-networking=0' \
-              || { echo "演练 stage 未显式 --skip-networking=0：Alpine mariadb 默认关 TCP，备份/恢复必连不上"; exit 1; }
+            # 只认「mysqld 命令行里真的带了 --skip-networking=0」——
+            # 本 stage 的注释里也提到过这个开关，直接 grep 字面量会匹配到注释而漏检。
+            printf '%s\n' "$stage_net" | grep -nE '^[[:space:]]*nohup[[:space:]]+mysqld.*--skip-networking=0' \
+              || { echo "演练 stage 未在 mysqld 命令行显式 --skip-networking=0：Alpine mariadb 默认关 TCP，备份/恢复必连不上"; exit 1; }
             printf '%s\n' "$stage_net" | grep -q 'port: 3306' \
               || { echo "演练 stage 缺少 TCP 端口自证（socket 就绪不代表 TCP 在听）"; exit 1; }
 
             echo "部署门禁通过"
-
-        # --- 前端：单测 + 构建 -----------------------------------------------
-        # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
-        - name: 前端单测与构建
-          image: node:24
-          script: |
-            set -e
-            cd frontend
-            npm ci --no-audit --no-fund
-            npm test
-            npm run build
-
-# 直接推送到 master（含合入后的结果）也要跑测试门禁：
-# PR 门禁只覆盖「提 PR 的路径」，直接 push 或合并后的 master 需要一个兜底，
-# 否则红灯仍然可能只存在于 master 而无人知晓。
-master:
-  push:
     - name: test-gate
       runner:
         cpus: 4
@@ -730,180 +896,6 @@ master:
             touch "$BACKUP_DIR/dwz_admin-20990101-000000.sql.gz"
             bash deploy/restore.sh --admin-only --check
             echo "残档已被跳过，演练用的是完整 dump"
-
-      # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
-      # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
-      # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
-      # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
-      # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
-        - name: 部署脚本与清单门禁
-          # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
-          # ⚠️ 选镜像的唯一硬约束是「镜像里必须有 /bin/sh」—— 平台用 `sh -c <script>`
-          # 起 stage，镜像少了解释器就会在起容器阶段直接红，
-          # 表现为：exec: "sh": executable file not found in $PATH（返回码 127）。
-          #
-          # 本轮红灯（cnb-26g-1k2vjn1he-002）就是踩了这个：
-          # 上一轮把 koalaman/shellcheck-alpine（无 bash，`sh: bash: not found` 127）
-          # 换成 koalaman/shellcheck:stable，以为 Debian 底必然规整，实际该镜像
-          # **只有 /bin/bash 一个解释器，没有 /bin/sh，也没有 /usr/bin/env**
-          # （本地 `tar -tf` 与 CNB 实测一致）；于是连 stage 脚本第一行都没跑到，
-          # 容器就起不来 —— 日志只有 docker: OCI runtime create failed ... exec: "sh"。
-          #
-          # 结论：**不要**依赖任何第三方镜像的 shell 布局，用官方 node（Debian 底，
-          # 自带 /bin/sh 与 bash）自己装 shellcheck 二进制。node:24 是官方镜像、
-          # 自带 sh/bash/curl/tar，且与本仓库其它 stage 用的是同一个 tag，可复用层。
-          image: node:24
-          script: |
-            set -e
-            # shellcheck 用官方静态 tar 包，避免 apt/apk 装依赖污染镜像层；
-            # 版本钉死，保证门禁结果在不同时间点可复现。
-            # 当前 linux 静态包的最新稳定版就是 v0.10.0（不存在 v0.11/v0.12 这类
-            # 版本号，写错会 404）；npm 的 `shellcheck` 包是另一套版本号（latest 4.x），
-            # 所以 npm 兜底**不带版本**，交给其 dist-tags 决定。
-            SHELLCHECK_VERSION=v0.10.0
-            # 解释器自证：平台用 `sh -c` 起 stage，缺 sh 会连脚本都跑不到（见上方注释）。
-            command -v sh >/dev/null \
-              || { echo "镜像缺少 sh，无法执行 stage 脚本"; exit 1; }
-            test -f /tmp/sc-dl-ok || rm -rf /tmp/sc-dl
-            if ! command -v shellcheck >/dev/null 2>&1; then
-              echo "--- 安装 shellcheck $SHELLCHECK_VERSION"
-              arch=$(uname -m)
-              case "$arch" in
-                x86_64|amd64) sc_arch=x86_64 ;;
-                aarch64|arm64) sc_arch=aarch64 ;;
-                *) echo "不支持的架构：$arch"; exit 1 ;;
-              esac
-              mkdir -p /tmp/sc-dl
-              sc_ok=0
-              if command -v curl >/dev/null 2>&1; then
-                # alpine 的 curl 可能是无 HTTPS 后端的 busybox 版，失败即降级，
-                # 不再静默产出空文件（上一轮 `curl -o` 在无依赖下会拿到空 tar 包）。
-                if curl -fsSL --retry 3 -o /tmp/sc-dl/sc.tar.xz \
-                     "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.$sc_arch.tar.xz" && \
-                   [ -s /tmp/sc-dl/sc.tar.xz ]; then
-                  # 解 tar.xz **不依赖 xz 命令**：node 镜像自带 python3，
-                  # 用标准库 tarfile 读 lzma 即可（CI 镜像里连 xz 都没有，
-                  # 用 `tar -xJ` 会 "Cannot exec: No such file or directory"）。
-                  if command -v python3 >/dev/null 2>&1; then
-                    python3 -c "import tarfile,sys; tarfile.open(sys.argv[1]).extractall(sys.argv[2])" \
-                      /tmp/sc-dl/sc.tar.xz /tmp/sc-dl && sc_ok=1
-                  elif command -v xz >/dev/null 2>&1; then
-                    tar -xJf /tmp/sc-dl/sc.tar.xz -C /tmp/sc-dl && sc_ok=1
-                  elif command -v busybox >/dev/null 2>&1 && busybox --list 2>/dev/null | grep -qx unxz; then
-                    busybox unxz -c /tmp/sc-dl/sc.tar.xz > /tmp/sc-dl/sc.tar \
-                      && tar -xf /tmp/sc-dl/sc.tar -C /tmp/sc-dl && sc_ok=1
-                  else
-                    echo "无可用解压器（python3/xz/busybox unxz），跳过 tar.xz 通道"
-                  fi
-                else
-                  echo "curl 下载 shellcheck 失败，尝试 npm 兜底"
-                fi
-              fi
-              if [ "$sc_ok" -ne 1 ] && command -v npm >/dev/null 2>&1; then
-                # npm 上的 shellcheck 是"下载器"包，版本号与上游 release 不同步，
-                # 因此这里不钉版本，由它的 latest tag 决定（仍会拉到同源二进制）。
-                echo "--- npm 安装 shellcheck（备选源）"
-                npm i -g shellcheck --no-audit --no-fund && sc_ok=1
-              fi
-              [ "$sc_ok" -eq 1 ] \
-                || { echo "shellcheck 安装失败（github 与 npm 均不可用）"; exit 1; }
-              if [ -x "/tmp/sc-dl/shellcheck-$SHELLCHECK_VERSION/shellcheck" ]; then
-                install -m 0755 "/tmp/sc-dl/shellcheck-$SHELLCHECK_VERSION/shellcheck" /usr/local/bin/shellcheck
-              fi
-              rm -rf /tmp/sc-dl
-              touch /tmp/sc-dl-ok
-            fi
-            shellcheck --version | head -3
-            # 仍显式自证 bash 存在：本 stage 要跑 `bash -n` 与 `bash deploy/check_manifest.sh`
-            # （check_manifest.sh 用了 pipefail 与 <(...) 进程替换，非 bash 不可）。
-            command -v bash >/dev/null \
-              || { echo "镜像缺少 bash，无法执行 bash -n / check_manifest.sh"; exit 1; }
-            for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
-              echo "--- bash -n $f"
-              bash -n "$f"
-              if command -v shellcheck >/dev/null 2>&1; then
-                echo "--- shellcheck $f"
-                # 只看 warning 及以上：ops/one_click_migrate.sh 有若干历史 info
-                # 级提示（SC2015/SC2016），不属本批范围，不该卡住部署门禁；
-                # 真正的 warning/error 仍然会红。
-                shellcheck --severity=warning "$f"
-              fi
-            done
-
-            # 部署清单与 Dockerfile.web 必须一致（否则静默漏文件）。
-            echo "--- 部署清单一致性"
-            bash deploy/check_manifest.sh
-
-            # 防回退：Dockerfile.entrypoint 不得再 COPY 仓库里不存在的
-            # backend/dist/migrate-docker（#9 的根因）。必须由构建阶段现编。
-            # 只匹配真正的 COPY 指令，注释里提到该路径不算违规。
-            echo "--- 一键部署构建可行性断言"
-            if grep -E '^[[:space:]]*COPY[[:space:]]+backend/dist/migrate-docker' deploy/docker/Dockerfile.entrypoint; then
-              echo "Dockerfile.entrypoint 仍依赖不存在的 backend/dist/migrate-docker，docker build 必失败"
-              exit 1
-            fi
-            grep -Eq 'go build .* -o /out/migrate ./cmd/migrate' deploy/docker/Dockerfile.entrypoint \
-              || { echo "Dockerfile.entrypoint 缺少 migrate 构建阶段"; exit 1; }
-
-            # .dockerignore 必须存在（#61：防止把本机真配置烤进镜像）。
-            echo "--- .dockerignore 存在性"
-            test -f .dockerignore || { echo "缺少根 .dockerignore"; exit 1; }
-            test -f backend/.dockerignore || { echo "缺少 backend/.dockerignore"; exit 1; }
-
-            # 演练环境依赖断言：「备份→恢复演练」镜像必须装对包且装全。
-            # Alpine 的 mysql-client 只给 `mysql`，不含 `mysqldump`（该 stage 第一次
-            # 真跑就因此红了）；演练改为容器内直起 mysqld 后还需要服务端包。
-            # 这条静态断言把同类改动拦在更前面，不必等下一次真跑。
-            echo "--- 演练环境依赖断言"
-            drill_dockerfile='deploy/docker/drill/Dockerfile'
-            grep -q 'mariadb-client' "$drill_dockerfile" \
-              || { echo "$drill_dockerfile 必须安装 mariadb-client（mysql-client 不含 mysqldump）"; exit 1; }
-            if grep -E '^[[:space:]]*RUN[^#]*apk add[^#]*mysql-client' "$drill_dockerfile"; then
-              echo "$drill_dockerfile 使用了 mysql-client：Alpine 下不含 mysqldump，backup.sh 必失败"
-              exit 1
-            fi
-            grep -Eq '^[[:space:]]*RUN[^#]*apk add[^#]* mariadb([[:space:]\\]|$)' "$drill_dockerfile" \
-              || { echo "$drill_dockerfile 必须安装 mariadb 服务端（演练要在容器内直起 mysqld）"; exit 1; }
-            for bin in mysqldump mysqld mariadb-install-db mysql mysqladmin; do
-              grep -q "command -v $bin" "$drill_dockerfile" \
-                || { echo "$drill_dockerfile 缺少 $bin 的构建期预检（command -v $bin）"; exit 1; }
-            done
-
-            # 跨平台 find 断言：backup.sh / restore.sh 会在 Alpine(busybox) 与
-            # Debian(GNU) 两种 find 下跑 —— 演练 stage 用 drill 镜像（Alpine），
-            # 生产容器同样是 Alpine。busybox find **不支持 GNU 专属的 -printf**，
-            # 用了会 "find: unrecognized: -printf" 非 0 退出；脚本里那句
-            # 2>/dev/null 又把报错吞了，于是备份明明成功却静默收尾失败
-            # （CI「备份→恢复演练」stage 的真实失败根因）。
-            # 统一用 `-exec stat -c '%Y %n' {} +`：GNU/busybox 语义一致。
-            echo "--- 跨平台 find 兼容性断言（禁止 GNU 专属 -printf）"
-            for f in deploy/backup.sh deploy/restore.sh; do
-              if grep -nE '(^|[^-[:alnum:]])-printf([[:space:]=]|$)' "$f" \
-                   | grep -vE '^[0-9]+:[[:space:]]*#'; then
-                echo "$f 使用了 GNU 专属的 find -printf：busybox find 不认，Alpine 下必失败"
-                echo "（改用 -exec stat -c '%Y %n' {} +）"
-                exit 1
-              fi
-            done
-            # 演练 stage 的 TCP 可达性断言（防回退）：Alpine 的 mariadb 包在
-            # /etc/my.cnf.d/mariadb-server.cnf 里默认写死 skip-networking，只开 unix
-            # socket（日志 `port: 0`），脚本用 -h127.0.0.1 -P3306 必然连不上。
-            # 必须在 mysqld 命令行显式 `--skip-networking=0` 覆盖配置文件才有效
-            # （`--port=3306` 单独放着不管用）。这条断言把该开关钉住，
-            # 避免有人"顺手清理参数"时又让门禁红回 origin 状态。
-            echo "--- 演练 stage TCP 可达性断言"
-            stage_net="$(awk '
-              /- name: 备份→恢复演练/ { f=1 }
-              f && /script: \|/ { g=1; next }
-              g && /^        - name:/ { exit }
-              g { print }
-            ' .cnb.yml)"
-            printf '%s\n' "$stage_net" | grep -q -- '--skip-networking=0' \
-              || { echo "演练 stage 未显式 --skip-networking=0：Alpine mariadb 默认关 TCP，备份/恢复必连不上"; exit 1; }
-            printf '%s\n' "$stage_net" | grep -q 'port: 3306' \
-              || { echo "演练 stage 缺少 TCP 端口自证（socket 就绪不代表 TCP 在听）"; exit 1; }
-
-            echo "部署门禁通过"
 
         # --- 前端：单测 + 构建 -----------------------------------------------
         # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
