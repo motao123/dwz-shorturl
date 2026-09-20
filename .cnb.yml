@@ -257,11 +257,11 @@
             bash deploy/restore.sh --admin-only --check
             echo "残档已被跳过，演练用的是完整 dump"
 
-        # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
-        # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
-        # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
-        # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
-        # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
+      # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
+      # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
+      # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
+      # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
+      # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
         - name: 部署脚本与清单门禁
           # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
           image: koalaman/shellcheck-alpine:stable
@@ -544,11 +544,11 @@ master:
             bash deploy/restore.sh --admin-only --check
             echo "残档已被跳过，演练用的是完整 dump"
 
-        # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
-        # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
-        # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
-        # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
-        # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
+      # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
+      # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
+      # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
+      # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
+      # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
         - name: 部署脚本与清单门禁
           # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
           image: koalaman/shellcheck-alpine:stable
