@@ -51,6 +51,12 @@
       # 证明"备份能恢复"，那正是本批要修的东西。
       services:
         - docker
+      # 流水线级默认构建环境 = drill 镜像（docker CLI + bash/gzip + mysql 客户端）。
+      # 只有「备份→恢复演练」stage 用默认环境；其余 stage 各自声明 image 覆盖。
+      # 必须放在 pipeline 级：Stage 不支持 docker.build，只有 image。
+      docker:
+        build:
+          dockerfile: deploy/docker/drill/Dockerfile
       stages:
         # --- Go：编译 + 单测 -------------------------------------------------
         # 任一阶段失败即中断，不再往下跑（快速失败）。
@@ -122,11 +128,12 @@
         # 导入临时库比对表数量 —— 失败即说明备份链路坏了。
         # 需要 docker service（见本 pipeline 的 services）。
         - name: 备份→恢复演练
-          # 专用构建环境：docker CLI（DinD）+ bash/gzip + mysql 客户端，缺一不可。
-          # 见 deploy/docker/drill/Dockerfile 的说明（没有任何官方镜像三者兼具）。
-          docker:
-            build:
-              dockerfile: deploy/docker/drill/Dockerfile
+          # 注意：这里**不能**写 stage/job 级的 docker.build —— Stage 只支持 image，
+          # job 级的 docker 键会被静默忽略（平台校验器也不报错），于是本 stage 会退回
+          # 默认构建环境 cnbcool/default-build-env，那里没有 mysqldump，backup.sh 直接
+          # "mysqldump: command not found"（PR #48 首次真跑就踩了这个静默坑）。
+          # 正确做法：把 drill 镜像声明在 **pipeline 级** docker.build（见本流水线头部），
+          # 本 stage 不写 image，即继承该默认环境；其它 stage 各自用 image 覆盖。
           script: |
             set -e
             # 起一个临时 MySQL（独立网络，容器名固定，脚本内用 127.0.0.1 走端口映射）
@@ -242,6 +249,12 @@ master:
       # 证明"备份能恢复"，那正是本批要修的东西。
       services:
         - docker
+      # 流水线级默认构建环境 = drill 镜像（docker CLI + bash/gzip + mysql 客户端）。
+      # 只有「备份→恢复演练」stage 用默认环境；其余 stage 各自声明 image 覆盖。
+      # 必须放在 pipeline 级：Stage 不支持 docker.build，只有 image。
+      docker:
+        build:
+          dockerfile: deploy/docker/drill/Dockerfile
       stages:
         - name: Go 编译与单测
           image: golang:1.26
@@ -308,11 +321,12 @@ master:
         # 导入临时库比对表数量 —— 失败即说明备份链路坏了。
         # 需要 docker service（见本 pipeline 的 services）。
         - name: 备份→恢复演练
-          # 专用构建环境：docker CLI（DinD）+ bash/gzip + mysql 客户端，缺一不可。
-          # 见 deploy/docker/drill/Dockerfile 的说明（没有任何官方镜像三者兼具）。
-          docker:
-            build:
-              dockerfile: deploy/docker/drill/Dockerfile
+          # 注意：这里**不能**写 stage/job 级的 docker.build —— Stage 只支持 image，
+          # job 级的 docker 键会被静默忽略（平台校验器也不报错），于是本 stage 会退回
+          # 默认构建环境 cnbcool/default-build-env，那里没有 mysqldump，backup.sh 直接
+          # "mysqldump: command not found"（PR #48 首次真跑就踩了这个静默坑）。
+          # 正确做法：把 drill 镜像声明在 **pipeline 级** docker.build（见本流水线头部），
+          # 本 stage 不写 image，即继承该默认环境；其它 stage 各自用 image 覆盖。
           script: |
             set -e
             # 起一个临时 MySQL（独立网络，容器名固定，脚本内用 127.0.0.1 走端口映射）
