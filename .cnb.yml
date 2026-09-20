@@ -136,13 +136,19 @@
           # 本 stage 不写 image，即继承该默认环境；其它 stage 各自用 image 覆盖。
           script: |
             set -e
-            # 起一个临时 MySQL（独立网络，容器名固定，脚本内用 127.0.0.1 走端口映射）
-            docker network create dwz-drill-net >/dev/null 2>&1 || true
-            docker run -d --name dwz-drill-mysql --network dwz-drill-net \
-              -e MYSQL_ROOT_PASSWORD=drillroot -p 33061:3306 mysql:8.0 \
-              --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-            cleanup_drill() { docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true; docker network rm dwz-drill-net >/dev/null 2>&1 || true; }
+            # 起一个临时 MySQL（host 网络，容器名固定）：备份/恢复脚本位于本 stage
+            # 容器内，必须能从 127.0.0.1:3306 直连，所以**不做端口映射**。
+            # 原因：本 Runner 的 docker daemon 跑在 WSL2 里（stage 日志里 docker 时间戳是
+            # UTC，宿主是 CST），DinD 的 -p 端口发布走的是 WSL2 的 NAT 代理，从 stage
+            # 容器访问 127.0.0.1:<映射端口> 会 115/EINPROGRESS 被拒（实测：同参数在
+            # userland-proxy 下必失败，`docker exec` 进容器内连 127.0.0.1 反而正常）。
+            # host 网络下没有 NAT 这一跳，脚本连的就是 MySQL 自己监听的地址。
+            docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true
+            cleanup_drill() { docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true; }
             trap cleanup_drill EXIT
+            docker run -d --name dwz-drill-mysql --network host \
+              -e MYSQL_ROOT_PASSWORD=drillroot mysql:8.0 \
+              --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
             echo "等待 MySQL 就绪..."
             for i in $(seq 1 60); do
               if docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent >/dev/null 2>&1; then echo "就绪(${i}s)"; break; fi
@@ -150,12 +156,29 @@
             done
             docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent
 
+            # 自证连通性：**宿主侧进程**（就是 backup.sh/restore.sh 所处的位置）能直连。
+            # 这条断言把"容器内 healthy"与"脚本真的连得上"区分开 —— 上一轮 CI 的失败
+            # 正是这两者不一致（容器内 ping 通、宿主连不上），却拖到 backup.sh 才暴露。
+            echo "--- 宿主到 MySQL 连通性自检"
+            for i in $(seq 1 30); do
+              if MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP -N -B -e 'SELECT 1' >/dev/null 2>&1; then
+                echo "宿主侧连通 OK（127.0.0.1:3306）"; break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "宿主侧连不上 127.0.0.1:3306"
+                docker ps -a --filter name=dwz-drill-mysql
+                docker logs --tail 30 dwz-drill-mysql 2>&1 || true
+                exit 1
+              fi
+              sleep 2
+            done
+
             # 建两个库并灌入真实 schema（用仓库里的迁移文件，不用假数据）。
             docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot -e "CREATE DATABASE dwz_admin CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE DATABASE dwz_public CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
             docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_admin < backend/migrations/schema.sql
             docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_public < backend/migrations/php/add_webhook_queue.sql
 
-            export DB_HOST=127.0.0.1 DB_PORT=33061
+            export DB_HOST=127.0.0.1 DB_PORT=3306
             export DB_ADMIN_USER=root DB_ADMIN_PASS=drillroot DB_ADMIN_NAME=dwz_admin
             export DB_PUBLIC_USER=root DB_PUBLIC_PASS=drillroot DB_PUBLIC_NAME=dwz_public
             export BACKUP_DIR=/tmp/dwz-backups
@@ -329,13 +352,19 @@ master:
           # 本 stage 不写 image，即继承该默认环境；其它 stage 各自用 image 覆盖。
           script: |
             set -e
-            # 起一个临时 MySQL（独立网络，容器名固定，脚本内用 127.0.0.1 走端口映射）
-            docker network create dwz-drill-net >/dev/null 2>&1 || true
-            docker run -d --name dwz-drill-mysql --network dwz-drill-net \
-              -e MYSQL_ROOT_PASSWORD=drillroot -p 33061:3306 mysql:8.0 \
-              --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-            cleanup_drill() { docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true; docker network rm dwz-drill-net >/dev/null 2>&1 || true; }
+            # 起一个临时 MySQL（host 网络，容器名固定）：备份/恢复脚本位于本 stage
+            # 容器内，必须能从 127.0.0.1:3306 直连，所以**不做端口映射**。
+            # 原因：本 Runner 的 docker daemon 跑在 WSL2 里（stage 日志里 docker 时间戳是
+            # UTC，宿主是 CST），DinD 的 -p 端口发布走的是 WSL2 的 NAT 代理，从 stage
+            # 容器访问 127.0.0.1:<映射端口> 会 115/EINPROGRESS 被拒（实测：同参数在
+            # userland-proxy 下必失败，`docker exec` 进容器内连 127.0.0.1 反而正常）。
+            # host 网络下没有 NAT 这一跳，脚本连的就是 MySQL 自己监听的地址。
+            docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true
+            cleanup_drill() { docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true; }
             trap cleanup_drill EXIT
+            docker run -d --name dwz-drill-mysql --network host \
+              -e MYSQL_ROOT_PASSWORD=drillroot mysql:8.0 \
+              --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
             echo "等待 MySQL 就绪..."
             for i in $(seq 1 60); do
               if docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent >/dev/null 2>&1; then echo "就绪(${i}s)"; break; fi
@@ -343,12 +372,29 @@ master:
             done
             docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent
 
+            # 自证连通性：**宿主侧进程**（就是 backup.sh/restore.sh 所处的位置）能直连。
+            # 这条断言把"容器内 healthy"与"脚本真的连得上"区分开 —— 上一轮 CI 的失败
+            # 正是这两者不一致（容器内 ping 通、宿主连不上），却拖到 backup.sh 才暴露。
+            echo "--- 宿主到 MySQL 连通性自检"
+            for i in $(seq 1 30); do
+              if MYSQL_PWD=drillroot mysql -h127.0.0.1 -P3306 -uroot --protocol=TCP -N -B -e 'SELECT 1' >/dev/null 2>&1; then
+                echo "宿主侧连通 OK（127.0.0.1:3306）"; break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "宿主侧连不上 127.0.0.1:3306"
+                docker ps -a --filter name=dwz-drill-mysql
+                docker logs --tail 30 dwz-drill-mysql 2>&1 || true
+                exit 1
+              fi
+              sleep 2
+            done
+
             # 建两个库并灌入真实 schema（用仓库里的迁移文件，不用假数据）。
             docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot -e "CREATE DATABASE dwz_admin CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE DATABASE dwz_public CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
             docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_admin < backend/migrations/schema.sql
             docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_public < backend/migrations/php/add_webhook_queue.sql
 
-            export DB_HOST=127.0.0.1 DB_PORT=33061
+            export DB_HOST=127.0.0.1 DB_PORT=3306
             export DB_ADMIN_USER=root DB_ADMIN_PASS=drillroot DB_ADMIN_NAME=dwz_admin
             export DB_PUBLIC_USER=root DB_PUBLIC_PASS=drillroot DB_PUBLIC_NAME=dwz_public
             export BACKUP_DIR=/tmp/dwz-backups
