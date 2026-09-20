@@ -160,18 +160,23 @@ for prefix in "$DB_ADMIN_NAME" "$DB_PUBLIC_NAME"; do
   # 按修改时间倒序，保留最近 $KEEP 份（文件名含时间戳，同一次运行的两个库
   # 时间戳相同，排序稳定）。
   #
-  # ⚠️ 不要用 `find ... -printf`：**busybox 的 find 没有 -printf**
-  # （Alpine 上一执行就 "find: unrecognized: -printf"，返回码 1）。
-  # 本脚本在本地 Debian/GNU 环境跑得好好的，进 Alpine 容器（drill 镜像）
-  # 立刻红 —— PR #48 第 7 轮 CI 就卡在这一行：两份 dump 已经备份成功、
-  # 日志都打出来了，紧接着因 `set -e` 被这条 find 的非零退出终止。
-  # 改用 `-exec ls -1t {} +`：POSIX 行为，busybox/GNU 都支持，
-  # 且 find 直接输出文件路径、由 ls 按 mtime 排序，避免 SC2012 的拆词问题。
+  # ⚠️ 不要用 `find -printf`：那是 **GNU findutils 专属**扩展，Alpine/busybox
+  # 的 find 不认，会报 "find: unrecognized: -printf" 并以非 0 退出；再叠加
+  # 这里的 2>/dev/null 把报错吞掉、脚本又是 set -euo pipefail，整条命令会在
+  # 备份**已经成功落盘之后**静默退出 1 —— 表现为"两库都已备份成功却立刻收尾失败"，
+  # 排查极难。本机是 Debian/GNU find 所以怎么都绿，进 Alpine 才红。
+  #
+  # 用 `-exec stat -c '%Y %n' {} +`（%Y=mtime 秒，%n=路径）而不是 `-exec ls -1t {} +`：
+  # 两者都能在 busybox/GNU 下按 mtime 排序，但 `-exec … +` 在文件多到超过命令行
+  # 长度上限时会**分批调用**；`ls -1t` 只在批内有序，跨批就会错序，轮转可能删错；
+  # `stat` 输出交给统一的 `sort -rn` 则是全局有序，且 `%n` 落在最后一个字段，
+  # 配合 `IFS= read -r _ts old` 天然支持带空格的文件名。
   # 只轮转最终产物（*.sql.gz），绝不匹配 .part 中间文件。
   find "$BACKUP_DIR" -maxdepth 1 -type f -name "${prefix}-*${SUFFIX}" \
-       -exec ls -1t {} + 2>/dev/null \
+       -exec stat -c '%Y %n' {} + 2>/dev/null \
+    | sort -rn \
     | tail -n +$((KEEP + 1)) \
-    | while IFS= read -r old; do
+    | while read -r _ts old; do
         [ -n "$old" ] || continue
         rm -f "$old"
         echo "==> 已清理旧备份 $old"

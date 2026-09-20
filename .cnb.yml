@@ -263,6 +263,13 @@
             # 显式断言备份成功且真的产出了两份非空 dump。
             # #55 教训：backup.sh 历史上会把失败当成功返回 0，只靠 "脚本没报错"
             # 判定备份成功等于没验；这里用产物存在性做二次兜底。
+            #
+            # ⚠️ 第 7 轮真跑曾在这里"两库都备份成功、然后没有然后了"并返回 1：
+            # backup.sh 末尾的备份轮转用了 GNU 专属的 `find -printf`，而本 stage 的
+            # drill 镜像是 **Alpine**，busybox `find` 不认 `-printf` → 非 0 退出，
+            # 报错又被脚本里的 2>/dev/null 吞掉。已改为 `find … -exec stat -c '%Y %n' {} +`
+            # （GNU/busybox 语义一致），并在部署门禁加了禁止 `-printf` 的静态断言。
+            # 所以：**本 stage 的脚本必须同时兼容 GNU 与 busybox 工具链**。
             bash deploy/backup.sh
             ls -la "$BACKUP_DIR"
             for f in "$BACKUP_DIR"/dwz_admin-*.sql.gz "$BACKUP_DIR"/dwz_public-*.sql.gz; do
@@ -348,6 +355,23 @@
             for bin in mysqldump mysqld mariadb-install-db mysql mysqladmin; do
               grep -q "command -v $bin" "$drill_dockerfile" \
                 || { echo "$drill_dockerfile 缺少 $bin 的构建期预检（command -v $bin）"; exit 1; }
+            done
+
+            # 跨平台 find 断言：backup.sh / restore.sh 会在 Alpine(busybox) 与
+            # Debian(GNU) 两种 find 下跑 —— 演练 stage 用 drill 镜像（Alpine），
+            # 生产容器同样是 Alpine。busybox find **不支持 GNU 专属的 -printf**，
+            # 用了会 "find: unrecognized: -printf" 非 0 退出；脚本里那句
+            # 2>/dev/null 又把报错吞了，于是备份明明成功却静默收尾失败
+            # （CI「备份→恢复演练」stage 的真实失败根因）。
+            # 统一用 `-exec stat -c '%Y %n' {} +`：GNU/busybox 语义一致。
+            echo "--- 跨平台 find 兼容性断言（禁止 GNU 专属 -printf）"
+            for f in deploy/backup.sh deploy/restore.sh; do
+              if grep -nE '(^|[^-[:alnum:]])-printf([[:space:]=]|$)' "$f" \
+                   | grep -vE '^[0-9]+:[[:space:]]*#'; then
+                echo "$f 使用了 GNU 专属的 find -printf：busybox find 不认，Alpine 下必失败"
+                echo "（改用 -exec stat -c '%Y %n' {} +）"
+                exit 1
+              fi
             done
             echo "部署门禁通过"
 
@@ -581,6 +605,13 @@ master:
             # 显式断言备份成功且真的产出了两份非空 dump。
             # #55 教训：backup.sh 历史上会把失败当成功返回 0，只靠 "脚本没报错"
             # 判定备份成功等于没验；这里用产物存在性做二次兜底。
+            #
+            # ⚠️ 第 7 轮真跑曾在这里"两库都备份成功、然后没有然后了"并返回 1：
+            # backup.sh 末尾的备份轮转用了 GNU 专属的 `find -printf`，而本 stage 的
+            # drill 镜像是 **Alpine**，busybox `find` 不认 `-printf` → 非 0 退出，
+            # 报错又被脚本里的 2>/dev/null 吞掉。已改为 `find … -exec stat -c '%Y %n' {} +`
+            # （GNU/busybox 语义一致），并在部署门禁加了禁止 `-printf` 的静态断言。
+            # 所以：**本 stage 的脚本必须同时兼容 GNU 与 busybox 工具链**。
             bash deploy/backup.sh
             ls -la "$BACKUP_DIR"
             for f in "$BACKUP_DIR"/dwz_admin-*.sql.gz "$BACKUP_DIR"/dwz_public-*.sql.gz; do
@@ -666,6 +697,23 @@ master:
             for bin in mysqldump mysqld mariadb-install-db mysql mysqladmin; do
               grep -q "command -v $bin" "$drill_dockerfile" \
                 || { echo "$drill_dockerfile 缺少 $bin 的构建期预检（command -v $bin）"; exit 1; }
+            done
+
+            # 跨平台 find 断言：backup.sh / restore.sh 会在 Alpine(busybox) 与
+            # Debian(GNU) 两种 find 下跑 —— 演练 stage 用 drill 镜像（Alpine），
+            # 生产容器同样是 Alpine。busybox find **不支持 GNU 专属的 -printf**，
+            # 用了会 "find: unrecognized: -printf" 非 0 退出；脚本里那句
+            # 2>/dev/null 又把报错吞了，于是备份明明成功却静默收尾失败
+            # （CI「备份→恢复演练」stage 的真实失败根因）。
+            # 统一用 `-exec stat -c '%Y %n' {} +`：GNU/busybox 语义一致。
+            echo "--- 跨平台 find 兼容性断言（禁止 GNU 专属 -printf）"
+            for f in deploy/backup.sh deploy/restore.sh; do
+              if grep -nE '(^|[^-[:alnum:]])-printf([[:space:]=]|$)' "$f" \
+                   | grep -vE '^[0-9]+:[[:space:]]*#'; then
+                echo "$f 使用了 GNU 专属的 find -printf：busybox find 不认，Alpine 下必失败"
+                echo "（改用 -exec stat -c '%Y %n' {} +）"
+                exit 1
+              fi
             done
             echo "部署门禁通过"
 
