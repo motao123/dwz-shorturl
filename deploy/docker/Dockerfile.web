@@ -8,7 +8,7 @@
 #
 # 用 nginx + php-fpm（Debian 基础镜像，PHP 8.2 与宝塔环境版本对应）。
 # ============================================================
-FROM node:25-alpine AS assets
+FROM node:24-alpine AS assets
 WORKDIR /app
 # 连 lockfile 一起拷贝并用 npm ci：保证 axios 等依赖版本与本地/CI 完全一致，
 # 否则 npm install 漂移到更新的 1.x 小版本会出现类型/行为不一致。
@@ -32,6 +32,12 @@ COPY do.php api.php batch.php member.php index.php stats.php sitemap.php rum.php
 COPY includes/ /var/www/dwz/includes/
 COPY assets/ /var/www/dwz/assets/
 COPY site/ /var/www/dwz/site/
+
+# webhook 后台投递 worker（#12）。用 supervisord 的 webhook-worker 常驻进程运行；
+# 放在这里是因为它只需 PHP + config.php，与前台同镜像最省事。
+# 注意：它 require includes/api.inc.php，而该文件模板里 migration 目录按
+# ROOT . '/migrations' 定位，故保留原相对路径 /var/www/dwz/migrations/。
+COPY migrations/ /var/www/dwz/migrations/
 
 # 管理台构建产物（/admin/ 与 /member/）
 COPY --from=assets /app/dist/ /var/www/dwz/admin/

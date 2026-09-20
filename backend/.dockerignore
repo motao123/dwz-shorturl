@@ -1,0 +1,27 @@
+# ============================================================
+# backend 镜像的构建上下文排除清单（#61）
+#
+# backend/Dockerfile 用 `COPY configs/ ./configs/`，如果构建机上存在
+# backend/configs/config.yaml（含数据库口令 + JWT 密钥，虽被 gitignore 但在
+# 本地构建时确实存在），它会被烤进镜像。这里显式排除真实配置，只保留样例。
+# ============================================================
+
+# 真实配置（含口令/密钥）——镜像里绝不能有，by design 由运行时挂载
+configs/config.yaml
+configs/config.yml
+configs/config.local.*
+
+# 本地凭据
+.env
+.env.*
+!.env.example
+
+# 构建产物与依赖
+dist
+*.log
+logs
+
+# 编辑器垃圾
+.DS_Store
+*.swp
+*~

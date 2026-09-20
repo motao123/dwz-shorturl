@@ -28,7 +28,9 @@ import (
 //	dwz_up                       1 when the process is serving
 //	dwz_goroutines               current goroutine count
 //	dwz_db_up                    1 when the admin DB answers a ping
-//	dwz_redis_up                 1 when Redis answers a ping (0 if unconfigured)
+//	dwz_public_db_up             1 when the public DB answers a ping (same as db_up in single-DB mode)
+//	dwz_redis_configured         1 when Redis is configured (a Redis address is set)
+//	dwz_redis_up                 1 when Redis answers a ping
 //	dwz_click_queue_pending      events waiting to be flushed
 //	dwz_click_queue_capacity     queue buffer size
 //	dwz_clicks_dropped_total     clicks lost because the queue was full
@@ -41,18 +43,27 @@ import (
 //   - dwz_db_up == 0 for 1m                → admin DB unreachable
 type MetricsHandler struct {
 	db         *gorm.DB
+	publicDB   *gorm.DB
 	rdb        *redis.Client
+	// redisConfigured distinguishes "Redis was intentionally not configured"
+	// from "Redis is configured but unreachable" (#58). Before this, the
+	// dwz_redis_up gauge read 0 in both cases, so the RedisDown alert fired
+	// permanently on deployments without Redis — alert fatigue that trains
+	// operators to ignore the rule (and the real outage hides behind it).
+	redisConfigured bool
 	clickQueue *ClickQueue
 	startedAt  time.Time
 	scrapes    int64
 }
 
-func NewMetricsHandler(db *gorm.DB, rdb *redis.Client, clickQueue *ClickQueue) *MetricsHandler {
+func NewMetricsHandler(db, publicDB *gorm.DB, rdb *redis.Client, redisConfigured bool, clickQueue *ClickQueue) *MetricsHandler {
 	return &MetricsHandler{
-		db:         db,
-		rdb:        rdb,
-		clickQueue: clickQueue,
-		startedAt:  time.Now(),
+		db:              db,
+		publicDB:        publicDB,
+		rdb:             rdb,
+		redisConfigured: redisConfigured,
+		clickQueue:      clickQueue,
+		startedAt:       time.Now(),
 	}
 }
 
@@ -88,8 +99,27 @@ func (h *MetricsHandler) Metrics(c *gin.Context) {
 	}
 	writeMetric("dwz_db_up", "1 when the admin database answers a ping.", "gauge", dbUp, "")
 
-	// Redis reachability. Unconfigured Redis reports 0 with a comment so the
-	// absence is visible rather than silently reading as "healthy".
+	// Public DB reachability (#58). In single-DB mode this is the same handle,
+	// so it reads the same value; in split-DB mode a public-DB outage (which
+	// silently breaks redirects/stats) is otherwise invisible on /metrics.
+	if h.publicDB != nil && h.publicDB != h.db {
+		pubUp := 0.0
+		if sqlDB, err := h.publicDB.DB(); err == nil && sqlDB != nil {
+			if pingErr := sqlDB.Ping(); pingErr == nil {
+				pubUp = 1
+			}
+		}
+		writeMetric("dwz_public_db_up", "1 when the public database answers a ping.", "gauge", pubUp, "")
+	}
+
+	// Redis reachability, split into "configured" and "up" (#58) so an
+	// unconfigured Redis is not mistaken for an outage.
+	redisConfigured := 0.0
+	if h.redisConfigured {
+		redisConfigured = 1
+	}
+	writeMetric("dwz_redis_configured", "1 when Redis is configured (address set).", "gauge", redisConfigured, "")
+
 	redisUp := 0.0
 	if h.rdb != nil {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)

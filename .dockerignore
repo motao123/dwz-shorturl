@@ -1,0 +1,60 @@
+# ============================================================
+# 构建上下文排除清单（#61）
+#
+# 背景：`Dockerfile.entrypoint` 的 build context 是整个仓库，而
+# `backend/Dockerfile` 里有 `COPY configs/ ./configs/`。构建机上常常存在
+# 真实配置文件（含数据库口令、JWT 密钥、SMTP 口令）与本地 .env，如果不排除，
+# 它们会被打进镜像层 —— 直接违反 `Dockerfile.web` 里"镜像里绝不能有数据库
+# 口令"的自我声明。推镜像 = 推口令。
+#
+# 原则：凡是"本机运行态/凭据/产物/版本控制"的东西，一律不进构建上下文。
+# ============================================================
+
+# --- 凭据与本地配置：绝对不能进镜像 ---
+.env
+.env.*
+!.env.example
+deploy/.env
+deploy/.env.*
+!deploy/.env.example
+config.php
+config.yaml
+backend/configs/config.yaml
+backend/configs/config.yml
+config.sample.php
+deploy/config.php
+
+# --- 版本控制 ---
+.git
+.gitignore
+.gitattributes
+.github
+
+# --- 依赖与构建产物（镜像内会重新构建，拷进去只会拖慢并污染层） ---
+node_modules
+frontend/node_modules
+frontend/dist
+backend/dist
+vendor
+**/*.log
+logs
+
+# --- 运行态数据与备份 ---
+backups
+**/backups
+*.sql.gz
+*.sql.gz.part
+*.sql.gz.tmp
+
+# --- 编辑器 / 系统垃圾 ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# --- 测试与文档（运行时不需要） ---
+**/*_test.go
+frontend/src/**/__tests__
+docs
+*.md

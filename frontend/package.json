@@ -1,6 +1,10 @@
 {
   "name": "dwz-admin-web",
   "private": true,
+  "engines": {
+    "node": ">=20 <25",
+    "npm": ">=10"
+  },
   "version": "1.0.0",
   "type": "module",
   "scripts": {

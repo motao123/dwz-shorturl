@@ -205,7 +205,7 @@ func main() {
 		Monitor:   handler.NewMonitorHandler(monitorSvc),
 		Webhook:   handler.NewWebhookHandler(webhookSvc, auditSvc),
 		MemberApi: handler.NewMemberApiHandler(memberApiSvc),
-		Metrics:   handler.NewMetricsHandler(db, rdb, clickQueue),
+		Metrics:   handler.NewMetricsHandler(db, publicDB, rdb, cfg.Redis.Addr != "", clickQueue),
 	}
 
 	// Permission loader function for RBAC middleware

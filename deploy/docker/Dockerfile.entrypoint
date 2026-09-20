@@ -3,12 +3,33 @@
 #
 # 一个容器里同时具备：
 #   - PHP 8 CLI + mysqli  ：跑 PHP 侧基线库表与 config.php 生成
-#   - migrate 二进制      ：跑统一迁移入口（Docker 构建阶段编译）
+#   - migrate 二进制      ：跑统一迁移入口（本文件内构建阶段现编）
 #   - mysql 客户端        ：等待数据库就绪
 #
 # 只做「一次性初始化」：建库表 → 生成配置 → 设置管理员账号密码。
 # 初始化完成后容器退出，真正的长期服务是 backend / frontend / mysql / redis。
+#
+# #9 整改：此前这里 `COPY backend/dist/migrate-docker`，而 backend/dist/ 被
+# .gitignore 忽略、全仓没有任何脚本产出该文件 —— 干净 clone 上
+# `docker compose build` 必然 `COPY failed: file not found`，README 承诺的
+# "一键部署"直接构建不出来。现在改为在本文件内用 golang 构建阶段现编，
+# 不再依赖任何预置产物（照抄 backend/Dockerfile 的既有做法）。
 # ============================================================
+FROM golang:1.26-alpine AS migrate-builder
+
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /src
+
+# 先拷 go.mod / go.sum 单独下载依赖，利用层缓存：改代码时不必重下依赖。
+COPY backend/go.mod backend/go.sum* ./
+RUN go mod download
+
+COPY backend/ ./
+
+# 只编迁移工具：installer 不需要 server 二进制。
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /out/migrate ./cmd/migrate
+
 FROM php:8.2-cli-alpine
 
 RUN apk add --no-cache \
@@ -22,8 +43,7 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-# 由 docker-compose 的 build context = 仓库根目录拷贝，保证迁移与 PHP 代码同源。
-COPY backend/dist/migrate-docker /usr/local/bin/migrate
+COPY --from=migrate-builder /out/migrate /usr/local/bin/migrate
 COPY backend/migrations/ /app/backend/migrations/
 COPY install.sql /app/install.sql
 COPY deploy/docker/init.php /app/init.php

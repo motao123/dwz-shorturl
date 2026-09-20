@@ -1,0 +1,46 @@
+# ============================================================
+# 部署文件清单（单一来源，单一真相）#16
+#
+# 背景：此前「要部署哪些文件」分散在两处且已经漂移：
+#   - deploy/docker/Dockerfile.web 的 COPY 列了 15 个根文件 + includes/assets/site/migrations
+#   - deploy.sh 的 scp 只传了 5 个根文件（do/api/batch/member/index.html）+ includes/assets
+# 结果：走 deploy.sh（宝塔/裸机）的人会漏传 stats.php / sitemap.php / rum.php /
+# api.html / robots.txt / 404.html / site.webmanifest / privacy.html / terms.html /
+# report.html 与整个 site/ 目录 —— 统计页、sitemap、404 页、合规页全部 404，
+# 但部署脚本"成功退出"，属于静默漏文件。
+#
+# 本文件是唯一来源：deploy.sh 与 Dockerfile.web 都从这里取清单，
+# CI 里有一条门禁断言两边一致（见 .cnb.yml）。
+#
+# 语法：
+#   - 每行一个「相对仓库根目录的路径」
+#   - `#` 开头为注释，空行忽略
+#   - 目录以 `/` 结尾，表示整目录递归上传
+#   - `->` 右侧为镜像/主机内目标路径，见各消费方：
+#       * deploy.sh 只关心左侧列表（统一传到 $WEB_DIR/）
+#       * Dockerfile.web 的 web-assets 段对应左侧列表
+# ============================================================
+
+# --- 前台 PHP 与静态页（传到 web 根目录） ---
+do.php
+api.php
+batch.php
+member.php
+index.php
+stats.php
+sitemap.php
+rum.php
+index.html
+api.html
+robots.txt
+404.html
+site.webmanifest
+privacy.html
+terms.html
+report.html
+
+# --- 目录（递归） ---
+includes/
+assets/
+site/
+migrations/

@@ -1,0 +1,124 @@
+# ============================================================
+# GitHub Actions 测试门禁（#60）
+#
+# 背景：README:137 让所有人从 github.com 克隆，但 GitHub 侧此前**只有**一个
+# Pages 工作流、零测试门禁 —— 从 GitHub 拿代码的人看不到任何质量信号；同时
+# CNB 的 lint 用 php:8.4，而运行时基线（Dockerfile.web）是 php:8.2-fpm，
+# 8.3+ 语法能过 CI 却在 8.2 生产 fatal。
+#
+# 本工作流在 GitHub 侧复刻 CNB 的 test-gate，并把 PHP 版本对齐到运行时的 8.2。
+# 与 .cnb.yml 是「同一套门禁、两个平台」：改一处请同步另一处。
+#
+# 说明：GitHub/CNB 双平台共存是本项目现状（README 同时给三个镜像地址），
+# 这里只补"缺失的那一半"，不改变现有部署形态。
+# ============================================================
+name: test-gate
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# 同一分支的旧运行在新 push 时取消，避免排队浪费额度
+concurrency:
+  group: test-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------- Go：编译 + 单测 ----------
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # 与 .cnb.yml 的 golang:1.26 保持同一大版本。
+          go-version: '1.26'
+          cache-dependency-path: backend/go.sum
+      - name: go vet / build / test
+        working-directory: backend
+        run: |
+          go vet ./...
+          go build ./...
+          go test ./...
+
+  # ---------- PHP：全量语法检查（8.2，对齐运行时）----------
+  php-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          # 关键：#60 —— 用 8.2 而不是 8.4。运行时是 php:8.2-fpm-alpine，
+          # 用更新版本 lint 会让 8.3+ 语法蒙混过关、在生产 fatal。
+          php-version: '8.2'
+          extensions: mysqli
+      - name: php -l 全量
+        run: |
+          fail=0
+          files=$(find . -name '*.php' \
+            -not -path './node_modules/*' \
+            -not -path './frontend/node_modules/*' \
+            -not -path './vendor/*')
+          for f in $files; do
+            if ! out=$(php -l "$f" 2>&1); then
+              echo "$out"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "PHP 语法检查失败"
+            exit 1
+          fi
+          echo "PHP 语法检查通过（php $(php -r 'echo PHP_VERSION;')）"
+
+  # ---------- 前端：单测 + 构建 ----------
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # 与 .cnb.yml 的 node:24 一致。
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm ci / test / build
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+          npm run build
+
+  # ---------- 部署脚本与清单门禁 ----------
+  deploy-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: 部署脚本静态检查 + 清单一致性 + 一键部署可行性
+        run: |
+          set -e
+          for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
+            echo "--- bash -n $f"; bash -n "$f"
+            echo "--- shellcheck $f"; shellcheck --severity=warning "$f"
+          done
+
+          echo "--- 部署清单一致性"; bash deploy/check_manifest.sh
+
+          echo "--- 一键部署构建可行性断言"
+          if grep -E '^[[:space:]]*COPY[[:space:]]+backend/dist/migrate-docker' deploy/docker/Dockerfile.entrypoint; then
+            echo "Dockerfile.entrypoint 仍依赖不存在的 backend/dist/migrate-docker，docker build 必失败"
+            exit 1
+          fi
+          grep -Eq 'go build .* -o /out/migrate ./cmd/migrate' deploy/docker/Dockerfile.entrypoint \
+            || { echo "Dockerfile.entrypoint 缺少 migrate 构建阶段"; exit 1; }
+
+          echo "--- .dockerignore 存在性"
+          test -f .dockerignore || { echo "缺少根 .dockerignore"; exit 1; }
+          test -f backend/.dockerignore || { echo "缺少 backend/.dockerignore"; exit 1; }
+          echo "部署门禁通过"
