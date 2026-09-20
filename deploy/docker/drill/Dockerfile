@@ -8,20 +8,35 @@
 # backup.sh 直接 "mysqldump: command not found"。这是 PR #48 首次真跑的根因。
 #
 # 该 stage 需要四样东西同时可用：
-#   1. docker CLI —— 用 DinD 起一个临时 MySQL 8.0（备份脚本要连真库）
-#   2. bash + gzip —— deploy/backup.sh 与 restore.sh 依赖
-#   3. mysql / mysqldump 客户端 —— 脚本本体
-#   4. git / coreutils —— 流水线在默认环境里拉代码、跑通用命令要用
+#   1. mysql 服务端 —— 演练要在本容器内直起 mysqld（脚本连的就是它）
+#   2. mysql / mysqldump 客户端 —— deploy/backup.sh 与 restore.sh 本体
+#   3. bash + gzip —— 两个脚本依赖
+#   4. docker CLI / git / coreutils —— 流水线在默认环境里拉代码、跑通用命令
 #
-# 没有任何现成官方镜像同时满足这些（自带 docker CLI 的镜像都没有 mysql 客户端，
-# 自带 mysql 客户端的镜像都没有 docker CLI）。所以用一个专用 Dockerfile 预装，
-# 而不是在流水线里 apk add —— 后者每次运行都要联网装包，且会被平台校验器提示
-# "手动安装系统依赖"。
+# 直接装 mysql 客户端 + 服务端，而不是拉 docker:mysql 镜像跑容器：容器化后
+# MySQL 落在**别的 netns**，脚本从本容器连 127.0.0.1:3306 永远连不上
+# （详见 .cnb.yml 「备份→恢复演练」stage 的四轮实测结论）。
 #
 # 注意：Alpine 的 mysql-client 包只提供 `mysql` 交互客户端，**不含 `mysqldump`**。
 # 必须用 mariadb-client：它同时提供 mysql / mysqladmin / mysqldump(mariadb-dump)，
-# 且与 MySQL 8.0 服务端协议兼容。deploy/docker/Dockerfile.entrypoint 也是这么装的。
+# 且与 MySQL 8.0 服务端协议兼容；服务端由 `mariadb` 包提供（Alpine 的 apk 源里
+# 没有 `mysql-server`）。deploy/docker/Dockerfile.entrypoint 的客户端也是这么装的。
+#
+# 注意 2：基础镜像 `docker:27-cli` 是 Alpine，apk 源里**没有 mysqld**
+# （只有 mariadb 服务端），本地验证基线用的是 Debian 包的 MariaDB 10.11，
+# 与 MySQL 8.0 同协议族。
 # ============================================================
 FROM docker:27-cli
 
-RUN apk add --no-cache bash gzip mariadb-client coreutils git
+# DRILL_ENV_REV: 4 —— 依赖有变必须 +1，便于在 CI 日志里确认跑的是哪一版镜像。
+LABEL cnb.drill.env.rev="4"
+
+RUN apk add --no-cache bash gzip mariadb-client mariadb coreutils git \
+    # 构建期预检：装完立刻验证命令真的存在，把"包内容与预期不符"拦在构建期，
+    # 而不是留到运行期才发现（第一轮 CI 红灯的根因就是 mysql-client 不含 mysqldump）。
+    && command -v mysql >/dev/null \
+    && command -v mysqladmin >/dev/null \
+    && command -v mysqldump >/dev/null \
+    && command -v mysqld >/dev/null \
+    && command -v gzip >/dev/null \
+    && command -v docker >/dev/null

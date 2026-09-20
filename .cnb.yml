@@ -137,6 +137,22 @@
           # 本 stage 不写 image，即继承该默认环境；其它 stage 各自用 image 覆盖。
           script: |
             set -e
+            # 运行期预检：镜像里必须同时有 mysqld 与 mysqldump。CNB 以 dockerfile 声明
+            # 构建环境时按内容缓存镜像，缓存命中就沿用旧层 —— 依赖包改了、镜像没跟着
+            # 更新时，backup.sh 只会抛一句没头没尾的 "command not found"。这里先自证
+            # 环境，缺什么直接红并打印诊断（DRILL_ENV_REV 已 +1 表示依赖变更）。
+            echo "--- 演练环境自检"
+            for bin in mysql mysqladmin mysqldump mysqld gzip bash; do
+              if ! command -v "$bin" >/dev/null 2>&1; then
+                echo "演练环境缺少 $bin：镜像未按 deploy/docker/drill/Dockerfile 重建"
+                echo "（该镜像被缓存时不会自动跟着 Dockerfile 变化重建；确认 DRILL_ENV_REV 已 +1）"
+                exit 1
+              fi
+            done
+            mysql --version
+            mysqld --version
+            echo "演练环境自检通过"
+
             # 这里**不通过容器跑 MySQL，也不做任何端口映射/容器名解析**，
             # 而是在本 stage 容器内直接起一个 mysqld —— 因为备份/恢复脚本就在
             # 这个容器里执行，连 127.0.0.1:3306 必须由它自己监听。
@@ -283,6 +299,25 @@
             echo "--- .dockerignore 存在性"
             test -f .dockerignore || { echo "缺少根 .dockerignore"; exit 1; }
             test -f backend/.dockerignore || { echo "缺少 backend/.dockerignore"; exit 1; }
+
+            # 演练环境依赖断言：「备份→恢复演练」镜像必须装对包且装全。
+            # Alpine 的 mysql-client 只给 `mysql`，不含 `mysqldump`（该 stage 第一次
+            # 真跑就因此红了）；演练改为容器内直起 mysqld 后还需要服务端包。
+            # 这条静态断言把同类改动拦在更前面，不必等下一次真跑。
+            echo "--- 演练环境依赖断言"
+            drill_dockerfile='deploy/docker/drill/Dockerfile'
+            grep -q 'mariadb-client' "$drill_dockerfile" \
+              || { echo "$drill_dockerfile 必须安装 mariadb-client（mysql-client 不含 mysqldump）"; exit 1; }
+            if grep -E '^[[:space:]]*RUN[^#]*apk add[^#]*mysql-client' "$drill_dockerfile"; then
+              echo "$drill_dockerfile 使用了 mysql-client：Alpine 下不含 mysqldump，backup.sh 必失败"
+              exit 1
+            fi
+            grep -Eq '^[[:space:]]*RUN[^#]*apk add[^#]* mariadb([[:space:]\\]|$)' "$drill_dockerfile" \
+              || { echo "$drill_dockerfile 必须安装 mariadb 服务端（演练要在容器内直起 mysqld）"; exit 1; }
+            for bin in mysqldump mysqld mysql mysqladmin; do
+              grep -q "command -v $bin" "$drill_dockerfile" \
+                || { echo "$drill_dockerfile 缺少 $bin 的构建期预检（command -v $bin）"; exit 1; }
+            done
             echo "部署门禁通过"
 
         # --- 前端：单测 + 构建 -----------------------------------------------
@@ -389,6 +424,22 @@ master:
           # 本 stage 不写 image，即继承该默认环境；其它 stage 各自用 image 覆盖。
           script: |
             set -e
+            # 运行期预检：镜像里必须同时有 mysqld 与 mysqldump。CNB 以 dockerfile 声明
+            # 构建环境时按内容缓存镜像，缓存命中就沿用旧层 —— 依赖包改了、镜像没跟着
+            # 更新时，backup.sh 只会抛一句没头没尾的 "command not found"。这里先自证
+            # 环境，缺什么直接红并打印诊断（DRILL_ENV_REV 已 +1 表示依赖变更）。
+            echo "--- 演练环境自检"
+            for bin in mysql mysqladmin mysqldump mysqld gzip bash; do
+              if ! command -v "$bin" >/dev/null 2>&1; then
+                echo "演练环境缺少 $bin：镜像未按 deploy/docker/drill/Dockerfile 重建"
+                echo "（该镜像被缓存时不会自动跟着 Dockerfile 变化重建；确认 DRILL_ENV_REV 已 +1）"
+                exit 1
+              fi
+            done
+            mysql --version
+            mysqld --version
+            echo "演练环境自检通过"
+
             # 这里**不通过容器跑 MySQL，也不做任何端口映射/容器名解析**，
             # 而是在本 stage 容器内直接起一个 mysqld —— 因为备份/恢复脚本就在
             # 这个容器里执行，连 127.0.0.1:3306 必须由它自己监听。
@@ -535,6 +586,25 @@ master:
             echo "--- .dockerignore 存在性"
             test -f .dockerignore || { echo "缺少根 .dockerignore"; exit 1; }
             test -f backend/.dockerignore || { echo "缺少 backend/.dockerignore"; exit 1; }
+
+            # 演练环境依赖断言：「备份→恢复演练」镜像必须装对包且装全。
+            # Alpine 的 mysql-client 只给 `mysql`，不含 `mysqldump`（该 stage 第一次
+            # 真跑就因此红了）；演练改为容器内直起 mysqld 后还需要服务端包。
+            # 这条静态断言把同类改动拦在更前面，不必等下一次真跑。
+            echo "--- 演练环境依赖断言"
+            drill_dockerfile='deploy/docker/drill/Dockerfile'
+            grep -q 'mariadb-client' "$drill_dockerfile" \
+              || { echo "$drill_dockerfile 必须安装 mariadb-client（mysql-client 不含 mysqldump）"; exit 1; }
+            if grep -E '^[[:space:]]*RUN[^#]*apk add[^#]*mysql-client' "$drill_dockerfile"; then
+              echo "$drill_dockerfile 使用了 mysql-client：Alpine 下不含 mysqldump，backup.sh 必失败"
+              exit 1
+            fi
+            grep -Eq '^[[:space:]]*RUN[^#]*apk add[^#]* mariadb([[:space:]\\]|$)' "$drill_dockerfile" \
+              || { echo "$drill_dockerfile 必须安装 mariadb 服务端（演练要在容器内直起 mysqld）"; exit 1; }
+            for bin in mysqldump mysqld mysql mysqladmin; do
+              grep -q "command -v $bin" "$drill_dockerfile" \
+                || { echo "$drill_dockerfile 缺少 $bin 的构建期预检（command -v $bin）"; exit 1; }
+            done
             echo "部署门禁通过"
 
         # --- 前端：单测 + 构建 -----------------------------------------------
