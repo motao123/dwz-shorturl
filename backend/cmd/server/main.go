@@ -134,7 +134,11 @@ func main() {
 	statsSvc := service.NewStatsService(shortUrlRepo, db)
 	configSvc := service.NewConfigService(configRepo).WithRuntimeConfig(runtimeCfg)
 	auditSvc := service.NewAuditService(auditRepo)
-	apiKeySvc := service.NewApiKeyService(apiKeyRepo)
+	// #40: the API-key service needs the super_admin resolver so its ownership
+	// guard can let a super_admin manage any key while still refusing everybody
+	// else. Without it the guard stays strict (owner-only), which is safe.
+	apiKeySvc := service.NewApiKeyService(apiKeyRepo).
+		WithSuperAdminChecker(userSvc.IsSuperAdmin)
 	domainSvc := service.NewDomainService(domainRepo)
 	memberSvc := service.NewMemberService(memberRepo).WithPurge(repository.NewMemberPurgeRepo(db, publicDB), zapLogger)
 	violationSvc := service.NewViolationService(violationRepo)

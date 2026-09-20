@@ -28,15 +28,33 @@ const formRef = ref()
 const form = reactive({
   name: '',
   rate_limit: 100,
-  expires_days: null as number | null
+  expires_days: null as number | null,
+  // #42：密钥权限范围。此前表单根本不发这个字段，而后端也从不校验，
+  // 于是"权限"这一栏在 UI 上不存在、在库里恒为空 —— 现在两端一起补齐。
+  permissions: ['short_urls.create'] as string[]
 })
+
+/* 可选权限范围。与后端 ApiKeyScope 一一对应（见 middleware/apikey.go）。 */
+const scopeOptions = [
+  { value: 'short_urls.create', label: '创建短链', hint: '调用 POST /public/api/short-urls / batch' },
+  { value: '*', label: '全部权限', hint: '通配：等价于勾选所有当前与将来的范围' }
+]
 
 const rules = {
   name: [
     { required: true, message: '请输入密钥用途名称', trigger: 'blur' },
     { max: 64, message: '名称不能超过 64 个字符', trigger: 'blur' }
   ],
-  rate_limit: [{ required: true, message: '请设置每分钟限额', trigger: 'blur' }]
+  rate_limit: [{ required: true, message: '请设置每分钟限额', trigger: 'blur' }],
+  permissions: [
+    {
+      type: 'array',
+      required: true,
+      min: 1,
+      message: '请至少选择一个权限范围（无权限的密钥无法调用任何接口）',
+      trigger: 'change'
+    }
+  ]
 }
 
 /* 创建成功结果（明文仅展示一次） */
@@ -71,7 +89,7 @@ async function loadData() {
 }
 
 function openCreate() {
-  Object.assign(form, { name: '', rate_limit: 100, expires_days: null })
+  Object.assign(form, { name: '', rate_limit: 100, expires_days: null, permissions: ['short_urls.create'] })
   createVisible.value = true
 }
 
@@ -87,7 +105,8 @@ async function handleCreate() {
     const res = await createApiKey({
       name: form.name.trim(),
       rate_limit: Number(form.rate_limit),
-      expires_days: form.expires_days
+      expires_days: form.expires_days,
+      permissions: form.permissions
     })
     // 契约已统一到扁平结构（api_key/name）；兼容旧的 key/plain_text 嵌套返回，
     // 避免后端版本不一致时弹窗渲染 undefined、用户永远拿不到明文密钥。
@@ -258,6 +277,14 @@ onMounted(loadData)
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
         <el-form-item label="密钥用途" prop="name">
           <el-input v-model="form.name" placeholder="如：小程序后端调用" maxlength="64" show-word-limit />
+        </el-form-item>
+        <el-form-item label="权限范围" prop="permissions">
+          <el-select v-model="form.permissions" multiple placeholder="请选择该密钥可调用的接口范围" style="width: 100%">
+            <el-option v-for="opt in scopeOptions" :key="opt.value" :label="opt.label" :value="opt.value">
+              <span>{{ opt.label }}</span>
+              <span style="color: var(--el-text-color-secondary); font-size: 12px; margin-left: 8px">{{ opt.hint }}</span>
+            </el-option>
+          </el-select>
         </el-form-item>
         <el-row :gutter="16">
           <el-col :span="12">

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -73,8 +74,12 @@ func (h *ApiKeyHandler) Revoke(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.Revoke(id); err != nil {
-		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+	// #40: scope the operation to the acting administrator. Revoke alone took a
+	// bare id, so any holder of api_keys.revoke could enumerate ids and revoke
+	// every API key on the platform.
+	actorID := c.GetUint64("user_id")
+	if err := h.svc.RevokeAs(actorID, id); err != nil {
+		apiKeyFail(c, err)
 		return
 	}
 
@@ -88,9 +93,12 @@ func (h *ApiKeyHandler) GetStats(c *gin.Context) {
 		return
 	}
 
-	key, err := h.svc.GetByID(id)
+	// #40: same ownership constraint as Revoke — the stats payload exposes key
+	// metadata (prefix, quota, usage) that belongs to a single account.
+	actorID := c.GetUint64("user_id")
+	key, err := h.svc.GetByIDAs(actorID, id)
 	if err != nil {
-		pkg.Fail(c, http.StatusNotFound, pkg.CodeNotFound, "api key not found")
+		apiKeyFail(c, err)
 		return
 	}
 
@@ -104,4 +112,21 @@ func (h *ApiKeyHandler) GetStats(c *gin.Context) {
 		"expires_at":   key.ExpiresAt,
 		"created_at":   key.CreatedAt,
 	})
+}
+
+// apiKeyFail maps an API-key service error to an HTTP response.
+//
+// An ownership violation is 403 (authenticated, but not allowed) while a
+// missing key is 404. The distinction is for logs and for operators; neither
+// discloses whether an id belonging to somebody else exists, because the 404
+// branch is only reachable when the key does not exist for anyone.
+func apiKeyFail(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrApiKeyForbidden):
+		pkg.Fail(c, http.StatusForbidden, pkg.CodeForbidden, "无权操作该 API Key")
+	case errors.Is(err, service.ErrApiKeyNotFound):
+		pkg.Fail(c, http.StatusNotFound, pkg.CodeNotFound, "API Key 不存在")
+	default:
+		pkg.Fail(c, http.StatusBadRequest, pkg.CodeBadRequest, err.Error())
+	}
 }
