@@ -449,6 +449,24 @@
                 exit 1
               fi
             done
+            # 演练 stage 的 TCP 可达性断言（防回退）：Alpine 的 mariadb 包在
+            # /etc/my.cnf.d/mariadb-server.cnf 里默认写死 skip-networking，只开 unix
+            # socket（日志 `port: 0`），脚本用 -h127.0.0.1 -P3306 必然连不上。
+            # 必须在 mysqld 命令行显式 `--skip-networking=0` 覆盖配置文件才有效
+            # （`--port=3306` 单独放着不管用）。这条断言把该开关钉住，
+            # 避免有人"顺手清理参数"时又让门禁红回 origin 状态。
+            echo "--- 演练 stage TCP 可达性断言"
+            stage_net="$(awk '
+              /- name: 备份→恢复演练/ { f=1 }
+              f && /script: \|/ { g=1; next }
+              g && /^        - name:/ { exit }
+              g { print }
+            ' .cnb.yml)"
+            printf '%s\n' "$stage_net" | grep -q -- '--skip-networking=0' \
+              || { echo "演练 stage 未显式 --skip-networking=0：Alpine mariadb 默认关 TCP，备份/恢复必连不上"; exit 1; }
+            printf '%s\n' "$stage_net" | grep -q 'port: 3306' \
+              || { echo "演练 stage 缺少 TCP 端口自证（socket 就绪不代表 TCP 在听）"; exit 1; }
+
             echo "部署门禁通过"
 
         # --- 前端：单测 + 构建 -----------------------------------------------
@@ -867,6 +885,24 @@ master:
                 exit 1
               fi
             done
+            # 演练 stage 的 TCP 可达性断言（防回退）：Alpine 的 mariadb 包在
+            # /etc/my.cnf.d/mariadb-server.cnf 里默认写死 skip-networking，只开 unix
+            # socket（日志 `port: 0`），脚本用 -h127.0.0.1 -P3306 必然连不上。
+            # 必须在 mysqld 命令行显式 `--skip-networking=0` 覆盖配置文件才有效
+            # （`--port=3306` 单独放着不管用）。这条断言把该开关钉住，
+            # 避免有人"顺手清理参数"时又让门禁红回 origin 状态。
+            echo "--- 演练 stage TCP 可达性断言"
+            stage_net="$(awk '
+              /- name: 备份→恢复演练/ { f=1 }
+              f && /script: \|/ { g=1; next }
+              g && /^        - name:/ { exit }
+              g { print }
+            ' .cnb.yml)"
+            printf '%s\n' "$stage_net" | grep -q -- '--skip-networking=0' \
+              || { echo "演练 stage 未显式 --skip-networking=0：Alpine mariadb 默认关 TCP，备份/恢复必连不上"; exit 1; }
+            printf '%s\n' "$stage_net" | grep -q 'port: 3306' \
+              || { echo "演练 stage 缺少 TCP 端口自证（socket 就绪不代表 TCP 在听）"; exit 1; }
+
             echo "部署门禁通过"
 
         # --- 前端：单测 + 构建 -----------------------------------------------
