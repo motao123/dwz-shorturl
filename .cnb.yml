@@ -47,6 +47,10 @@
     - name: test-gate
       runner:
         cpus: 4
+      # 备份→恢复演练需要 DinD 起一个真 MySQL：用假数据或纯静态检查都不足以
+      # 证明"备份能恢复"，那正是本批要修的东西。
+      services:
+        - docker
       stages:
         # --- Go：编译 + 单测 -------------------------------------------------
         # 任一阶段失败即中断，不再往下跑（快速失败）。
@@ -60,9 +64,12 @@
             go build ./...
             go test ./...
 
-        # --- PHP：全量语法检查 -----------------------------------------------
+        # --- PHP：全量语法检查（用 8.2 对齐运行时）----------------------------
+        # #60：运行时基线是 deploy/docker/Dockerfile.web 的 php:8.2-fpm-alpine，
+        # 文档承诺 PHP 8.0+。此前这里用 php:8.4-cli，8.3/8.4 的新语法能过 CI
+        # 却在 8.2 生产直接 fatal —— lint 版本必须 ≤ 运行时版本才拦得住。
         - name: PHP 语法检查
-          image: php:8.4-cli
+          image: php:8.2-cli
           script: |
             set -e
             php -v
@@ -108,6 +115,110 @@
               exit 1
             fi
             echo "XFF 赋值方式检查通过"
+        # --- 备份→恢复演练（真 MySQL，端到端）---------------------------------
+        # 这是本批唯一"不是静态检查"的门禁，也是最该有的一条：备份的价值只由
+        # "能恢复"定义，而"能恢复"只有把 dump 真的导进一个库才知道。用 DinD 起
+        # 一个 mysql:8.0，跑 deploy/backup.sh 出 dump，再跑 deploy/restore.sh --check
+        # 导入临时库比对表数量 —— 失败即说明备份链路坏了。
+        # 需要 docker service（见本 pipeline 的 services）。
+        - name: 备份→恢复演练
+          # 专用构建环境：docker CLI（DinD）+ bash/gzip + mysql 客户端，缺一不可。
+          # 见 deploy/docker/drill/Dockerfile 的说明（没有任何官方镜像三者兼具）。
+          docker:
+            build:
+              dockerfile: deploy/docker/drill/Dockerfile
+          script: |
+            set -e
+            # 起一个临时 MySQL（独立网络，容器名固定，脚本内用 127.0.0.1 走端口映射）
+            docker network create dwz-drill-net >/dev/null 2>&1 || true
+            docker run -d --name dwz-drill-mysql --network dwz-drill-net \
+              -e MYSQL_ROOT_PASSWORD=drillroot -p 33061:3306 mysql:8.0 \
+              --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+            cleanup_drill() { docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true; docker network rm dwz-drill-net >/dev/null 2>&1 || true; }
+            trap cleanup_drill EXIT
+            echo "等待 MySQL 就绪..."
+            for i in $(seq 1 60); do
+              if docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent >/dev/null 2>&1; then echo "就绪(${i}s)"; break; fi
+              sleep 2
+            done
+            docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent
+
+            # 建两个库并灌入真实 schema（用仓库里的迁移文件，不用假数据）。
+            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot -e "CREATE DATABASE dwz_admin CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE DATABASE dwz_public CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_admin < backend/migrations/schema.sql
+            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_public < backend/migrations/php/add_webhook_queue.sql
+
+            export DB_HOST=127.0.0.1 DB_PORT=33061
+            export DB_ADMIN_USER=root DB_ADMIN_PASS=drillroot DB_ADMIN_NAME=dwz_admin
+            export DB_PUBLIC_USER=root DB_PUBLIC_PASS=drillroot DB_PUBLIC_NAME=dwz_public
+            export BACKUP_DIR=/tmp/dwz-backups
+            mkdir -p "$BACKUP_DIR"
+
+            echo "--- 备份"
+            bash deploy/backup.sh
+            ls -la "$BACKUP_DIR"
+
+            echo "--- 恢复演练（必须 PASS）"
+            bash deploy/restore.sh --check
+
+            echo "--- 残档防护 A：显式指定截断的 dump 必须被拒（非 0 退出）"
+            printf 'CREATE TABLE t(id int);\n' | gzip -9 > /tmp/truncated.sql.gz
+            if bash deploy/restore.sh --admin-only --check --file=/tmp/truncated.sql.gz 2>/dev/null; then
+              echo "截断的 dump 被当成有效备份 -> 失败"; exit 1
+            fi
+            echo "截断 dump 已被正确拒绝"
+
+            echo "--- 残档防护 B：目录里最"新"的 dump 是残档时，必须跳过它用完整的那个"
+            # 造一个 mtime 最新的截断残档，放在与完整 dump 同一个目录。
+            cp /tmp/truncated.sql.gz "$BACKUP_DIR/dwz_admin-20990101-000000.sql.gz"
+            touch "$BACKUP_DIR/dwz_admin-20990101-000000.sql.gz"
+            bash deploy/restore.sh --admin-only --check
+            echo "残档已被跳过，演练用的是完整 dump"
+
+        # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
+        # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
+        # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
+        # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
+        # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
+        - name: 部署脚本与清单门禁
+          # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
+          image: koalaman/shellcheck-alpine:stable
+          script: |
+            set -e
+            # 该镜像基于 alpine，已内置 shellcheck，无需现场安装。
+            for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
+              echo "--- bash -n $f"
+              bash -n "$f"
+              if command -v shellcheck >/dev/null 2>&1; then
+                echo "--- shellcheck $f"
+                # 只看 warning 及以上：ops/one_click_migrate.sh 有若干历史 info
+                # 级提示（SC2015/SC2016），不属本批范围，不该卡住部署门禁；
+                # 真正的 warning/error 仍然会红。
+                shellcheck --severity=warning "$f"
+              fi
+            done
+
+            # 部署清单与 Dockerfile.web 必须一致（否则静默漏文件）。
+            echo "--- 部署清单一致性"
+            bash deploy/check_manifest.sh
+
+            # 防回退：Dockerfile.entrypoint 不得再 COPY 仓库里不存在的
+            # backend/dist/migrate-docker（#9 的根因）。必须由构建阶段现编。
+            # 只匹配真正的 COPY 指令，注释里提到该路径不算违规。
+            echo "--- 一键部署构建可行性断言"
+            if grep -E '^[[:space:]]*COPY[[:space:]]+backend/dist/migrate-docker' deploy/docker/Dockerfile.entrypoint; then
+              echo "Dockerfile.entrypoint 仍依赖不存在的 backend/dist/migrate-docker，docker build 必失败"
+              exit 1
+            fi
+            grep -Eq 'go build .* -o /out/migrate ./cmd/migrate' deploy/docker/Dockerfile.entrypoint \
+              || { echo "Dockerfile.entrypoint 缺少 migrate 构建阶段"; exit 1; }
+
+            # .dockerignore 必须存在（#61：防止把本机真配置烤进镜像）。
+            echo "--- .dockerignore 存在性"
+            test -f .dockerignore || { echo "缺少根 .dockerignore"; exit 1; }
+            test -f backend/.dockerignore || { echo "缺少 backend/.dockerignore"; exit 1; }
+            echo "部署门禁通过"
+
         # --- 前端：单测 + 构建 -----------------------------------------------
         # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
         - name: 前端单测与构建
@@ -127,6 +238,10 @@ master:
     - name: test-gate
       runner:
         cpus: 4
+      # 备份→恢复演练需要 DinD 起一个真 MySQL：用假数据或纯静态检查都不足以
+      # 证明"备份能恢复"，那正是本批要修的东西。
+      services:
+        - docker
       stages:
         - name: Go 编译与单测
           image: golang:1.26
@@ -138,8 +253,9 @@ master:
             go build ./...
             go test ./...
 
+        # PHP lint 用 8.2 对齐运行时（#60，理由见 PR 分支同名 stage）。
         - name: PHP 语法检查
-          image: php:8.4-cli
+          image: php:8.2-cli
           script: |
             set -e
             php -v
@@ -185,6 +301,110 @@ master:
               exit 1
             fi
             echo "XFF 赋值方式检查通过"
+        # --- 备份→恢复演练（真 MySQL，端到端）---------------------------------
+        # 这是本批唯一"不是静态检查"的门禁，也是最该有的一条：备份的价值只由
+        # "能恢复"定义，而"能恢复"只有把 dump 真的导进一个库才知道。用 DinD 起
+        # 一个 mysql:8.0，跑 deploy/backup.sh 出 dump，再跑 deploy/restore.sh --check
+        # 导入临时库比对表数量 —— 失败即说明备份链路坏了。
+        # 需要 docker service（见本 pipeline 的 services）。
+        - name: 备份→恢复演练
+          # 专用构建环境：docker CLI（DinD）+ bash/gzip + mysql 客户端，缺一不可。
+          # 见 deploy/docker/drill/Dockerfile 的说明（没有任何官方镜像三者兼具）。
+          docker:
+            build:
+              dockerfile: deploy/docker/drill/Dockerfile
+          script: |
+            set -e
+            # 起一个临时 MySQL（独立网络，容器名固定，脚本内用 127.0.0.1 走端口映射）
+            docker network create dwz-drill-net >/dev/null 2>&1 || true
+            docker run -d --name dwz-drill-mysql --network dwz-drill-net \
+              -e MYSQL_ROOT_PASSWORD=drillroot -p 33061:3306 mysql:8.0 \
+              --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+            cleanup_drill() { docker rm -f dwz-drill-mysql >/dev/null 2>&1 || true; docker network rm dwz-drill-net >/dev/null 2>&1 || true; }
+            trap cleanup_drill EXIT
+            echo "等待 MySQL 就绪..."
+            for i in $(seq 1 60); do
+              if docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent >/dev/null 2>&1; then echo "就绪(${i}s)"; break; fi
+              sleep 2
+            done
+            docker exec dwz-drill-mysql mysqladmin ping -h127.0.0.1 -uroot -pdrillroot --silent
+
+            # 建两个库并灌入真实 schema（用仓库里的迁移文件，不用假数据）。
+            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot -e "CREATE DATABASE dwz_admin CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE DATABASE dwz_public CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_admin < backend/migrations/schema.sql
+            docker exec -i dwz-drill-mysql mysql -uroot -pdrillroot dwz_public < backend/migrations/php/add_webhook_queue.sql
+
+            export DB_HOST=127.0.0.1 DB_PORT=33061
+            export DB_ADMIN_USER=root DB_ADMIN_PASS=drillroot DB_ADMIN_NAME=dwz_admin
+            export DB_PUBLIC_USER=root DB_PUBLIC_PASS=drillroot DB_PUBLIC_NAME=dwz_public
+            export BACKUP_DIR=/tmp/dwz-backups
+            mkdir -p "$BACKUP_DIR"
+
+            echo "--- 备份"
+            bash deploy/backup.sh
+            ls -la "$BACKUP_DIR"
+
+            echo "--- 恢复演练（必须 PASS）"
+            bash deploy/restore.sh --check
+
+            echo "--- 残档防护 A：显式指定截断的 dump 必须被拒（非 0 退出）"
+            printf 'CREATE TABLE t(id int);\n' | gzip -9 > /tmp/truncated.sql.gz
+            if bash deploy/restore.sh --admin-only --check --file=/tmp/truncated.sql.gz 2>/dev/null; then
+              echo "截断的 dump 被当成有效备份 -> 失败"; exit 1
+            fi
+            echo "截断 dump 已被正确拒绝"
+
+            echo "--- 残档防护 B：目录里最"新"的 dump 是残档时，必须跳过它用完整的那个"
+            # 造一个 mtime 最新的截断残档，放在与完整 dump 同一个目录。
+            cp /tmp/truncated.sql.gz "$BACKUP_DIR/dwz_admin-20990101-000000.sql.gz"
+            touch "$BACKUP_DIR/dwz_admin-20990101-000000.sql.gz"
+            bash deploy/restore.sh --admin-only --check
+            echo "残档已被跳过，演练用的是完整 dump"
+
+        # --- 部署脚本与清单门禁（#16 / #55 / #61）-------------------------------
+        # 部署相关的问题不会让任何单测变红：#9 那种"COPY 一个不存在的文件"
+        # 只有真 docker build 才会暴露；#16 的清单漂移只有对比两份列表才知道。
+        # 这里用 shellcheck + bash -n + 清单一致性 + 关键 COPY 存在性做静态门禁，
+        # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
+        - name: 部署脚本与清单门禁
+          # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
+          image: koalaman/shellcheck-alpine:stable
+          script: |
+            set -e
+            # 该镜像基于 alpine，已内置 shellcheck，无需现场安装。
+            for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
+              echo "--- bash -n $f"
+              bash -n "$f"
+              if command -v shellcheck >/dev/null 2>&1; then
+                echo "--- shellcheck $f"
+                # 只看 warning 及以上：ops/one_click_migrate.sh 有若干历史 info
+                # 级提示（SC2015/SC2016），不属本批范围，不该卡住部署门禁；
+                # 真正的 warning/error 仍然会红。
+                shellcheck --severity=warning "$f"
+              fi
+            done
+
+            # 部署清单与 Dockerfile.web 必须一致（否则静默漏文件）。
+            echo "--- 部署清单一致性"
+            bash deploy/check_manifest.sh
+
+            # 防回退：Dockerfile.entrypoint 不得再 COPY 仓库里不存在的
+            # backend/dist/migrate-docker（#9 的根因）。必须由构建阶段现编。
+            # 只匹配真正的 COPY 指令，注释里提到该路径不算违规。
+            echo "--- 一键部署构建可行性断言"
+            if grep -E '^[[:space:]]*COPY[[:space:]]+backend/dist/migrate-docker' deploy/docker/Dockerfile.entrypoint; then
+              echo "Dockerfile.entrypoint 仍依赖不存在的 backend/dist/migrate-docker，docker build 必失败"
+              exit 1
+            fi
+            grep -Eq 'go build .* -o /out/migrate ./cmd/migrate' deploy/docker/Dockerfile.entrypoint \
+              || { echo "Dockerfile.entrypoint 缺少 migrate 构建阶段"; exit 1; }
+
+            # .dockerignore 必须存在（#61：防止把本机真配置烤进镜像）。
+            echo "--- .dockerignore 存在性"
+            test -f .dockerignore || { echo "缺少根 .dockerignore"; exit 1; }
+            test -f backend/.dockerignore || { echo "缺少 backend/.dockerignore"; exit 1; }
+            echo "部署门禁通过"
+
         # --- 前端：单测 + 构建 -----------------------------------------------
         # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
         - name: 前端单测与构建

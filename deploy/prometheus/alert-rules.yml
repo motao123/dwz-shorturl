@@ -40,11 +40,27 @@ groups:
           description: "dwz_db_up 已为 0 超过 1 分钟，短链跳转与后台均不可用，检查 MySQL 连接与凭据。"
 
       # 4) Redis 不可达：限流会 fail-open、缓存与队列退化，属于功能性降级。
+      #
+      # #58：表达式必须同时要求 dwz_redis_configured == 1。此前只判
+      # dwz_redis_up == 0，而"未配置 Redis"的部署也报 0 —— 这条规则会**永久
+      # firing**，把真正需要处理的告警淹没在噪音里。现在只有"配置了 Redis 但
+      # 连不上"才告警；未配置属于有意为之，不算故障。
       - alert: DwzRedisDown
-        expr: dwz_redis_up == 0
+        expr: dwz_redis_configured == 1 and dwz_redis_up == 0
         for: 2m
         labels:
           severity: warning
         annotations:
           summary: "dwz 后端无法连接 Redis"
-          description: "dwz_redis_up 已为 0 超过 2 分钟：限流将退化为不限流、后台登录锁定失效，请检查 Redis 服务。"
+          description: "已配置 Redis 但 dwz_redis_up 为 0 超过 2 分钟：限流将退化为不限流、后台登录锁定失效，请检查 Redis 服务。"
+
+      # 5) 公共库不可达（分库模式）：跳转与统计依赖公共库，进程"活着"但功能已坏。
+      # 单库模式下该指标不导出，规则自然不 firing。
+      - alert: DwzPublicDatabaseDown
+        expr: dwz_public_db_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "dwz 后端无法连接公共库（分库模式）"
+          description: "dwz_public_db_up 已为 0 超过 2 分钟，短链跳转与点击统计受影响，检查公共库连接与凭据。"

@@ -21,7 +21,7 @@ func TestMetricsEndpointExpositionFormat(t *testing.T) {
 	// A queue that no Redis/DB is attached to: the handler must still render,
 	// reporting the unavailable dependencies as 0 instead of failing.
 	q := &ClickQueue{ch: make(chan ClickEvent, 8), logger: zap.NewNop()}
-	h := NewMetricsHandler(nil, nil, q)
+	h := NewMetricsHandler(nil, nil, nil, false, q)
 
 	router := gin.New()
 	router.GET("/metrics", h.Metrics)
@@ -42,8 +42,9 @@ func TestMetricsEndpointExpositionFormat(t *testing.T) {
 	for _, want := range []string{
 		"# TYPE dwz_up gauge",
 		"dwz_up 1",
-		"dwz_db_up 0",    // nil db -> unavailable
-		"dwz_redis_up 0", // nil redis -> unavailable
+		"dwz_db_up 0",           // nil db -> unavailable
+		"dwz_redis_configured 0", // not configured
+		"dwz_redis_up 0",        // nil redis -> unavailable
 		"dwz_click_queue_capacity 8",
 		"# TYPE dwz_clicks_dropped_total counter",
 	} {
@@ -86,7 +87,7 @@ func TestClickQueueCountsDropsWhenFull(t *testing.T) {
 // report the counter advanced rather than erroring.
 func TestMetricsEndpointIsRepeatable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewMetricsHandler(nil, nil, nil)
+	h := NewMetricsHandler(nil, nil, nil, false, nil)
 	router := gin.New()
 	router.GET("/metrics", h.Metrics)
 
@@ -100,5 +101,28 @@ func TestMetricsEndpointIsRepeatable(t *testing.T) {
 			t.Fatalf("scrape %d: missing dwz_up", i+1)
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// #58: an unconfigured Redis must be distinguishable from a configured-but-down
+// one, otherwise the DwzRedisDown alert fires forever on deployments that
+// intentionally run without Redis.
+func TestMetricsRedisConfiguredDistinguishesUnconfigured(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	render := func(configured bool) string {
+		h := NewMetricsHandler(nil, nil, nil, configured, nil)
+		router := gin.New()
+		router.GET("/metrics", h.Metrics)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		return rec.Body.String()
+	}
+
+	if body := render(false); !strings.Contains(body, "dwz_redis_configured 0") {
+		t.Errorf("unconfigured Redis should report dwz_redis_configured 0\n%s", body)
+	}
+	if body := render(true); !strings.Contains(body, "dwz_redis_configured 1") {
+		t.Errorf("configured Redis should report dwz_redis_configured 1\n%s", body)
 	}
 }

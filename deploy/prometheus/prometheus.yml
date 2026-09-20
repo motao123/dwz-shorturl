@@ -6,7 +6,7 @@
 # rule_files 指向的位置即可。
 #
 # 若后端不在本机，把 targets 改成实际地址；若 /metrics 已按
-# deploy/nginx/default.conf 限制了来源，请确保 Prometheus 的出口 IP 在
+# deploy/docker/web/nginx.conf 的 location = /metrics 限制了来源，请确保 Prometheus 的出口 IP 在
 # 允许网段内。
 
 global:

@@ -106,7 +106,8 @@ DWZ 短网址平台是一套 **PHP 前台 + Go 核心 + Vue3 管理台** 的三�
 | 🗃️ **schema_migrations** | 单一迁移入口 `cmd/migrate` + 版本表，覆盖 PHP 侧与 Go 侧全部迁移，幂等可重跑 |
 | ⚖️ **对账 Cron** | `short_urls` ↔ `wjoy_log` 双写对账、点击计数校准 |
 | 📦 **分区维护** | `click_logs` 按月自动分区、始终超前 2 个月；状态可查（`GET /monitor/partitions`）、失败告警（webhook `system.partition_alert`）、幂等自愈 |
-| 💾 **定时备份** | `deploy/backup.sh` mysqldump + 保留策略 |
+| 💾 **定时备份** | `deploy/backup.sh` mysqldump（原子落盘 + 完整性校验 + 串行锁 + 失败告警）|
+| ♻️ **备份恢复/演练** | `deploy/restore.sh --check` 真导入临时库比对表数，证明备份可恢复 |
 | 📨 **Webhook 异步队列** | PHP 跳转入队（O(1)）+ `migrations/webhook_worker.php` 后台投递，指数退避重试 |
 | 🎨 **静态资源构建** | `php migrations/build_assets.php` 压缩 CSS/JS 并注入内容哈希版本号，零 npm 依赖 |
 | 📋 **迁移工具** | 目录扫描自动发现迁移，`-status` / `-dry-run` / `-all` / `-baseline` / `-config` 全参数 |
@@ -375,6 +376,8 @@ PHP 前台的 webhook 投递、静态资源构建均为可选增强，按需启�
 ```bash
 # 1) Webhook 异步投递队列（每分钟消费一批；也可 --loop 常驻）
 php migrations/webhook_worker.php
+#    Docker 一键部署无需手动 —— deploy/docker/web/supervisord.conf 里已有常驻
+#    webhook-worker 进程，PHP 跳转路径入队后由它投递。
 
 # 2) 构建静态资源（压缩 + 内容哈希版本注入 index.html/api.html/stats.php）
 php migrations/build_assets.php
