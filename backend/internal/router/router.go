@@ -45,10 +45,22 @@ func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, err
 	engine.POST("/r/:code", h.Redirect.Redirect)
 
 	// Public API (API-key authenticated)
+	//
+	// #42: every route declares the scope its key must hold. RequireApiKey
+	// authenticates and loads the key's permissions; ScopeApiKey enforces them.
+	// Until this was wired, the api_keys.permissions column was written by the
+	// create endpoint, shown in the admin UI, and never consulted — so a key
+	// created with no permissions could call every endpoint here.
 	public := engine.Group("/public/api")
 	{
-		public.POST("/short-urls", middleware.RequireApiKey(apiKeyRepo, rateLimiter), h.ShortUrl.CreatePublic)
-		public.POST("/short-urls/batch", middleware.RequireApiKey(apiKeyRepo, rateLimiter), h.ShortUrl.BatchCreatePublic)
+		public.POST("/short-urls",
+			middleware.RequireApiKey(apiKeyRepo, rateLimiter),
+			middleware.ScopeApiKey(middleware.ScopeShortURLsCreate),
+			h.ShortUrl.CreatePublic)
+		public.POST("/short-urls/batch",
+			middleware.RequireApiKey(apiKeyRepo, rateLimiter),
+			middleware.ScopeApiKey(middleware.ScopeShortURLsBatch),
+			h.ShortUrl.BatchCreatePublic)
 	}
 
 	// Member API (public registered users, authenticated by member JWT)
