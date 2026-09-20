@@ -302,16 +302,84 @@
       # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
         - name: 部署脚本与清单门禁
           # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
-          # ⚠️ 必须用 koalaman/shellcheck（Debian 底），**不能**用
-          # koalaman/shellcheck-alpine：后者只是 alpine + shellcheck，**没有 bash**，
-          # 而本 stage 要跑 `bash -n` 与 `bash deploy/check_manifest.sh`
-          # （check_manifest.sh 用了 pipefail 与 <(...) 进程替换，非 bash 不可）。
-          # 用 alpine 版会直接 `sh: bash: not found` 退出 127 —— 本 stage 的红灯根因。
-          image: koalaman/shellcheck:stable
+          # ⚠️ 选镜像的唯一硬约束是「镜像里必须有 /bin/sh」—— 平台用 `sh -c <script>`
+          # 起 stage，镜像少了解释器就会在起容器阶段直接红，
+          # 表现为：exec: "sh": executable file not found in $PATH（返回码 127）。
+          #
+          # 本轮红灯（cnb-26g-1k2vjn1he-002）就是踩了这个：
+          # 上一轮把 koalaman/shellcheck-alpine（无 bash，`sh: bash: not found` 127）
+          # 换成 koalaman/shellcheck:stable，以为 Debian 底必然规整，实际该镜像
+          # **只有 /bin/bash 一个解释器，没有 /bin/sh，也没有 /usr/bin/env**
+          # （本地 `tar -tf` 与 CNB 实测一致）；于是连 stage 脚本第一行都没跑到，
+          # 容器就起不来 —— 日志只有 docker: OCI runtime create failed ... exec: "sh"。
+          #
+          # 结论：**不要**依赖任何第三方镜像的 shell 布局，用官方 node（Debian 底，
+          # 自带 /bin/sh 与 bash）自己装 shellcheck 二进制。node:24 是官方镜像、
+          # 自带 sh/bash/curl/tar，且与本仓库其它 stage 用的是同一个 tag，可复用层。
+          image: node:24
           script: |
             set -e
-            # 该镜像基于 Debian，已内置 shellcheck 与 bash，无需现场安装。
-            # 仍显式自证 bash 存在：镜像换 base 时不该靠"想当然"。
+            # shellcheck 用官方静态 tar 包，避免 apt/apk 装依赖污染镜像层；
+            # 版本钉死，保证门禁结果在不同时间点可复现。
+            # 当前 linux 静态包的最新稳定版就是 v0.10.0（不存在 v0.11/v0.12 这类
+            # 版本号，写错会 404）；npm 的 `shellcheck` 包是另一套版本号（latest 4.x），
+            # 所以 npm 兜底**不带版本**，交给其 dist-tags 决定。
+            SHELLCHECK_VERSION=v0.10.0
+            # 解释器自证：平台用 `sh -c` 起 stage，缺 sh 会连脚本都跑不到（见上方注释）。
+            command -v sh >/dev/null \
+              || { echo "镜像缺少 sh，无法执行 stage 脚本"; exit 1; }
+            test -f /tmp/sc-dl-ok || rm -rf /tmp/sc-dl
+            if ! command -v shellcheck >/dev/null 2>&1; then
+              echo "--- 安装 shellcheck $SHELLCHECK_VERSION"
+              arch=$(uname -m)
+              case "$arch" in
+                x86_64|amd64) sc_arch=x86_64 ;;
+                aarch64|arm64) sc_arch=aarch64 ;;
+                *) echo "不支持的架构：$arch"; exit 1 ;;
+              esac
+              mkdir -p /tmp/sc-dl
+              sc_ok=0
+              if command -v curl >/dev/null 2>&1; then
+                # alpine 的 curl 可能是无 HTTPS 后端的 busybox 版，失败即降级，
+                # 不再静默产出空文件（上一轮 `curl -o` 在无依赖下会拿到空 tar 包）。
+                if curl -fsSL --retry 3 -o /tmp/sc-dl/sc.tar.xz \
+                     "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.$sc_arch.tar.xz" && \
+                   [ -s /tmp/sc-dl/sc.tar.xz ]; then
+                  # 解 tar.xz **不依赖 xz 命令**：node 镜像自带 python3，
+                  # 用标准库 tarfile 读 lzma 即可（CI 镜像里连 xz 都没有，
+                  # 用 `tar -xJ` 会 "Cannot exec: No such file or directory"）。
+                  if command -v python3 >/dev/null 2>&1; then
+                    python3 -c "import tarfile,sys; tarfile.open(sys.argv[1]).extractall(sys.argv[2])" \
+                      /tmp/sc-dl/sc.tar.xz /tmp/sc-dl && sc_ok=1
+                  elif command -v xz >/dev/null 2>&1; then
+                    tar -xJf /tmp/sc-dl/sc.tar.xz -C /tmp/sc-dl && sc_ok=1
+                  elif command -v busybox >/dev/null 2>&1 && busybox --list 2>/dev/null | grep -qx unxz; then
+                    busybox unxz -c /tmp/sc-dl/sc.tar.xz > /tmp/sc-dl/sc.tar \
+                      && tar -xf /tmp/sc-dl/sc.tar -C /tmp/sc-dl && sc_ok=1
+                  else
+                    echo "无可用解压器（python3/xz/busybox unxz），跳过 tar.xz 通道"
+                  fi
+                else
+                  echo "curl 下载 shellcheck 失败，尝试 npm 兜底"
+                fi
+              fi
+              if [ "$sc_ok" -ne 1 ] && command -v npm >/dev/null 2>&1; then
+                # npm 上的 shellcheck 是"下载器"包，版本号与上游 release 不同步，
+                # 因此这里不钉版本，由它的 latest tag 决定（仍会拉到同源二进制）。
+                echo "--- npm 安装 shellcheck（备选源）"
+                npm i -g shellcheck --no-audit --no-fund && sc_ok=1
+              fi
+              [ "$sc_ok" -eq 1 ] \
+                || { echo "shellcheck 安装失败（github 与 npm 均不可用）"; exit 1; }
+              if [ -x "/tmp/sc-dl/shellcheck-$SHELLCHECK_VERSION/shellcheck" ]; then
+                install -m 0755 "/tmp/sc-dl/shellcheck-$SHELLCHECK_VERSION/shellcheck" /usr/local/bin/shellcheck
+              fi
+              rm -rf /tmp/sc-dl
+              touch /tmp/sc-dl-ok
+            fi
+            shellcheck --version | head -3
+            # 仍显式自证 bash 存在：本 stage 要跑 `bash -n` 与 `bash deploy/check_manifest.sh`
+            # （check_manifest.sh 用了 pipefail 与 <(...) 进程替换，非 bash 不可）。
             command -v bash >/dev/null \
               || { echo "镜像缺少 bash，无法执行 bash -n / check_manifest.sh"; exit 1; }
             for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
@@ -652,16 +720,84 @@ master:
       # 在不引入 docker-in-docker 的前提下覆盖住"照着改一定踩"的坑。
         - name: 部署脚本与清单门禁
           # 用自带 shellcheck 的镜像，避免每次流水线 apk add 重复安装系统依赖。
-          # ⚠️ 必须用 koalaman/shellcheck（Debian 底），**不能**用
-          # koalaman/shellcheck-alpine：后者只是 alpine + shellcheck，**没有 bash**，
-          # 而本 stage 要跑 `bash -n` 与 `bash deploy/check_manifest.sh`
-          # （check_manifest.sh 用了 pipefail 与 <(...) 进程替换，非 bash 不可）。
-          # 用 alpine 版会直接 `sh: bash: not found` 退出 127 —— 本 stage 的红灯根因。
-          image: koalaman/shellcheck:stable
+          # ⚠️ 选镜像的唯一硬约束是「镜像里必须有 /bin/sh」—— 平台用 `sh -c <script>`
+          # 起 stage，镜像少了解释器就会在起容器阶段直接红，
+          # 表现为：exec: "sh": executable file not found in $PATH（返回码 127）。
+          #
+          # 本轮红灯（cnb-26g-1k2vjn1he-002）就是踩了这个：
+          # 上一轮把 koalaman/shellcheck-alpine（无 bash，`sh: bash: not found` 127）
+          # 换成 koalaman/shellcheck:stable，以为 Debian 底必然规整，实际该镜像
+          # **只有 /bin/bash 一个解释器，没有 /bin/sh，也没有 /usr/bin/env**
+          # （本地 `tar -tf` 与 CNB 实测一致）；于是连 stage 脚本第一行都没跑到，
+          # 容器就起不来 —— 日志只有 docker: OCI runtime create failed ... exec: "sh"。
+          #
+          # 结论：**不要**依赖任何第三方镜像的 shell 布局，用官方 node（Debian 底，
+          # 自带 /bin/sh 与 bash）自己装 shellcheck 二进制。node:24 是官方镜像、
+          # 自带 sh/bash/curl/tar，且与本仓库其它 stage 用的是同一个 tag，可复用层。
+          image: node:24
           script: |
             set -e
-            # 该镜像基于 Debian，已内置 shellcheck 与 bash，无需现场安装。
-            # 仍显式自证 bash 存在：镜像换 base 时不该靠"想当然"。
+            # shellcheck 用官方静态 tar 包，避免 apt/apk 装依赖污染镜像层；
+            # 版本钉死，保证门禁结果在不同时间点可复现。
+            # 当前 linux 静态包的最新稳定版就是 v0.10.0（不存在 v0.11/v0.12 这类
+            # 版本号，写错会 404）；npm 的 `shellcheck` 包是另一套版本号（latest 4.x），
+            # 所以 npm 兜底**不带版本**，交给其 dist-tags 决定。
+            SHELLCHECK_VERSION=v0.10.0
+            # 解释器自证：平台用 `sh -c` 起 stage，缺 sh 会连脚本都跑不到（见上方注释）。
+            command -v sh >/dev/null \
+              || { echo "镜像缺少 sh，无法执行 stage 脚本"; exit 1; }
+            test -f /tmp/sc-dl-ok || rm -rf /tmp/sc-dl
+            if ! command -v shellcheck >/dev/null 2>&1; then
+              echo "--- 安装 shellcheck $SHELLCHECK_VERSION"
+              arch=$(uname -m)
+              case "$arch" in
+                x86_64|amd64) sc_arch=x86_64 ;;
+                aarch64|arm64) sc_arch=aarch64 ;;
+                *) echo "不支持的架构：$arch"; exit 1 ;;
+              esac
+              mkdir -p /tmp/sc-dl
+              sc_ok=0
+              if command -v curl >/dev/null 2>&1; then
+                # alpine 的 curl 可能是无 HTTPS 后端的 busybox 版，失败即降级，
+                # 不再静默产出空文件（上一轮 `curl -o` 在无依赖下会拿到空 tar 包）。
+                if curl -fsSL --retry 3 -o /tmp/sc-dl/sc.tar.xz \
+                     "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VERSION/shellcheck-$SHELLCHECK_VERSION.linux.$sc_arch.tar.xz" && \
+                   [ -s /tmp/sc-dl/sc.tar.xz ]; then
+                  # 解 tar.xz **不依赖 xz 命令**：node 镜像自带 python3，
+                  # 用标准库 tarfile 读 lzma 即可（CI 镜像里连 xz 都没有，
+                  # 用 `tar -xJ` 会 "Cannot exec: No such file or directory"）。
+                  if command -v python3 >/dev/null 2>&1; then
+                    python3 -c "import tarfile,sys; tarfile.open(sys.argv[1]).extractall(sys.argv[2])" \
+                      /tmp/sc-dl/sc.tar.xz /tmp/sc-dl && sc_ok=1
+                  elif command -v xz >/dev/null 2>&1; then
+                    tar -xJf /tmp/sc-dl/sc.tar.xz -C /tmp/sc-dl && sc_ok=1
+                  elif command -v busybox >/dev/null 2>&1 && busybox --list 2>/dev/null | grep -qx unxz; then
+                    busybox unxz -c /tmp/sc-dl/sc.tar.xz > /tmp/sc-dl/sc.tar \
+                      && tar -xf /tmp/sc-dl/sc.tar -C /tmp/sc-dl && sc_ok=1
+                  else
+                    echo "无可用解压器（python3/xz/busybox unxz），跳过 tar.xz 通道"
+                  fi
+                else
+                  echo "curl 下载 shellcheck 失败，尝试 npm 兜底"
+                fi
+              fi
+              if [ "$sc_ok" -ne 1 ] && command -v npm >/dev/null 2>&1; then
+                # npm 上的 shellcheck 是"下载器"包，版本号与上游 release 不同步，
+                # 因此这里不钉版本，由它的 latest tag 决定（仍会拉到同源二进制）。
+                echo "--- npm 安装 shellcheck（备选源）"
+                npm i -g shellcheck --no-audit --no-fund && sc_ok=1
+              fi
+              [ "$sc_ok" -eq 1 ] \
+                || { echo "shellcheck 安装失败（github 与 npm 均不可用）"; exit 1; }
+              if [ -x "/tmp/sc-dl/shellcheck-$SHELLCHECK_VERSION/shellcheck" ]; then
+                install -m 0755 "/tmp/sc-dl/shellcheck-$SHELLCHECK_VERSION/shellcheck" /usr/local/bin/shellcheck
+              fi
+              rm -rf /tmp/sc-dl
+              touch /tmp/sc-dl-ok
+            fi
+            shellcheck --version | head -3
+            # 仍显式自证 bash 存在：本 stage 要跑 `bash -n` 与 `bash deploy/check_manifest.sh`
+            # （check_manifest.sh 用了 pipefail 与 <(...) 进程替换，非 bash 不可）。
             command -v bash >/dev/null \
               || { echo "镜像缺少 bash，无法执行 bash -n / check_manifest.sh"; exit 1; }
             for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
