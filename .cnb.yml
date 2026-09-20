@@ -199,7 +199,14 @@
             }
 
             init_datadir
-            nohup mysqld --user=mysql --datadir=/var/lib/mysql \
+            # ⚠️ Alpine 的 mariadb 包在 /etc/my.cnf.d/mariadb-server.cnf 里**默认写死
+            # \`skip-networking\`**（Alpine aports main/mariadb/APKBUILD 里可查）——
+            # 于是 mysqld 只开 unix socket，TCP 完全不监听。日志里表现为
+            # "ready for connections ... port: 0"，而 socket ping 却是通的：
+            # 第 6 轮 CI 就是这样 —— 初始化过了、socket 就绪了，宿主侧 TCP 自检
+            # 却连不上 127.0.0.1:3306，白白耗掉 60s 才失败。
+            # 命令行显式 \`--skip-networking=0\` 覆盖配置文件里的开关，强制开 TCP。
+            nohup mysqld --skip-networking=0 --user=mysql --datadir=/var/lib/mysql \
               --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
               --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
               >/tmp/mysql-logs/mysqld.log 2>&1 &
@@ -212,6 +219,15 @@
             if [ "$READY" -ne 1 ]; then
               echo "MySQL 未能在 120s 内就绪"
               tail -n 50 /tmp/mysql-logs/mysqld.log
+              exit 1
+            fi
+            # TCP 端口自证：socket 通了**不代表** TCP 在听。Alpine 的 mariadb 默认
+            # 带了 skip-networking，socket ping 照样 OK 但 TCP 是 0 端口。这里直接
+            # 断言端口已监听，把问题定位到"没开 TCP"这一层，而不是拖到 60s 超时后
+            # 只留一句"宿主侧连不上 127.0.0.1:3306"。
+            if ! grep -qiE 'port:[[:space:]]*3306' /tmp/mysql-logs/mysqld.log; then
+              echo "mysqld 未监听 TCP 3306（日志无 'port: 3306'，多半是被 skip-networking 关了）"
+              grep -iE 'port:|networking' /tmp/mysql-logs/mysqld.log | tail -5
               exit 1
             fi
             mysql_create_root
@@ -501,7 +517,14 @@ master:
             }
 
             init_datadir
-            nohup mysqld --user=mysql --datadir=/var/lib/mysql \
+            # ⚠️ Alpine 的 mariadb 包在 /etc/my.cnf.d/mariadb-server.cnf 里**默认写死
+            # \`skip-networking\`**（Alpine aports main/mariadb/APKBUILD 里可查）——
+            # 于是 mysqld 只开 unix socket，TCP 完全不监听。日志里表现为
+            # "ready for connections ... port: 0"，而 socket ping 却是通的：
+            # 第 6 轮 CI 就是这样 —— 初始化过了、socket 就绪了，宿主侧 TCP 自检
+            # 却连不上 127.0.0.1:3306，白白耗掉 60s 才失败。
+            # 命令行显式 \`--skip-networking=0\` 覆盖配置文件里的开关，强制开 TCP。
+            nohup mysqld --skip-networking=0 --user=mysql --datadir=/var/lib/mysql \
               --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
               --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
               >/tmp/mysql-logs/mysqld.log 2>&1 &
@@ -514,6 +537,15 @@ master:
             if [ "$READY" -ne 1 ]; then
               echo "MySQL 未能在 120s 内就绪"
               tail -n 50 /tmp/mysql-logs/mysqld.log
+              exit 1
+            fi
+            # TCP 端口自证：socket 通了**不代表** TCP 在听。Alpine 的 mariadb 默认
+            # 带了 skip-networking，socket ping 照样 OK 但 TCP 是 0 端口。这里直接
+            # 断言端口已监听，把问题定位到"没开 TCP"这一层，而不是拖到 60s 超时后
+            # 只留一句"宿主侧连不上 127.0.0.1:3306"。
+            if ! grep -qiE 'port:[[:space:]]*3306' /tmp/mysql-logs/mysqld.log; then
+              echo "mysqld 未监听 TCP 3306（日志无 'port: 3306'，多半是被 skip-networking 关了）"
+              grep -iE 'port:|networking' /tmp/mysql-logs/mysqld.log | tail -5
               exit 1
             fi
             mysql_create_root
