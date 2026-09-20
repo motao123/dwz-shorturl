@@ -359,12 +359,26 @@
             init_datadir() {
               [ -d /var/lib/mysql/mysql ] && return 0
               echo "初始化数据目录（约 20-30s）..."
+              # timeout 兜底：mariadb-install-db 在主机名反查不出去的环境里会
+              # 空转不退出（不报错、不产出系统表），把 stage 直接耗到平台超时、
+              # 日志一片空白 —— 比报错更难查。本机复现过：不加 timeout 时它一直
+              # 处于 R 状态且无子进程。90s 足够正常初始化，超时不 abort（只提示），
+              # 由下面的系统表断言决定成败。
               if mysqld --version 2>&1 | grep -qi 'mariadb'; then
                 echo "检测到 MariaDB 服务端，使用 mariadb-install-db"
-                mariadb-install-db --user=mysql --datadir=/var/lib/mysql --skip-test-db >/dev/null
+                timeout 90 mariadb-install-db --user=mysql --datadir=/var/lib/mysql --skip-test-db >/dev/null \
+                  || echo "（mariadb-install-db 未在 90s 内正常结束，检查是否产出系统表）"
               else
                 echo "检测到 MySQL 服务端，使用 --initialize-insecure"
-                mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql
+                timeout 90 mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql \
+                  || echo "（--initialize-insecure 未在 90s 内正常结束）"
+              fi
+              # 不论走哪条路，都断言系统表真的产出了（超时/静默失败会在这里被拦住，
+              # 而不是拖到 60s 后一句"连不上"）。
+              if [ ! -d /var/lib/mysql/mysql ]; then
+                echo "初始化未产出系统表，data 目录内容如下："
+                ls -la /var/lib/mysql | head -20
+                exit 1
               fi
             }
 
@@ -376,8 +390,12 @@
             # 第 6 轮 CI 就是这样 —— 初始化过了、socket 就绪了，宿主侧 TCP 自检
             # 却连不上 127.0.0.1:3306，白白耗掉 60s 才失败。
             # 命令行显式 \`--skip-networking=0\` 覆盖配置文件里的开关，强制开 TCP。
+            # --pid-file 显式给：MariaDB 的默认 pid 路径是从 socket 目录推导的，
+            # socket 目录不存在/不可写时会 "can't create PID file" 然后直接 segfault
+            # （本机复现：报完 PID file 错就 signal 11）。显式给出即可与该推导解耦。
             nohup mysqld --skip-networking=0 --user=mysql --datadir=/var/lib/mysql \
-              --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
+              --socket=/run/mysqld/mysqld.sock --pid-file=/run/mysqld/mysqld.pid \
+              --port=3306 --bind-address=127.0.0.1 \
               --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
               >/tmp/mysql-logs/mysqld.log 2>&1 &
             echo "等待 MySQL 就绪..."
@@ -791,12 +809,26 @@ master:
             init_datadir() {
               [ -d /var/lib/mysql/mysql ] && return 0
               echo "初始化数据目录（约 20-30s）..."
+              # timeout 兜底：mariadb-install-db 在主机名反查不出去的环境里会
+              # 空转不退出（不报错、不产出系统表），把 stage 直接耗到平台超时、
+              # 日志一片空白 —— 比报错更难查。本机复现过：不加 timeout 时它一直
+              # 处于 R 状态且无子进程。90s 足够正常初始化，超时不 abort（只提示），
+              # 由下面的系统表断言决定成败。
               if mysqld --version 2>&1 | grep -qi 'mariadb'; then
                 echo "检测到 MariaDB 服务端，使用 mariadb-install-db"
-                mariadb-install-db --user=mysql --datadir=/var/lib/mysql --skip-test-db >/dev/null
+                timeout 90 mariadb-install-db --user=mysql --datadir=/var/lib/mysql --skip-test-db >/dev/null \
+                  || echo "（mariadb-install-db 未在 90s 内正常结束，检查是否产出系统表）"
               else
                 echo "检测到 MySQL 服务端，使用 --initialize-insecure"
-                mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql
+                timeout 90 mysqld --initialize-insecure --user=mysql --datadir=/var/lib/mysql \
+                  || echo "（--initialize-insecure 未在 90s 内正常结束）"
+              fi
+              # 不论走哪条路，都断言系统表真的产出了（超时/静默失败会在这里被拦住，
+              # 而不是拖到 60s 后一句"连不上"）。
+              if [ ! -d /var/lib/mysql/mysql ]; then
+                echo "初始化未产出系统表，data 目录内容如下："
+                ls -la /var/lib/mysql | head -20
+                exit 1
               fi
             }
 
@@ -808,8 +840,12 @@ master:
             # 第 6 轮 CI 就是这样 —— 初始化过了、socket 就绪了，宿主侧 TCP 自检
             # 却连不上 127.0.0.1:3306，白白耗掉 60s 才失败。
             # 命令行显式 \`--skip-networking=0\` 覆盖配置文件里的开关，强制开 TCP。
+            # --pid-file 显式给：MariaDB 的默认 pid 路径是从 socket 目录推导的，
+            # socket 目录不存在/不可写时会 "can't create PID file" 然后直接 segfault
+            # （本机复现：报完 PID file 错就 signal 11）。显式给出即可与该推导解耦。
             nohup mysqld --skip-networking=0 --user=mysql --datadir=/var/lib/mysql \
-              --socket=/run/mysqld/mysqld.sock --port=3306 --bind-address=127.0.0.1 \
+              --socket=/run/mysqld/mysqld.sock --pid-file=/run/mysqld/mysqld.pid \
+              --port=3306 --bind-address=127.0.0.1 \
               --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci \
               >/tmp/mysql-logs/mysqld.log 2>&1 &
             echo "等待 MySQL 就绪..."
