@@ -136,7 +136,7 @@ func main() {
 	auditSvc := service.NewAuditService(auditRepo)
 	apiKeySvc := service.NewApiKeyService(apiKeyRepo)
 	domainSvc := service.NewDomainService(domainRepo)
-	memberSvc := service.NewMemberService(memberRepo)
+	memberSvc := service.NewMemberService(memberRepo).WithPurge(repository.NewMemberPurgeRepo(db, publicDB), zapLogger)
 	violationSvc := service.NewViolationService(violationRepo)
 	monitorSvc := service.NewMonitorService(db, rdb, clickQueue, cronSvc, zapLogger)
 	webhookSvc := service.NewWebhookService(webhookRepo, zapLogger)
@@ -226,7 +226,7 @@ func main() {
 	}
 
 	// Register routes
-	router.Setup(engine, handlers, permFunc, zapLogger, cfg, apiKeyRepo, rateLimiter, memberRepo)
+	router.Setup(engine, handlers, permFunc, zapLogger, cfg, apiKeyRepo, rateLimiter, memberRepo, runtimeCfg)
 
 	// Create HTTP server
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

@@ -146,3 +146,47 @@ func TestRuntimeConfig_DBErrorIsLoudAndConservative(t *testing.T) {
 		t.Error("LoadError must surface the degraded state")
 	}
 }
+
+// TestRuntimeConfig_MemberRateLimit covers the #8/#37 quota resolver: the admin
+// UI must be able to tune both numbers, illegal values must fall back (not
+// silently disable the gate), and an explicit 0 must stay 0 because that is the
+// documented "unlimited" opt-out.
+func TestRuntimeConfig_MemberRateLimit(t *testing.T) {
+	// Defaults: an install that never opened the config page still gets a bound.
+	rc := NewRuntimeConfig(&cfgRepoStub{}, nil)
+	if max, window := rc.MemberRateLimit(); max != defaultMemberRateMax || window.Seconds() != defaultMemberRateWindow {
+		t.Fatalf("defaults = (%d, %v), want (%d, %ds)",
+			max, window, defaultMemberRateMax, defaultMemberRateWindow)
+	}
+
+	// Operator values win.
+	rc = NewRuntimeConfig(&cfgRepoStub{rows: []model.SystemConfig{
+		row(KeyMemberRateMax, "30"),
+		row(KeyMemberRateWindow, "120"),
+	}}, nil)
+	if max, window := rc.MemberRateLimit(); max != 30 || window.Seconds() != 120 {
+		t.Fatalf("operator values = (%d, %v), want (30, 120s)", max, window)
+	}
+
+	// Explicit 0 is the documented opt-out and must survive.
+	rc = NewRuntimeConfig(&cfgRepoStub{rows: []model.SystemConfig{row(KeyMemberRateMax, "0")}}, nil)
+	if max, _ := rc.MemberRateLimit(); max != 0 {
+		t.Fatalf("explicit 0 must mean unlimited, got %d", max)
+	}
+
+	// Garbage must fall back to the default, never to "unlimited".
+	rc = NewRuntimeConfig(&cfgRepoStub{rows: []model.SystemConfig{
+		row(KeyMemberRateMax, "abc"),
+		row(KeyMemberRateWindow, "-5"),
+	}}, nil)
+	if max, window := rc.MemberRateLimit(); max != defaultMemberRateMax || window.Seconds() != defaultMemberRateWindow {
+		t.Fatalf("garbage values = (%d, %v), want defaults", max, window)
+	}
+
+	// An absurd window is clamped back to the default so a typo cannot create a
+	// window that rejects every request.
+	rc = NewRuntimeConfig(&cfgRepoStub{rows: []model.SystemConfig{row(KeyMemberRateWindow, "999999")}}, nil)
+	if _, window := rc.MemberRateLimit(); window.Seconds() != defaultMemberRateWindow {
+		t.Fatalf("absurd window = %v, want default %ds", window, defaultMemberRateWindow)
+	}
+}

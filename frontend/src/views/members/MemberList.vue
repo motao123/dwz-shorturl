@@ -113,8 +113,11 @@ async function handleResetPassword(row: Member) {
 
 async function handleRemove(row: Member) {
   try {
+    // 删除是级联的（服务端 member pur）：文案必须说清会连带处理其短链与
+    // 点击明细，否则管理员以为只删了账号，事后发现短链全 410 会当成故障。
     await ElMessageBox.confirm(
-      `确定删除注册用户「${row.username}」吗？该操作不可撤销。`,
+      `确定删除注册用户「${row.username}」吗？该操作不可撤销。` +
+        '删除后该用户的短链将全部停止跳转，其点击明细中的访问者信息会被匿名化。',
       '删除确认',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
     )
@@ -123,7 +126,7 @@ async function handleRemove(row: Member) {
   }
   try {
     await removeMember(row.id)
-    ElMessage.success('注册用户已删除')
+    ElMessage.success('注册用户已删除，其短链已停用')
     loadData()
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '删除失败')

@@ -48,6 +48,16 @@ const (
 	defaultBatchMaxURLs        = 100
 	defaultAllowedExpireDays   = "0,1,7,30,365"
 
+	// Member API quota defaults (#8/#37). 120 requests / 60s per member token is
+	// deliberately generous: it must not break the console's own burst (a page
+	// load issues several calls), while still bounding an authenticated client
+	// that loops the create endpoint. Operators can tune both from the config
+	// page; 0 in api_rate_max disables the limit.
+	defaultMemberRateMax    = 120
+	defaultMemberRateWindow = 60
+	minMemberRateWindow     = 1
+	maxMemberRateWindow     = 3600
+
 	// Guard rails for the switches an operator can set. A zero/negative batch
 	// size would reject every batch request, so it falls back to the default.
 	minBatchMaxURLs = 1
@@ -60,6 +70,8 @@ const (
 	KeyRequireRegistration = "shorturl.require_registration"
 	KeyBatchMaxURLs        = "batch.max_urls"
 	KeyAllowedExpireDays   = "short_url.allowed_expire_days"
+	KeyMemberRateMax       = "member.api_rate_max"
+	KeyMemberRateWindow    = "member.api_rate_window"
 )
 
 // NewRuntimeConfig builds a resolver. A nil repo yields defaults for everything,
@@ -251,6 +263,36 @@ func parseExpireDays(raw string) ([]int, bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+// MemberRateLimit returns the per-member quota as (max, window). max <= 0 means
+// unlimited. Values outside the sane range fall back to the default rather than
+// silently disabling the gate, and the window is clamped to 1..3600s so a typo
+// cannot produce a 1ns window that rejects everything.
+func (r *RuntimeConfig) MemberRateLimit() (int, time.Duration) {
+	max := defaultMemberRateMax
+	if v, ok := r.lookup(KeyMemberRateMax); ok && v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			r.logger.Warn("member.api_rate_max 取值非法，使用默认值",
+				zap.String("value", v), zap.Int("default", defaultMemberRateMax))
+		} else {
+			max = n
+		}
+	}
+
+	window := defaultMemberRateWindow
+	if v, ok := r.lookup(KeyMemberRateWindow); ok && v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < minMemberRateWindow || n > maxMemberRateWindow {
+			r.logger.Warn("member.api_rate_window 取值非法，使用默认值",
+				zap.String("value", v), zap.Int("default", defaultMemberRateWindow))
+		} else {
+			window = n
+		}
+	}
+
+	return max, time.Duration(window) * time.Second
 }
 
 func parseBool(v string, fallback bool) bool {
