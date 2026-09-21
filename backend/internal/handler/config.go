@@ -43,11 +43,27 @@ func (h *ConfigHandler) GetAll(c *gin.Context) {
 	// to the frontend. The keys stay visible so admins know the setting exists.
 	for i := range configs {
 		if isSensitiveConfigKey(configs[i].ConfigKey) && configs[i].ConfigValue != "" {
-			configs[i].ConfigValue = "******"
+			configs[i].ConfigValue = configValueMask
 		}
 	}
 
 	pkg.Success(c, configs)
+}
+
+// configValueMask replaces sensitive values in GetAll()'s response.
+const configValueMask = "******"
+
+// resolveConfigValue stops the mask from being written back as a real value.
+// GetAll() shows ****** for secrets, so any round-trip — an operator touching
+// that one field, or an API client PUTing a whole GetAll() snapshot back —
+// would otherwise store the literal "******" over the real SMTP password. That
+// failure is silent and unrecoverable (the original value is gone), so the mask
+// is treated as "unchanged" for sensitive keys.
+func resolveConfigValue(key, incoming, stored string) string {
+	if incoming == configValueMask && isSensitiveConfigKey(key) {
+		return stored
+	}
+	return incoming
 }
 
 func isSensitiveConfigKey(key string) bool {
@@ -91,6 +107,8 @@ func (h *ConfigHandler) BatchUpdate(c *gin.Context) {
 			Description: item.Description,
 		}
 		if prev, ok := cur[item.ConfigKey]; ok {
+			// 掩码回写保护：客户端把 GetAll() 的 ****** 原样提交回来时，保留库中真值。
+			merged.ConfigValue = resolveConfigValue(item.ConfigKey, item.ConfigValue, prev.ConfigValue)
 			if merged.ValueType == "" {
 				merged.ValueType = prev.ValueType
 			}

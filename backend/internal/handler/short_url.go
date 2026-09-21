@@ -513,9 +513,12 @@ func (h *ShortUrlHandler) Restore(c *gin.Context) {
 	pkg.Success(c, record)
 }
 
-func (h *ShortUrlHandler) List(c *gin.Context) {
-	page, perPage := pkg.ParsePagination(c)
-
+// parseShortUrlFilters is the ONE place admin short-link filters are read from
+// the query string. List and Export must share it: Export used to parse only
+// keyword+status, so an operator who filtered by date or category and exported
+// got the whole table instead of the rows on screen, and the "共 N 条" in the UI
+// never matched the file (#26).
+func parseShortUrlFilters(c *gin.Context) repository.ShortUrlFilters {
 	filters := repository.ShortUrlFilters{
 		Keyword:        c.Query("keyword"),
 		IncludeDeleted: c.Query("include_deleted") == "1",
@@ -561,6 +564,12 @@ func (h *ShortUrlHandler) List(c *gin.Context) {
 
 	filters.Sort = c.Query("sort")
 	filters.Order = c.Query("order")
+	return filters
+}
+
+func (h *ShortUrlHandler) List(c *gin.Context) {
+	page, perPage := pkg.ParsePagination(c)
+	filters := parseShortUrlFilters(c)
 
 	list, total, err := h.svc.List(page, perPage, filters)
 	if err != nil {
@@ -572,19 +581,8 @@ func (h *ShortUrlHandler) List(c *gin.Context) {
 }
 
 func (h *ShortUrlHandler) Export(c *gin.Context) {
-	filters := repository.ShortUrlFilters{
-		Keyword: c.Query("keyword"),
-	}
-
-	if s := c.Query("status"); s != "" {
-		v, err := strconv.ParseInt(s, 10, 8)
-		if err == nil {
-			status := int8(v)
-			filters.Status = &status
-		}
-	}
-
-	data, err := h.svc.Export(filters)
+	// #26: 与 List 共用同一份筛选解析，导出必须等于屏幕上看到的那些行。
+	data, err := h.svc.Export(parseShortUrlFilters(c))
 	if err != nil {
 		pkg.Fail(c, http.StatusInternalServerError, pkg.CodeInternalError, "export failed")
 		return
