@@ -74,14 +74,11 @@ func main() {
 	// Initialize Redis
 	rdb := initRedis(cfg)
 
-	// P1-4: register the JWT logout blacklist (revoked jti → rejected by Auth middleware).
-	middleware.SetTokenBlacklistCheck(func(jti string) bool {
-		if jti == "" {
-			return false
-		}
-		n, err := rdb.Exists(rdb.Context(), "jwt:blacklist:"+jti).Result()
-		return err == nil && n > 0
-	})
+	// 会话吊销：登出作废单个 jti；禁用账号、重置密码、改角色按用户水位线作废其全部在授凭证。
+	// redis.addr 留空 = 该部署没有吊销能力，检查恒为放行；配置了却连不上属于"不可用"，
+	// 由鉴权中间件按拒绝处理（#38/#42）。
+	revocation := service.NewSessionRevocation(rdb, cfg.Redis.Addr != "").WithLogger(zapLogger)
+	middleware.SetSessionRevocationCheck(revocation.Checker())
 
 	// Initialize click event queue (buffered channel + batch worker)
 	clickQueue := handler.NewClickQueue(db, zapLogger)
@@ -129,16 +126,10 @@ func main() {
 	runtimeCfg := service.NewRuntimeConfig(configRepo, zapLogger)
 
 	// Initialize services
-	authSvc := service.NewAuthService(userRepo, roleRepo).WithTokenBlacklist(func(jti string) bool {
-		if jti == "" {
-			return false
-		}
-		n, err := rdb.Exists(rdb.Context(), "jwt:blacklist:"+jti).Result()
-		return err == nil && n > 0
-	})
+	authSvc := service.NewAuthService(userRepo, roleRepo).WithSessionCheck(revocation.Checker())
 	shortUrlSvc := service.NewShortUrlService(shortUrlRepo, rdb, db, wjoyLogRepo, domainRepo, violationRepo).
 		WithSettings(runtimeCfg)
-	userSvc := service.NewUserService(userRepo)
+	userSvc := service.NewUserService(userRepo).WithSessionRevocation(revocation, zapLogger)
 	roleSvc := service.NewRoleService(roleRepo)
 	statsSvc := service.NewStatsService(shortUrlRepo, db)
 	configSvc := service.NewConfigService(configRepo).WithRuntimeConfig(runtimeCfg)
@@ -203,7 +194,7 @@ func main() {
 
 	// Initialize handlers
 	handlers := &router.Handlers{
-		Auth:      handler.NewAuthHandler(authSvc, rdb),
+		Auth:      handler.NewAuthHandler(authSvc, revocation),
 		ShortUrl:  handler.NewShortUrlHandler(shortUrlSvc, rateLimiter, cfg.RateLimit, auditSvc, webhookSvc),
 		User:      handler.NewUserHandler(userSvc, auditSvc),
 		Role:      handler.NewRoleHandler(roleSvc, auditSvc),

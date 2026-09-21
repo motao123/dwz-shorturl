@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"errors"
 
 	"dwz-admin/internal/model"
 	"dwz-admin/internal/pkg"
 	"dwz-admin/internal/repository"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -63,10 +65,43 @@ type UserService interface {
 
 type userService struct {
 	userRepo repository.UserRepo
+	// revocation 作废被改动账号当前已签发的全部会话（#42）。nil 表示本部署没有
+	// 吊销存储，此时行为与改动前一致。
+	revocation Revoker
+	logger     *zap.Logger
 }
 
-func NewUserService(userRepo repository.UserRepo) UserService {
+// NewUserService returns the concrete type so callers can chain optional wiring
+// (WithSessionRevocation); it still satisfies UserService.
+func NewUserService(userRepo repository.UserRepo) *userService {
 	return &userService{userRepo: userRepo}
+}
+
+// WithSessionRevocation wires session revocation for the mutations that change
+// what an account is allowed to be. A nil revoker leaves behaviour unchanged.
+func (s *userService) WithSessionRevocation(revocation Revoker, logger *zap.Logger) *userService {
+	s.revocation = revocation
+	s.logger = logger
+	return s
+}
+
+// revokeSessions 在 DB 变更已经落库之后作废会话。失败不回滚那次变更——禁用账号本身
+// 才是要紧的一步——但必须记成 Error，否则"以为已经吊销"比没吊销更糟。
+func (s *userService) revokeSessions(userID uint64, reason string) {
+	if s.revocation == nil || userID == 0 {
+		return
+	}
+	if err := s.revocation.RevokeUser(context.Background(), userID); err != nil {
+		if s.logger != nil {
+			s.logger.Error("failed to revoke sessions after an account change",
+				zap.Uint64("user_id", userID), zap.String("reason", reason), zap.Error(err))
+		}
+		return
+	}
+	if s.logger != nil {
+		s.logger.Info("sessions revoked after an account change",
+			zap.Uint64("user_id", userID), zap.String("reason", reason))
+	}
 }
 
 func (s *userService) Create(username, email, password, displayName string) (*model.User, error) {
@@ -124,6 +159,8 @@ func (s *userService) Update(id uint64, email, displayName, avatarURL string, st
 		user.AvatarURL = avatarURL
 	}
 
+	statusChanged := status != nil && *status != user.Status
+
 	if status != nil {
 		user.Status = *status
 	}
@@ -132,11 +169,20 @@ func (s *userService) Update(id uint64, email, displayName, avatarURL string, st
 		return nil, err
 	}
 
+	// #42：禁用（或任何状态变更）必须立刻对在授 token 生效，而不是等它 2 小时自然过期。
+	if statusChanged {
+		s.revokeSessions(user.ID, "status_changed")
+	}
+
 	return user, nil
 }
 
 func (s *userService) Delete(id uint64) error {
-	return s.userRepo.SoftDelete(id)
+	if err := s.userRepo.SoftDelete(id); err != nil {
+		return err
+	}
+	s.revokeSessions(id, "account_deleted")
+	return nil
 }
 
 func (s *userService) GetByID(id uint64) (*model.User, error) {
@@ -180,7 +226,12 @@ func (s *userService) AssignRoles(userID uint64, roleIDs []uint64) error {
 	if len(roleIDs) == 0 {
 		return ErrEmptyRoles
 	}
-	return s.userRepo.SetRoles(userID, roleIDs)
+	if err := s.userRepo.SetRoles(userID, roleIDs); err != nil {
+		return err
+	}
+	// #42：角色写在 claims 里，改角色后旧 token 仍带着旧权限，必须作废。
+	s.revokeSessions(userID, "roles_changed")
+	return nil
 }
 
 func (s *userService) ResetPassword(id uint64, newPassword string) error {
@@ -195,7 +246,11 @@ func (s *userService) ResetPassword(id uint64, newPassword string) error {
 	}
 
 	user.PasswordHash = hash
-	return s.userRepo.Update(user)
+	if err := s.userRepo.Update(user); err != nil {
+		return err
+	}
+	s.revokeSessions(user.ID, "password_reset")
+	return nil
 }
 
 func (s *userService) TotpStatus(id uint64) (bool, error) {

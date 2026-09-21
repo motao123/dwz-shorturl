@@ -202,7 +202,6 @@ INSERT INTO `permissions` (`resource`, `action`, `description`) VALUES
 ('short_urls', 'delete', 'Delete short URLs'),
 ('short_urls', 'export', 'Export short URLs'),
 ('stats', 'read', 'View statistics'),
-('stats', 'export', 'Export statistics'),
 ('users', 'create', 'Create users'),
 ('users', 'read', 'View users'),
 ('users', 'update', 'Edit users'),

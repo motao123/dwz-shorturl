@@ -40,7 +40,7 @@ DirectoryIndex index.php index.html
 #
 # 未使用 Go 后端（纯 PHP 形态，前台 do.php/api.php/batch.php/member.php 自足）
 # 时，把上面「方案 B」整段注释掉即可；此时管理台「域名池」与会员中心接口不可用。
-# 完整说明见 docs/deploy-baota.md。
+# 完整说明见维护者本地保存的部署手册（docs/deploy-baota.md，不随仓库分发）。
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
