@@ -103,7 +103,7 @@ jobs:
       - name: 部署脚本静态检查 + 清单一致性 + 一键部署可行性
         run: |
           set -e
-          for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
+          for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy/check_internal_docs.sh deploy.sh ops/one_click_migrate.sh; do
             echo "--- bash -n $f"; bash -n "$f"
             echo "--- shellcheck $f"; shellcheck --severity=warning "$f"
           done
