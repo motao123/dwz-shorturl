@@ -148,6 +148,8 @@ $yaml = "server:\n"
     . "  batch_window: 60\n"
     . "log:\n"
     . "  level: info\n"
+    // 容器里 stdout 就是日志流，JSON 才能被 Loki/ELK 直接解析（#59）。
+    . "  format: json\n"
     // 邮件（可选）：不填 host/user/password 时后端会明确提示「邮件服务未配置」，
     // 而不是泛化的发送失败，方便自助部署者定位。
     . "smtp:\n"

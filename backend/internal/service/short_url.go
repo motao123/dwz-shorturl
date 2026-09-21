@@ -44,6 +44,10 @@ var (
 	ErrExpireDaysNotAllowed = errors.New("有效期不在管理员允许的范围内")
 	ErrCustomCodeTaken  = errors.New("自定义短码已被占用")
 	ErrCodeCollision    = errors.New("短码生成冲突，请重试")
+	// ErrMemberQuotaExceeded is the per-member live-link cap (#41). It counts
+	// against a limit an operator can raise in the config catalog, so the message
+	// points there instead of sounding like a hard error.
+	ErrMemberQuotaExceeded = errors.New("短链数量已达本站上限，请清理后再创建或联系管理员调整配额")
 )
 
 // PublicSyncError reports that an administrative change was applied to the
@@ -82,6 +86,13 @@ type ShortUrlService interface {
 	// RenewIfExpired reactivates a soft-expired link in place, shared by the
 	// public API and member console paths so semantics stay identical.
 	RenewIfExpired(existing *model.ShortUrl, expireDays int)
+	// ValidateDomain checks a domain reference is present and active. Exported so
+	// the member path enforces it too (#41): it used to accept any int64, which
+	// both probed the domains table for existence and attached links to disabled
+	// domains for link_count bookkeeping.
+	ValidateDomain(domainID *uint64) error
+	// CheckMemberQuota enforces the per-member live-link cap (#41).
+	CheckMemberQuota(memberID uint64) error
 	// WithSettings attaches the runtime governance switches (#4/#62).
 	WithSettings(rc *RuntimeConfig) ShortUrlService
 	// FillShortURLs / FillShortURL / FillShortURLOutcomes populate each record's
@@ -183,9 +194,9 @@ func (s *shortUrlService) checkViolation(longURL, source, ip string) error {
 	return nil
 }
 
-// validateDomain checks that a domain reference is present and active. It is a
+// ValidateDomain checks that a domain reference is present and active. It is a
 // no-op when domainID is nil. A nil domainRepo treats the reference as valid.
-func (s *shortUrlService) validateDomain(domainID *uint64) error {
+func (s *shortUrlService) ValidateDomain(domainID *uint64) error {
 	if domainID == nil || s.domainRepo == nil {
 		return nil
 	}
@@ -198,6 +209,30 @@ func (s *shortUrlService) validateDomain(domainID *uint64) error {
 	}
 	if d.Status != 1 {
 		return ErrDomainInvalid
+	}
+	return nil
+}
+
+// CheckMemberQuota enforces the per-member live-link cap (#41). 0 in the config
+// means unlimited. Soft-deleted rows are excluded by GORM's default scope, so a
+// member frees quota by deleting; expired/disabled links still occupy a slot
+// because they can be renewed back into service.
+func (s *shortUrlService) CheckMemberQuota(memberID uint64) error {
+	max := defaultMemberMaxLinks
+	if s.settings != nil {
+		max = s.settings.MemberMaxLinks()
+	}
+	if max <= 0 {
+		return nil
+	}
+	count, err := s.repo.CountByMember(memberID)
+	if err != nil {
+		// Failing closed would lock members out of creating anything whenever the
+		// count query errors; the cap is an abuse control, not an auth gate.
+		return nil
+	}
+	if count >= int64(max) {
+		return ErrMemberQuotaExceeded
 	}
 	return nil
 }
@@ -239,7 +274,7 @@ func (s *shortUrlService) create(longURL, custom string, expireDays int, domainI
 		}
 	}
 
-	if err := s.validateDomain(domainID); err != nil {
+	if err := s.ValidateDomain(domainID); err != nil {
 		return nil, err
 	}
 
@@ -640,7 +675,7 @@ func (s *shortUrlService) Update(id uint64, longURL, title string, expireDays *i
 		return nil, err
 	}
 
-	if err := s.validateDomain(domainID); err != nil {
+	if err := s.ValidateDomain(domainID); err != nil {
 		return nil, err
 	}
 

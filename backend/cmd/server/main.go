@@ -54,7 +54,7 @@ func main() {
 	}
 
 	// Initialize logger
-	zapLogger := initLogger(cfg.Log.Level, cfg.Log.File)
+	zapLogger := initLogger(cfg.Log.Level, cfg.Log.File, cfg.Log.Format)
 	defer zapLogger.Sync()
 
 	// public.base_url is no longer defaulted to any domain (#20). Without it the
@@ -320,7 +320,7 @@ func isInsecureJWTSecret(secret string) bool {
 	return false
 }
 
-func initLogger(level, file string) *zap.Logger {
+func initLogger(level, file, format string) *zap.Logger {
 	var zapLevel zapcore.Level
 	switch level {
 	case "debug":
@@ -335,9 +335,17 @@ func initLogger(level, file string) *zap.Logger {
 
 	var cores []zapcore.Core
 
-	// Console encoder
-	consoleEncoder := zapcore.NewConsoleEncoder(zap.NewProductionEncoderConfig())
-	cores = append(cores, zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zapLevel))
+	// stdout is the container log stream; `log.format: json` makes it parseable by
+	// Loki/ELK without a file in between (#59). Unknown values fall back to
+	// console rather than silently producing no output at all.
+	encoderConfig := zap.NewProductionEncoderConfig()
+	var stdoutEncoder zapcore.Encoder
+	if strings.EqualFold(strings.TrimSpace(format), "json") {
+		stdoutEncoder = zapcore.NewJSONEncoder(encoderConfig)
+	} else {
+		stdoutEncoder = zapcore.NewConsoleEncoder(encoderConfig)
+	}
+	cores = append(cores, zapcore.NewCore(stdoutEncoder, zapcore.AddSync(os.Stdout), zapLevel))
 
 	// File encoder (if configured)
 	if file != "" {

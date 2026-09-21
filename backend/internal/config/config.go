@@ -88,6 +88,11 @@ type RateLimitConfig struct {
 type LogConfig struct {
 	Level string `mapstructure:"level"`
 	File  string `mapstructure:"file"`
+	// Format is "console" (human-readable, the default for a laptop `go run`) or
+	// "json". Containers should use json: a stack that collects stdout has to
+	// parse level/msg/ts structurally, and #59 exists because production logs
+	// were console-only while the JSON encoder was reachable only via log.file.
+	Format string `mapstructure:"format"`
 }
 
 var (
@@ -133,6 +138,7 @@ func Init(path string) error {
 		v.SetDefault("cors.allowed_origins", []string{})
 		v.SetDefault("log.level", "info")
 		v.SetDefault("log.file", "")
+		v.SetDefault("log.format", "console")
 
 		v.AutomaticEnv()
 	v.SetEnvPrefix("DWZ")

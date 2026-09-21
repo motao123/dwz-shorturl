@@ -135,11 +135,18 @@ if (is_file($configFile)) {
 }
 $host = isset($cliParams['host']) ? $cliParams['host'] : (isset($host) ? $host : null);
 $user = isset($cliParams['user']) ? $cliParams['user'] : (isset($user) ? $user : null);
-$pwd = isset($cliParams['pwd']) ? $cliParams['pwd'] : (isset($pwd) ? $pwd : '');
+// 口令优先取 DWZ_DB_PWD 环境变量，其次才看 --pwd（#57）。命令行参数会出现在
+// /proc/<pid>/cmdline 里，同机任何低权限用户都能读到——迁移正是拿这个账号跑
+// DDL 的高权限凭据。ops/one_click_migrate.sh 早就用 MYSQL_PWD 传值，这里补齐
+// 另一处，两栈的口令都不再进 argv。
+$envPwd = getenv('DWZ_DB_PWD');
+$pwd = $envPwd !== false && $envPwd !== ''
+    ? $envPwd
+    : (isset($cliParams['pwd']) ? $cliParams['pwd'] : (isset($pwd) ? $pwd : ''));
 $dbname = isset($cliParams['db']) ? $cliParams['db'] : (isset($dbname) ? $dbname : null);
 $port = isset($cliParams['port']) ? (int) $cliParams['port'] : (isset($port) ? (int) $port : 3306);
 if ($host === null || $user === null || $dbname === null) {
-    abortMigration('未找到完整数据库配置。请保留现有 config.php，或传入 --host --port --user --pwd --db 参数。');
+    abortMigration('未找到完整数据库配置。请保留现有 config.php，或传入 --host --port --user --db 参数（口令用 DWZ_DB_PWD 或 --pwd）。');
 }
 if (!extension_loaded('mysqli')) {
     abortMigration('缺少 mysqli PHP 扩展');

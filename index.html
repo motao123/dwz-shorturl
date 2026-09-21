@@ -68,7 +68,7 @@
   <meta name="msvalidate.01" content="PLACEHOLDER">
 
   <link rel="stylesheet" href="./assets/tokens.min.css?v=3366f25a">
-  <link rel="stylesheet" href="./assets/app.min.css?v=18d2f329">
+  <link rel="stylesheet" href="./assets/app.min.css?v=bde6730f">
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
@@ -142,6 +142,12 @@
           </div>
 
           <div class="field-group">
+            <label for="linkPassword">访问密码 <span>可选</span></label>
+            <input type="text" id="linkPassword" name="password" maxlength="72" autocomplete="new-password" spellcheck="false" placeholder="设置后访问需先输密码" aria-describedby="password-help">
+            <p class="field-help" id="password-help">访客需输入此密码才能跳转。留空表示不设密码。</p>
+          </div>
+
+          <div class="field-group">
             <label for="expireDays">有效期</label>
             <select id="expireDays" name="expire">
               <option value="0">永久有效</option>
@@ -162,6 +168,15 @@
           <span>生成短链接</span><span aria-hidden="true">→</span>
         </button>
       </form>
+    </section>
+
+    <section class="tool-card" id="recentPanel" hidden aria-labelledby="recent-title">
+      <div class="section-heading compact">
+        <h2 id="recent-title">最近生成</h2>
+        <button class="button button-secondary button-sm" type="button" id="clearRecent">清空</button>
+      </div>
+      <p class="field-help">记录保存在本机浏览器里，关掉页面也能找回；清空或换设备后即不可见。</p>
+      <ul class="recent-list" id="recentList"></ul>
     </section>
 
     <div class="feature-grid" aria-label="核心能力">
@@ -282,7 +297,7 @@
   </div>
 
   <script src="./assets/qrcode.min.js?v=2.6.0"></script>
-  <script src="./assets/app.min.js?v=256e8014"></script>
+  <script src="./assets/app.min.js?v=9a40b8a1"></script>
 
   <!-- 百度统计 -->
   <script>

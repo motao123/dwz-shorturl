@@ -5,7 +5,12 @@ error_reporting(E_ALL);
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 if (!is_dir(ROOT . 'logs')) @mkdir(ROOT . 'logs', 0755, true);
-ini_set('error_log', ROOT . 'logs/php_error.log');
+// 错误日志落点可由 DWZ_PHP_ERROR_LOG 指定（#59）。容器里该目录不是卷，重建即丢，
+// 而词库降级、限流器故障、member_secret 缺失这些告警恰恰只在容器部署下最 needed。
+// Dockerfile.web 把它设成 /dev/stderr，交给 supervisor/docker 日志驱动收集；
+// 裸机部署不设该变量则维持原来的文件路径，行为不变。
+$phpErrorLog = getenv('DWZ_PHP_ERROR_LOG');
+ini_set('error_log', $phpErrorLog !== false && $phpErrorLog !== '' ? $phpErrorLog : ROOT . 'logs/php_error.log');
 define('IN_CRONLITE', true);
 date_default_timezone_set('Asia/Shanghai');
 $date = date('Y-m-d H:i:s');

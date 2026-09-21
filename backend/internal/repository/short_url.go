@@ -49,6 +49,9 @@ type ShortUrlRepo interface {
 	List(page, perPage int, filters ShortUrlFilters) ([]model.ShortUrl, int64, error)
 	Count() (int64, error)
 	CountByStatus(status int8) (int64, error)
+	// CountByMember counts a member's live (not soft-deleted) links, for the
+	// per-member quota (#41).
+	CountByMember(memberID uint64) (int64, error)
 	CountToday() (int64, error)
 	BatchCreate(urls []model.ShortUrl) error
 	IncrementClicks(id uint64) error
@@ -352,6 +355,15 @@ func (r *shortUrlRepo) Count() (int64, error) {
 func (r *shortUrlRepo) CountByStatus(status int8) (int64, error) {
 	var count int64
 	err := r.db.Model(&model.ShortUrl{}).Where("status = ?", status).Count(&count).Error
+	return count, err
+}
+
+func (r *shortUrlRepo) CountByMember(memberID uint64) (int64, error) {
+	var count int64
+	// GORM's default scope already excludes soft-deleted rows, so a member who
+	// deleted links frees their quota; status is deliberately not filtered —
+	// expired and disabled links still occupy a slot.
+	err := r.db.Model(&model.ShortUrl{}).Where("member_id = ?", memberID).Count(&count).Error
 	return count, err
 }
 

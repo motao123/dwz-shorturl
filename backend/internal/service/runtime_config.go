@@ -54,6 +54,10 @@ const (
 	// that loops the create endpoint. Operators can tune both from the config
 	// page; 0 in api_rate_max disables the limit.
 	defaultMemberRateMax    = 120
+	// defaultMemberMaxLinks is the per-member live-link cap when the operator
+	// hasn't set member.max_links (#41). Finite on purpose: "unlimited by
+	// default" is what let fresh registrations mass-produce phishing links.
+	defaultMemberMaxLinks = 1000
 	defaultMemberRateWindow = 60
 	minMemberRateWindow     = 1
 	maxMemberRateWindow     = 3600
@@ -71,6 +75,8 @@ const (
 	KeyBatchMaxURLs        = "batch.max_urls"
 	KeyAllowedExpireDays   = "short_url.allowed_expire_days"
 	KeyMemberRateMax       = "member.api_rate_max"
+	// KeyMemberMaxLinks caps how many live links one member account may hold (#41).
+	KeyMemberMaxLinks      = "member.max_links"
 	KeyMemberRateWindow    = "member.api_rate_window"
 )
 
@@ -293,6 +299,26 @@ func (r *RuntimeConfig) MemberRateLimit() (int, time.Duration) {
 	}
 
 	return max, time.Duration(window) * time.Second
+}
+
+// MemberMaxLinks is the per-member cap on live links (0 = unlimited). A value
+// that isn't a number falls back to the default rather than silently lifting the
+// cap, matching how MemberRateLimit treats a typo.
+func (r *RuntimeConfig) MemberMaxLinks() int {
+	if r == nil {
+		return defaultMemberMaxLinks
+	}
+	v, ok := r.lookup(KeyMemberMaxLinks)
+	if !ok || v == "" {
+		return defaultMemberMaxLinks
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		r.logger.Warn("member.max_links 取值非法，使用默认值",
+			zap.String("value", v), zap.Int("default", defaultMemberMaxLinks))
+		return defaultMemberMaxLinks
+	}
+	return n
 }
 
 func parseBool(v string, fallback bool) bool {

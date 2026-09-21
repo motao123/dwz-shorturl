@@ -31,12 +31,15 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"dwz-admin/internal/config"
 	"dwz-admin/internal/migration"
@@ -363,11 +366,14 @@ func applyPHP(db *gorm.DB, m migration.File, cfg *config.Config, dryRun bool) er
 		"--host=" + publicCfg.Host,
 		fmt.Sprintf("--port=%d", publicCfg.Port),
 		"--user=" + publicCfg.User,
-		"--pwd=" + publicCfg.Password,
 		"--db=" + publicCfg.DBName,
 		"--admin-db=" + cfg.Database.DBName,
 	}
-	if err := runPHP(phpBin(), args); err != nil {
+	// #57: the password goes through the environment, never argv. Anything on a
+	// command line is readable from /proc/<pid>/cmdline by any local user, and
+	// this is the same privileged account the migration runs DDL with.
+	env := []string{"DWZ_DB_PWD=" + publicCfg.Password}
+	if err := runPHP(phpBin(), args, env); err != nil {
 		return fmt.Errorf("php script failed: %w", err)
 	}
 	return db.Exec("INSERT INTO schema_migrations (version) VALUES (?)", m.Key).Error
@@ -539,6 +545,17 @@ func main() {
 
 	// ---- apply -------------------------------------------------------------
 	//
+	// #57: MySQL DDL is not transactional, so two instances racing here can leave
+	// the schema half-migrated (and schema_migrations cannot say where it
+	// stopped). Take a named mutex for the whole apply phase; -status/-dry-run
+	// return above, so read-only invocations never wait on it.
+	releaseLock, err := acquireMigrationLock(admin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer releaseLock()
+
 	// The two groups are NOT independent, so apply them in one global order
 	// instead of running one group to completion and then the other. The
 	// cross-database migrations read short_urls (created by the admin baseline
@@ -642,11 +659,66 @@ func markApplied(db *gorm.DB, version string) error {
 			"ON DUPLICATE KEY UPDATE version = version", version).Error
 }
 
+// migrationLockName is the named mutex guarding the apply phase (#57).
+const migrationLockName = "dwz_migrate"
+
+// acquireMigrationLock takes GET_LOCK on its own pinned connection and returns a
+// release function.
+//
+// The dedicated connection matters: GET_LOCK is per-session in MySQL, while the
+// DDL itself runs off GORM's pool. Holding the lock on a pooled connection would
+// let a second instance's DDL proceed on a different connection, i.e. the mutex
+// would look taken while guarding nothing.
+//
+// Timeout is 0 (fail fast, never wait): a concurrent run means someone double
+// launched this or a cron overlaps a manual apply, and queueing behind it would
+// only make the second run apply a half-finished plan later.
+func acquireMigrationLock(db *gorm.DB) (func(), error) {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("migration lock: cannot reach sql.DB: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("migration lock: cannot pin a connection: %w", err)
+	}
+
+	var got sql.NullInt64
+	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, 0)", migrationLockName).Scan(&got); err != nil {
+		_ = conn.Close()
+		cancel()
+		return nil, fmt.Errorf("migration lock: GET_LOCK failed: %w", err)
+	}
+	if !got.Valid || got.Int64 != 1 {
+		_ = conn.Close()
+		cancel()
+		return nil, fmt.Errorf(
+			"另一个 migrate 进程正在持有 %s 锁，本次拒绝执行以避免互相抢 DDL（MySQL DDL 非事务，交错执行会留下半迁移库）",
+			migrationLockName)
+	}
+
+	return func() {
+		// Release on a fresh context: the caller may be exiting after the fetch
+		// context was cancelled, and releasing a session lock dies with the
+		// session anyway.
+		_, _ = conn.ExecContext(context.Background(), "SELECT RELEASE_LOCK(?)", migrationLockName)
+		_ = conn.Close()
+		cancel()
+	}, nil
+}
+
 // runPHP executes a PHP migration script. Kept as a named function so tests can
-// wrap it without spawning a real interpreter.
-func runPHP(bin string, args []string) error {
+// wrap it without spawning a real interpreter. extraEnv is appended to the
+// process environment so secrets never have to travel as arguments (#57).
+func runPHP(bin string, args, extraEnv []string) error {
 	cmd := exec.Command(bin, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	return cmd.Run()
 }
