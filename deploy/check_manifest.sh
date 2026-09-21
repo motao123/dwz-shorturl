@@ -240,6 +240,91 @@ else
   fi
 fi
 
+# --- 敏感词单一真源的一致性（防四处副本再次漂移） ---------------------------
+# 起因：这份 pattern 曾同时在门禁脚本、.gitignore、.dockerignore、.scanignore
+# 各写一份，其中 .gitignore 只写了 `docs/`，比门禁窄。于是"把 docs/ 里的文件
+# 改名挪到根目录"本地不拦、只有 CI 事后才红 —— 而改名/换目录正是那次泄露的绕过形状。
+# 真源收进 deploy/internal_docs_pattern 后，这里断言：
+#   1) 门禁脚本本身不再内联 pattern（否则真源形同虚设）；
+#   2) .gitignore 对每个敏感词 × 每个文档后缀都有对应 glob（与门禁判定口径一致）；
+#   3) .gitignore 不得出现"裸关键词"glob（无后缀），否则会连源码一起忽略
+#      （audit.go / AuditLogList.vue 就是这么被误伤的，上一版踩过）；
+#   4) .dockerignore 与 .scanignore 引用了真源文件名（文档性同步）。
+PATTERN_FILE="$ROOT/deploy/internal_docs_pattern"
+GITIGNORE="$ROOT/.gitignore"
+DOCKERIGNORE="$ROOT/.dockerignore"
+SCANIGNORE="$ROOT/.scanignore"
+
+# 与 check_internal_docs.sh 保持同一份"文档后缀"清单。
+DOC_EXTS="md txt rst pdf docx"
+
+# 把敏感词转成大小写不敏感的 glob 片段：AUDIT -> [Aa][Uu][Dd][Ii][Tt]
+word_to_glob() {
+  printf '%s' "$1" | awk '{
+    out = ""
+    n = length($0)
+    for (i = 1; i <= n; i++) {
+      c = substr($0, i, 1)
+      if (c == "_") { out = out "_" }
+      else if (c ~ /[A-Za-z]/) { out = out "[" toupper(c) tolower(c) "]" }
+      else { out = out c }
+    }
+    print out
+  }'
+}
+
+if [ ! -f "$PATTERN_FILE" ]; then
+  echo "缺少敏感词真源：$PATTERN_FILE" >&2
+  fail=1
+else
+  # 1) 门禁脚本不得再内联 pattern（真源唯一）。
+  if grep -qE '(^|[^_])PATTERN='"'"'[A-Z]' "$DOCS_GUARD"; then
+    echo "deploy/check_internal_docs.sh 仍内联 pattern，应从 $PATTERN_FILE 读取" >&2
+    fail=1
+  fi
+
+  PATTERN="$(grep -vE '^[[:space:]]*(#|$)' "$PATTERN_FILE" | head -n 1)"
+  if [ -z "$PATTERN" ]; then
+    echo "敏感词真源 $PATTERN_FILE 没有有效的 pattern 行" >&2
+    fail=1
+  fi
+fi
+
+# 2) .gitignore 必须对每个敏感词 × 每个文档后缀都有 glob。
+if [ -f "$GITIGNORE" ] && [ -n "${PATTERN:-}" ]; then
+  OLD_IFS="$IFS"
+  IFS='|'
+  for word in $PATTERN; do
+    IFS="$OLD_IFS"
+    glob="$(word_to_glob "$word")"
+    for ext in $DOC_EXTS; do
+      if ! grep -qF "*${glob}*.${ext}" "$GITIGNORE"; then
+        echo ".gitignore 未覆盖「${word} × .${ext}」：改名/换目录可绕过入库门禁" >&2
+        echo "  期望含模式：*${glob}*.${ext}   （真源：deploy/internal_docs_pattern）" >&2
+        fail=1
+      fi
+    done
+    # 3) 禁止裸关键词 glob：整行恰好是 *<glob>*（不带 .后缀）的那种。
+    #    它是源码误伤源（audit_new_test.go / views/audit/NewPage.vue 会被忽略）。
+    #    用固定字符串整行比较，避免 glob 里的 [ ] 被当成正则字符类。
+    if grep -qxF "*${glob}*" "$GITIGNORE"; then
+      echo ".gitignore 存在裸关键词 glob：*${glob}* —— 会连源码一起忽略，必须带文档后缀" >&2
+      fail=1
+    fi
+    IFS='|'
+  done
+  IFS="$OLD_IFS"
+fi
+
+# 4) 忽略文件必须点到真源，避免"下一份副本"再次无声明地出现。
+for f in "$DOCKERIGNORE" "$SCANIGNORE"; do
+  [ -f "$f" ] || continue
+  if ! grep -q 'internal_docs_pattern' "$f"; then
+    echo "$f 未引用敏感词真源 deploy/internal_docs_pattern" >&2
+    fail=1
+  fi
+done
+
 if [ "$fail" -ne 0 ]; then
   echo "部署门禁检查失败" >&2
   exit 1

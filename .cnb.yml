@@ -495,11 +495,23 @@
         # 后台本身有"操作审计日志"功能，audit.go / AuditLogList.vue 会被一起误伤，
         # 结果就是这道门禁在自己的主干上直接红。
         - name: 内部文档入库检查
-          image: alpine:3.20
+          # 这里**不能**用 `image: alpine:3.20`：官方 alpine 没有 git，
+          # 门禁第二行 `git ls-files` 直接 "git: not found"、返回码 127，
+          # 检查根本没跑（PR #55 的 test-gate 就是这么红的），却看起来像"没命中"。
+          # 走本 pipeline 默认环境（stage 不写 image 即继承 pipeline 级 docker.build），
+          # 它就是 drill 镜像，内含 git。stage 顶部再加运行期自检，
+          # 以后换镜像/砍依赖时立刻在日志里点名缺哪个命令，不再伪装成门禁失败。
           script: |
             set -e
             # 判定只写一份：deploy/check_internal_docs.sh。两处 stage 调同一个脚本，
             # 否则哪天只改了一处，另一处就悄悄放宽了（上一版正是复制粘贴的产物）。
+            #
+            # 依赖自检：脚本要 `git ls-files` 拿被跟踪文件清单，没有 git 就没法检查。
+            if ! command -v git >/dev/null 2>&1; then
+              echo "内部文档入库检查环境缺少 git：门禁无法枚举被跟踪文件，不能跳过"
+              echo "（不要退回 alpine:3.20 —— 官方 alpine 不含 git，会以 127 假失败）"
+              exit 1
+            fi
             sh deploy/check_internal_docs.sh
 
         # --- 前端：单测 + 构建 -----------------------------------------------
@@ -964,11 +976,23 @@ master:
         # 后台本身有"操作审计日志"功能，audit.go / AuditLogList.vue 会被一起误伤，
         # 结果就是这道门禁在自己的主干上直接红。
         - name: 内部文档入库检查
-          image: alpine:3.20
+          # 这里**不能**用 `image: alpine:3.20`：官方 alpine 没有 git，
+          # 门禁第二行 `git ls-files` 直接 "git: not found"、返回码 127，
+          # 检查根本没跑（PR #55 的 test-gate 就是这么红的），却看起来像"没命中"。
+          # 走本 pipeline 默认环境（stage 不写 image 即继承 pipeline 级 docker.build），
+          # 它就是 drill 镜像，内含 git。stage 顶部再加运行期自检，
+          # 以后换镜像/砍依赖时立刻在日志里点名缺哪个命令，不再伪装成门禁失败。
           script: |
             set -e
             # 判定只写一份：deploy/check_internal_docs.sh。两处 stage 调同一个脚本，
             # 否则哪天只改了一处，另一处就悄悄放宽了（上一版正是复制粘贴的产物）。
+            #
+            # 依赖自检：脚本要 `git ls-files` 拿被跟踪文件清单，没有 git 就没法检查。
+            if ! command -v git >/dev/null 2>&1; then
+              echo "内部文档入库检查环境缺少 git：门禁无法枚举被跟踪文件，不能跳过"
+              echo "（不要退回 alpine:3.20 —— 官方 alpine 不含 git，会以 127 假失败）"
+              exit 1
+            fi
             sh deploy/check_internal_docs.sh
 
         # --- 前端：单测 + 构建 -----------------------------------------------
