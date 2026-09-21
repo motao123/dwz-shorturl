@@ -85,15 +85,15 @@
         <a href="https://github.com/motao123/dwz-shorturl#readme" target="_blank" rel="noopener">文档</a>
         <a href="https://github.com/motao123/dwz-shorturl" target="_blank" rel="noopener">GitHub</a>
         <!-- 会员入口：移动端折叠菜单里唯一可达的注册/登录入口，常显 -->
-        <a href="/member/login" class="header-nav-member">登录 / 注册</a>
+        <a href="member/login" class="header-nav-member">登录 / 注册</a>
       </nav>
     </div>
     <div class="header-right">
       <span class="header-note" data-state="up"><span class="status-dot" aria-hidden="true"></span><span class="status-label">在线</span></span>
       <div class="member-bar" id="memberBar">
         <!-- 未登录时常显「登录 / 注册」，登录后由 app.js 原地替换为用户中心与退出 -->
-        <a class="member-link" href="/member/login" id="memberLoginBtn">登录 / 注册</a>
-        <a class="member-user" href="/member/" id="memberUser" hidden title="进入用户中心"></a>
+        <a class="member-link" href="member/login" id="memberLoginBtn">登录 / 注册</a>
+        <a class="member-user" href="member/" id="memberUser" hidden title="进入用户中心"></a>
         <a class="member-link" href="#" id="memberLogoutBtn" hidden>退出</a>
       </div>
       <button class="nav-toggle" type="button" id="navToggle" aria-label="展开导航菜单" aria-expanded="false" aria-controls="headerNav">☰</button>
@@ -118,7 +118,7 @@
 
       <!-- 「仅注册使用」开关开启时显示（后端 api.php 同步 401 兜底） -->
       <p id="single-gate" class="batch-gate" hidden>
-        当前站点已开启「仅注册使用」：<a href="/member/login?redirect=%2F">登录 / 注册</a> 后即可生成短链。
+        当前站点已开启「仅注册使用」：<a href="member/login?redirect=./">登录 / 注册</a> 后即可生成短链。
       </p>
 
       <form id="shorten-form" novalidate>
@@ -197,7 +197,7 @@
       </div>
 
       <p id="batch-gate" class="batch-gate" hidden>
-        批量生成需要登录：<a href="/member/login?redirect=%2F%23batch">登录 / 注册</a> 后可使用（输入内容会保留）。
+        批量生成需要登录：<a href="member/login?redirect=./%23batch">登录 / 注册</a> 后可使用（输入内容会保留）。
       </p>
 
       <form id="batch-form" class="batch-form" novalidate>
@@ -282,7 +282,7 @@
   </div>
 
   <script src="./assets/qrcode.min.js?v=2.6.0"></script>
-  <script src="./assets/app.min.js?v=ca9815b0"></script>
+  <script src="./assets/app.min.js?v=256e8014"></script>
 
   <!-- 百度统计 -->
   <script>

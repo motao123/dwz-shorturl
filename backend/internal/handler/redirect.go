@@ -469,7 +469,6 @@ func passwordUnlocked(c *gin.Context, uid string) bool {
 func renderPasswordPage(uid, errMsg string) string {
 	// Escape every interpolation: callers may pass arbitrary strings in the
 	// future, so treat them as untrusted (PHP's password_page_html does the same).
-	safeUID := html.EscapeString(uid)
 	safeErr := html.EscapeString(errMsg)
 	title := "请输入访问密码"
 	msg := ""
@@ -484,7 +483,7 @@ func renderPasswordPage(uid, errMsg string) string {
 <title>` + title + ` - 短网址</title>
 <meta name="robots" content="noindex">
 <style>
-:root{--pw-page:#f2f5f7;--pw-card:#fff;--pw-line:#e4ecee;--pw-text:#16292b;--pw-dim:#6b7f86;--pw-input:#d3e0e3;--pw-brand:#0e6e75;--pw-brand-hover:#0a5a60;--pw-danger:#c0392b}
+:root{--pw-page:#f2f5f7;--pw-card:#fff;--pw-line:#e4ecee;--pw-text:#16292b;--pw-dim:#5b6f76;--pw-input:#d3e0e3;--pw-brand:#0e6e75;--pw-brand-hover:#0a5a60;--pw-danger:#b02a1f}
 @media (prefers-color-scheme:dark){:root{--pw-page:#0d1b20;--pw-card:#122027;--pw-line:#23343b;--pw-text:#e6edf0;--pw-dim:#9aa9ae;--pw-input:#31454d;--pw-brand:#12909a;--pw-brand-hover:#0e6e75;--pw-danger:#f87171}}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--pw-page);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--pw-text)}
 .card{width:min(92vw,360px);background:var(--pw-card);border:1px solid var(--pw-line);border-radius:14px;padding:28px 24px;box-shadow:0 8px 30px rgba(14,110,117,.08)}
@@ -498,11 +497,11 @@ button{width:100%;margin-top:12px;padding:11px;background:var(--pw-brand);color:
 button:hover{background:var(--pw-brand-hover)}
 .brand{display:block;margin-top:16px;text-align:center;font-size:12.5px;color:var(--pw-dim);text-decoration:none}
 .brand:hover{color:var(--pw-brand)}
-</style></head><body><form class="card" method="post" action="/` + safeUID + `">
+</style></head><body><form class="card" method="post" action="">
 <p class="lock">🔒</p><h1>此链接受密码保护</h1><p class="sub">请输入访问密码以继续</p>
 ` + msg + `<input type="password" name="password" placeholder="访问密码" required autofocus autocomplete="off">
 <button type="submit">解锁访问</button>
-<a class="brand" href="/">← 返回短网址首页</a>
+<a class="brand" href="./">← 返回短网址首页</a>
 </form></body></html>`
 }
 
@@ -544,7 +543,7 @@ func renderErrorPage(c *gin.Context, status int, kind errorPageKind) {
 <meta name="robots" content="noindex">
 <meta name="referrer" content="no-referrer">
 <style>
-:root{--ep-page:#f2f5f7;--ep-card:#fff;--ep-line:#e4ecee;--ep-text:#16292b;--ep-dim:#6b7f86;--ep-brand:#0e6e75;--ep-brand-hover:#0a5a60}
+:root{--ep-page:#f2f5f7;--ep-card:#fff;--ep-line:#e4ecee;--ep-text:#16292b;--ep-dim:#5b6f76;--ep-brand:#0e6e75;--ep-brand-hover:#0a5a60}
 @media (prefers-color-scheme:dark){:root{--ep-page:#0d1b20;--ep-card:#122027;--ep-line:#23343b;--ep-text:#e6edf0;--ep-dim:#9aa9ae;--ep-brand:#12909a;--ep-brand-hover:#0e6e75}}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--ep-page);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ep-text)}
 .card{width:min(92vw,400px);background:var(--ep-card);border:1px solid var(--ep-line);border-radius:14px;padding:32px 26px;text-align:center;box-shadow:0 8px 30px rgba(14,110,117,.08)}

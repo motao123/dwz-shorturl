@@ -120,7 +120,13 @@ if ($action === 'my_links') {
 
 // 默认：返回当前登录用户 + CSRF token + 会员 JWT
 $member = member_current($DB);
-$_SESSION['member_csrf'] = bin2hex(random_bytes(16));
+// CSRF token 只在会话里没有时生成。此前每次默认请求都重新签发，而 app.js 仅在页面
+// 加载时读一次：开两个标签页时旧页面上的 token 必被新页面换掉，提交就 403
+// 「页面已过期」，刷新后另一页又坏，来回打转（#53）。CSRF 防护依赖的是"攻击者猜不到
+// 会话内 token"，会话级恒定不削弱这一性质。
+if (empty($_SESSION['member_csrf'])) {
+    $_SESSION['member_csrf'] = bin2hex(random_bytes(16));
+}
 $token = $member ? member_issue_token($member['id'], $member['username'], (int)($member['token_version'] ?? 0)) : '';
 // 同时写入 HttpOnly cookie：Go 后端 MemberAuth 在请求头缺失时会回退读取它，
 // 这样即使前端 token 未持久化（或页面刷新后），会员接口依然可用。
@@ -159,11 +165,14 @@ function member_result($code, $msg, $result, $status = 200, $data = null) {
 function member_set_token_cookie($token) {
     if (headers_sent()) return;
     $name = 'dwz_member_token';
-    $secure = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+    // 这枚 cookie 单独就能证明会员身份（Go 侧会回退读它），等价于Bearer 凭据。
+    // nginx/CDN 终止 TLS 时 $_SERVER['HTTPS'] 是空的，只看它就等于在最常见的
+    // 反向代理部署下丢掉 Secure；SameSite=Lax 挡住跨站 POST 带上它（#35）。
+    $base = array('path' => '/', 'domain' => '', 'secure' => dwz_is_https(), 'httponly' => true, 'samesite' => 'Lax');
     if ($token === '' || $token === null) {
-        setcookie($name, '', time() - 3600, '/', '', $secure, true);
+        setcookie($name, '', $base + array('expires' => time() - 3600));
         unset($_COOKIE[$name]);
         return;
     }
-    setcookie($name, (string)$token, 0, '/', '', $secure, true);
+    setcookie($name, (string)$token, $base + array('expires' => 0));
 }

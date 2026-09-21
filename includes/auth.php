@@ -7,14 +7,13 @@
 if (!defined('IN_CRONLITE')) exit();
 
 if (session_status() === PHP_SESSION_NONE) {
-    // 站点强制 HTTPS；反向代理场景下以 X-Forwarded-Proto 判断，确保 cookie 带 Secure 标志
-    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (isset($_SERVER['X_FORWARDED_PROTO']) && $_SERVER['X_FORWARDED_PROTO'] === 'https')
-        || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https');
+    // 站点强制 HTTPS；反向代理场景下以 X-Forwarded-Proto 判断，确保 cookie 带 Secure 标志。
+    // 判定统一走 dwz_is_https()（#35），会员 token 与解锁 cookie 共用同一套逻辑，
+    // 避免三处各写一份、只硬化了其中一处。
     session_set_cookie_params([
         'httponly' => true,
         'samesite' => 'Lax',
-        'secure'   => $isHttps,
+        'secure'   => dwz_is_https(),
         'path'     => '/',
     ]);
     session_name('dwz_member');

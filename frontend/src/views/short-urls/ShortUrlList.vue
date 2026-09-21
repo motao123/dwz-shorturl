@@ -33,6 +33,7 @@ import {
   type ShortUrlStatus,
   type LinkStat
 } from '@/api/short-urls'
+import { listDomains, type Domain } from '@/api/domains'
 import {
   SHORT_URL_STATUS,
   URL_CATEGORIES,
@@ -61,6 +62,7 @@ const page = useListPage<ShortUrl>({
     keyword: '',
     status: '' as ShortUrlStatus | '',
     category_id: '' as number | '',
+    domain_id: '' as number | '',
     date_start: '',
     date_end: '',
     sort: 'created_at',
@@ -90,6 +92,14 @@ const batch = useBatchAction<ShortUrl>()
 const keyword = page.filterRef<string>('keyword')
 const statusFilter = page.filterRef<ShortUrlStatus | ''>('status')
 const categoryFilter = page.filterRef<number | ''>('category_id')
+const domainFilter = page.filterRef<number | ''>('domain_id')
+
+// #43：域名筛选。后端一直支持 domain_id（本列表页第 4 个筛选维度），此前前端没有
+// 可发的字段，第 9 批新加的 idx_domain_created 索引因此在后台无人使用。
+const domainOptions = ref<Domain[]>([])
+void listDomains(1)
+  .then((rows) => { domainOptions.value = rows })
+  .catch(() => { ElMessage.warning('域名列表加载失败，域名筛选暂不可用') })
 const dateStart = page.filterRef<string>('date_start')
 const dateEnd = page.filterRef<string>('date_end')
 
@@ -454,6 +464,15 @@ function formatExpire(row: ShortUrl): string {
           @change="handleSearch"
         >
           <el-option v-for="c in URL_CATEGORIES" :key="c.id" :label="c.name" :value="c.id" />
+        </el-select>
+        <el-select
+          v-model="domainFilter"
+          placeholder="域名"
+          clearable
+          style="width: 160px"
+          @change="handleSearch"
+        >
+          <el-option v-for="d in domainOptions" :key="d.id" :label="d.domain" :value="d.id" />
         </el-select>
         <el-date-picker
           v-model="dateRange"
