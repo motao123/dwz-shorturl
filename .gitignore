@@ -19,3 +19,6 @@ deploy/.env
 
 # Database backups produced by ops/one_click_migrate.sh
 backups/
+
+# 文档只在本地维护，不分发到远端仓库
+docs/

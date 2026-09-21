@@ -17,7 +17,7 @@
  * 2) nginx：直接把 location 反代到 http://127.0.0.1:8080（性能更好，优先）
  *
  * ⚠️ 性能提示：PHP 代理会多一次进程与网络往返，仅作兜底。有 nginx 时请优先用
- *    nginx 反代（见 nginx.example.conf 与 docs/deploy-baota.md）。
+ *    nginx 反代（见 nginx.example.conf 与本地部署文档 docs/deploy-baota.md）。
  *
  * ⚠️ 安全：仅允许白名单前缀，且只允许转发到本机后端，避免被当作开放代理。
  */

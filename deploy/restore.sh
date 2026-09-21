@@ -271,7 +271,7 @@ for which in admin public; do
 done
 
 echo "==> $(date '+%F %T') 恢复完成"
-echo "==> 下一步（按 docs/BACKUP_RESTORE.md 第四节）："
+echo "==> 下一步（按备份恢复文档 BACKUP_RESTORE.md 第四节，该文档本地维护）："
 echo "    1) 恢复 config.php / config.yaml（JWT 密钥变更会让所有会话失效）"
 echo "    2) 重启 php-fpm 与 dwz-admin 服务"
 echo "    3) 验证：curl -s <站点>/health；抽 3 条短链跳转；管理台登录"

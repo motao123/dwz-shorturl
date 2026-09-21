@@ -269,7 +269,7 @@ DWZ_SERVER=your.host DWZ_USER=root DWZ_PASS='密码' ./deploy.sh
 | 路径 | Web Server | 前台 PHP | 管理台 / 会员中心接口 | 说明 |
 |---|---|---|---|---|
 | **Docker**（推荐） | 容器内 nginx | ✅ | ✅ 开箱可用 | `docker compose up -d` 已配好全部反代，见上文 |
-| **nginx / 宝塔** | nginx | ✅ | ⚠️ **需手工配 4 段反代** | 未配则接口全 404，见 [docs/deploy-baota.md](docs/deploy-baota.md) |
+| **nginx / 宝塔** | nginx | ✅ | ⚠️ **需手工配 4 段反代** | 未配则接口全 404，见 `docs/deploy-baota.md`（本地文档）|
 | **Apache** | Apache + .htaccess | ✅ | ⚠️ **需启用 mod_rewrite** | 默认走 `api_proxy.php` 兜底，开箱可用 |
 
 #### Apache 部署（含共享虚拟主机）
@@ -414,15 +414,10 @@ php migrations/build_assets.php --check
 | 文档 | 说明 |
 |------|------|
 | [📘 API 文档](api.html) | 前台接口完整说明 + 错误码 + curl 示例 |
-| [🎨 后台设计](docs/BACKEND_ADMIN_DESIGN.md) | 管理后台技术设计文档 |
-| [🗺️ 功能路线图](docs/FEATURE_ROADMAP.md) | 5 个 Phase / 10 大模块 / 79.5 人日规划 |
-| [🔬 深度分析报告](docs/ANALYSIS_REPORT_2026-08.md) | 功能/UI/交互/架构四维审计 + 13 批修复记录 |
-| [🧩 列表页 composable](docs/frontend-list-composables.md) | `useListPage` 等组合式函数：分页/筛选/批量/导出的统一契约与用法 |
-| [🧩 分区维护](docs/partition-maintenance.md) | click_logs 月度分区：覆盖目标、告警阈值、幂等补齐与生产注意事项 |
-| [🖥️ 管理台使用手册](docs/admin-guide.md) | 面向运营：登录与 2FA、RBAC 角色矩阵、域名池、API 密钥、Webhook、违规复核、审计与监控 |
-| [🧰 宝塔 / 单机部署](docs/deploy-baota.md) | 非 Docker 部署：nginx 反代四条规则、Go 后端启动、一键迁移与上线自查清单 |
-| [🛡️ 依赖风险与安全扫描](docs/SECURITY_SCAN.md) | PR 增量门禁 / 仓库级降噪 / 存量告警分类：哪些会阻断、哪些只记录 |
 | [🖥️ 项目官网](https://motao123.github.io/dwz-shorturl/) | GitHub Pages 宣传站（由 Actions 自动构建，Vercel 极简浅色设计语言，见 site/DESIGN.md） |
+
+> 后台设计、功能路线图、部署与管理台手册、备份恢复、分区维护、安全扫描与逐批验收记录等文档
+> 在 `docs/` 目录下本地维护，不随仓库分发；文中出现的 `docs/...` 路径仅在本机有效。
 
 ---
 
@@ -447,7 +442,7 @@ php migrations/build_assets.php --check
 - **依赖自动升级** `.github/dependabot.yml`：每周对 Go / npm minor+patch 分组提 PR（major 需人工评估）；
 - **仓库级扫描降噪** `.scanignore` + `.cnb/security/code_scan_config.yml`：排除第三方代码、构建产物、示例配置等确定无攻击面路径。
 
-> 设计取舍与存量告警分类见 [🛡️ 依赖风险与安全扫描](docs/SECURITY_SCAN.md)。
+> 设计取舍与存量告警分类见 `docs/SECURITY_SCAN.md`（本地文档）。
 > `dependency-risk-check` 对所有分支的 PR 生效（含 `master` 与 `auto/*` 特性分支）。
 
 ### 本地自查
