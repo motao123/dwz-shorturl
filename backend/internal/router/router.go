@@ -66,6 +66,12 @@ func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, err
 	// Member API (public registered users, authenticated by member JWT)
 	member := engine.Group("/member/api")
 
+	// #36: every write here can be authenticated by the member cookie alone, so a
+	// cross-site request that the browser is willing to send also carries the
+	// credential. Registered before the group's other middleware so the four
+	// public auth POSTs below are covered too.
+	member.Use(middleware.RequireSameSiteOrigin(func() string { return config.Get().Public.BaseURL }))
+
 	// #8/#37: the member API is the only externally reachable group that had no
 	// limiter at all. The quota comes from the config catalog so an operator can
 	// tune it without a redeploy; the identity is the member token once

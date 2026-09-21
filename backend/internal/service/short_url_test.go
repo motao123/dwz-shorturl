@@ -22,6 +22,8 @@ type mockShortRepo struct {
 	byID     uint64
 	domains  *mockDomainRepo
 	createFn func(*model.ShortUrl) error // optional override
+	// memberCount backs CountByMember for the per-member quota tests (#41).
+	memberCount int64
 }
 
 func newMockShortRepo() *mockShortRepo {
@@ -177,6 +179,7 @@ func (m *mockShortRepo) List(page, perPage int, f repository.ShortUrlFilters) ([
 }
 func (m *mockShortRepo) Count() (int64, error)                    { return int64(len(m.records)), nil }
 func (m *mockShortRepo) CountByStatus(int8) (int64, error)        { return 0, nil }
+func (m *mockShortRepo) CountByMember(uint64) (int64, error)     { return m.memberCount, nil }
 func (m *mockShortRepo) CountToday() (int64, error)               { return 0, nil }
 func (m *mockShortRepo) BatchCreate(urls []model.ShortUrl) error  { return nil }
 func (m *mockShortRepo) IncrementClicks(uint64) error             { return nil }

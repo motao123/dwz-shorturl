@@ -65,6 +65,11 @@ RUN mkdir -p /var/www/dwz/logs/ratelimit /run/nginx \
 
 EXPOSE 80
 
+# PHP 的 error_log 走 stderr（#59）：/var/www/dwz/logs 不是卷，容器一重建里面的
+# php_error.log 就没了，而词库降级、限流器故障、member_secret 缺失这类告警恰恰只在
+# 容器部署下最需要被看到。交给 supervisord/docker 日志驱动收集。
+ENV DWZ_PHP_ERROR_LOG=/dev/stderr
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1/admin/ || exit 1
 

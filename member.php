@@ -138,6 +138,10 @@ member_result(1, 'ok', 1, 200, array(
     // 「仅注册使用」开关状态随登录态下发：首页据此把建链表单切换为登录
     // 引导（体验层）；api.php 的 401 拦截是真正的后端兜底。
     'require_registration' => member_only_create_enabled(),
+    // #50：批量上限随会话下发。此前 app.js 把 100 写死，而 batch.php 读
+    // batch.max_urls（可配 1–1000），管理员调大后前端照样挡住用户；更糟的是
+    // 服务端真返回 300 条时界面只显前 100 条却报告「100 成功 0 失败」。
+    'batch_max' => system_config_int('batch.max_urls', 100),
 ));
 
 // 统一的 405 响应：带上 Allow 头并指明允许的方法，便于调用方排障。

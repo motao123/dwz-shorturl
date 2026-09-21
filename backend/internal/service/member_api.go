@@ -195,6 +195,16 @@ func (s *memberApiService) createLink(memberID uint64, url, title, custom string
 		return existing, nil
 	}
 
+	// 复用已有短链不占配额、也不改域名，所以校验放在去重分支之后（#41）。
+	if s.shortUrlSvc != nil {
+		if err := s.shortUrlSvc.ValidateDomain(domainID); err != nil {
+			return nil, err
+		}
+		if err := s.shortUrlSvc.CheckMemberQuota(memberID); err != nil {
+			return nil, err
+		}
+	}
+
 	passwordHash, err := hashPassword(password)
 	if err != nil {
 		return nil, err

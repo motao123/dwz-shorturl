@@ -1,6 +1,8 @@
 (function () {
   'use strict';
 
+  // 批量上限。默认 100 与服务端配置缺省一致；登录后由会员中心会话下发的
+  // batch_max 覆盖（#50）——此前这里写死，管理员把 batch.max_urls 调大也没用。
   var MAX_BATCH_ITEMS = 100;
   var REQUEST_TIMEOUT = 20000;
   var statusTimer = null;
@@ -11,6 +13,7 @@
   var batchForm = document.getElementById('batch-form');
   var urlInput = document.getElementById('inputContent');
   var customInput = document.getElementById('customCode');
+  var passwordInput = document.getElementById('linkPassword');
   var expireSelect = document.getElementById('expireDays');
   var singleButton = document.getElementById('shortify');
   var batchInput = document.getElementById('batchInput');
@@ -182,7 +185,9 @@
 
     urlInput.value = normalized;
     var domain = domainSelect.value || '';
-    return { url: normalized, custom: custom, expire: expireSelect.value, domain: domain };
+    // #47：密码保护的建链能力此前只在 api.php 与文档里存在，前台没地方填。
+    var password = passwordInput && typeof passwordInput.value === 'string' ? passwordInput.value : '';
+    return { url: normalized, custom: custom, expire: expireSelect.value, domain: domain, password: password };
   }
 
   function getFocusableElements() {
@@ -318,23 +323,31 @@
     }
 
     row.append(source, output);
-    return { element: row, success: success };
+    return { element: row, success: success, shortUrl: success ? shortUrl : '' };
   }
 
   function renderBatch(items) {
-    var bounded = items.slice(0, MAX_BATCH_ITEMS);
+    // 不再截断到本地常量（#50）：服务端返回多少就渲染多少。此前的
+    // items.slice(0, MAX_BATCH_ITEMS) 在服务端返回 300 条时只显 100 条，
+    // 而汇总仍按 100 报告「100 成功 0 失败」，另外 200 条凭空消失。
     var fragment = document.createDocumentFragment();
     var successCount = 0;
+    var created = [];
     batchList.replaceChildren();
 
-    bounded.forEach(function (item) {
+    items.forEach(function (item) {
       var rendered = createBatchItem(item || {});
-      if (rendered.success) successCount += 1;
+      if (rendered.success) {
+        successCount += 1;
+        created.push(rendered.shortUrl);
+      }
       fragment.appendChild(rendered.element);
     });
+    // 批量结果同样进最近生成（#52），否则一次批量后关掉结果区就再也没处找回。
+    rememberShortUrls(created);
 
     batchList.appendChild(fragment);
-    batchSummary.textContent = successCount + ' 条成功，' + (bounded.length - successCount) + ' 条失败';
+    batchSummary.textContent = successCount + ' 条成功，' + (items.length - successCount) + ' 条失败';
     batchResults.hidden = false;
     var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     batchResults.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest' });
@@ -363,6 +376,7 @@
       if (!isSuccess(payload)) throw new Error(readError(payload, '短链接生成失败'));
       var shortUrl = extractShortUrl(payload);
       if (!shortUrl) throw new Error('服务未返回有效的短链接');
+      rememberShortUrls([shortUrl]);
       openDialog(shortUrl);
     } catch (error) {
       announce(error.message || '短链接生成失败，请稍后重试', true);
@@ -389,7 +403,7 @@
     }
     if (lines.length > MAX_BATCH_ITEMS) {
       batchInput.setAttribute('aria-invalid', 'true');
-      announce('一次最多处理 100 条网址，请删减后重试', true);
+      announce('一次最多处理 ' + MAX_BATCH_ITEMS + ' 条网址，请删减后重试', true);
       batchInput.focus();
       return;
     }
@@ -612,6 +626,76 @@
   }
 
   // 获取当前登录态 + CSRF token（用于批量接口）
+  // 最近生成（#52）：「复制前手滑把弹窗关了」此前没有任何找回手段——生成结果只存在
+  // 于弹窗里，关掉即永久丢失。落在本机 localStorage，上限 5 条、新的在前。
+  var RECENT_KEY = 'dwz_recent_links';
+  var RECENT_MAX = 5;
+  var recentPanel = document.getElementById('recentPanel');
+  var recentList = document.getElementById('recentList');
+  var clearRecentButton = document.getElementById('clearRecent');
+
+  function readRecent() {
+    try {
+      var raw = window.localStorage.getItem(RECENT_KEY);
+      var parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter(function (u) { return typeof u === 'string' && /^https?:\/\//.test(u); }) : [];
+    } catch (e) {
+      // 隐私模式或配额满时 localStorage 会抛错：静默降级，绝不让主流程失败。
+      return [];
+    }
+  }
+
+  function renderRecent() {
+    if (!recentPanel || !recentList) return;
+    var items = readRecent();
+    recentPanel.hidden = items.length === 0;
+    recentList.replaceChildren();
+    items.forEach(function (url) {
+      var li = document.createElement('li');
+      li.className = 'recent-item';
+      var link = document.createElement('a');
+      link.href = url;
+      link.className = 'mono';
+      link.textContent = url;
+      link.target = '_blank';
+      link.rel = 'noopener';
+      var copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'button button-secondary button-sm';
+      copy.textContent = '复制';
+      copy.addEventListener('click', async function () {
+        try {
+          await copyText(url);
+          announce('已复制 ' + url);
+        } catch (e) {
+          announce('复制失败，请手动选择', true);
+        }
+      });
+      li.append(link, copy);
+      recentList.append(li);
+    });
+  }
+
+  function rememberShortUrls(urls) {
+    var clean = (urls || []).filter(function (u) { return typeof u === 'string' && u.indexOf('http') === 0; });
+    if (!clean.length) return;
+    try {
+      var next = clean.concat(readRecent()).filter(function (u, i, arr) { return arr.indexOf(u) === i; }).slice(0, RECENT_MAX);
+      window.localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+    } catch (e) {
+      return;
+    }
+    renderRecent();
+  }
+
+  if (clearRecentButton) {
+    clearRecentButton.addEventListener('click', function () {
+      try { window.localStorage.removeItem(RECENT_KEY); } catch (e) { /* 隐私模式忽略 */ }
+      renderRecent();
+      announce('已清空本机最近生成记录');
+    });
+  }
+
   async function loadMemberState() {
     try {
       var response = await fetch(endpoint('member.php'), {
@@ -622,6 +706,13 @@
       if (payload && payload.result === 1 && payload.data) {
         memberState.csrf = payload.data.csrf || '';
         memberState.requireReg = Boolean(payload.data.require_registration);
+        // #50：管理员可调的批量上限走会话下发，不再依赖本地写死的 100。
+        // 只接受 1–1000 的整数，越界就保持默认——避免配置写错把界面挡死。
+        var serverBatchMax = Number(payload.data.batch_max);
+        if (Number.isInteger(serverBatchMax) && serverBatchMax >= 1 && serverBatchMax <= 1000) {
+          MAX_BATCH_ITEMS = serverBatchMax;
+        }
+        updateBatchCount();
         setMemberUI(payload.data.member);
       } else {
         setMemberUI(null);
@@ -784,6 +875,7 @@
   initWebVitals();
   // 域名下拉改由登录态驱动：loadMemberState → setMemberUI → loadDomains()
   loadMemberState();
+  renderRecent();
   checkHealth();
   window.setInterval(checkHealth, 60000);
 }());

@@ -46,6 +46,9 @@ rate_limit:
 log:
   level: info
   file: ""
+  # console = 人读（本机 go run 用）；json = 让 Loki/ELK 直接解析 stdout。
+  # 容器部署请设为 json（docker compose 的 init 生成的配置已经是 json，#59）。
+  format: console
 
 # Outgoing mail (SMTP). OPTIONAL, but without it:
 #   - "forgot password" cannot send the reset link (users are locked out);
