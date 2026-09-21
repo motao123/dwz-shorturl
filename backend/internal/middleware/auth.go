@@ -3,21 +3,24 @@ package middleware
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"dwz-admin/internal/pkg"
 
 	"github.com/gin-gonic/gin"
 )
 
-// tokenBlacklistCheck reports whether a token jti has been revoked (logout).
-// Registered once at startup by main; no-op when unset so the middleware keeps
-// working without a blacklist backend.
-var tokenBlacklistCheck func(jti string) bool
+// sessionCheck reports whether a signed, unexpired token is still usable
+// (revoked at logout, or by disabling the account / resetting its password /
+// changing its roles). Registered once at startup by main; unset means the
+// deployment has no revocation store, which keeps the middleware working
+// without Redis.
+var sessionCheck pkg.SessionChecker
 
-// SetTokenBlacklistCheck registers the Redis-backed revocation check used by
-// the Auth middleware and the Logout handler.
-func SetTokenBlacklistCheck(fn func(jti string) bool) {
-	tokenBlacklistCheck = fn
+// SetSessionRevocationCheck registers the revocation check used by the Auth
+// middleware.
+func SetSessionRevocationCheck(fn pkg.SessionChecker) {
+	sessionCheck = fn
 }
 
 // Auth is a JWT authentication middleware. It extracts the Bearer token from
@@ -64,11 +67,26 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 
-		// P1-4: reject tokens that were revoked via logout.
-		if tokenBlacklistCheck != nil && claims.ID != "" && tokenBlacklistCheck(claims.ID) {
-			pkg.Fail(c, http.StatusUnauthorized, pkg.CodeUnauthorized, "token has been revoked")
-			c.Abort()
-			return
+		// P1-4 / #42：拒绝已吊销的会话——登出作废单个 jti，禁用账号、重置密码、
+		// 改角色则按用户水位线作废其全部在授凭证。
+		var issuedAt time.Time
+		if claims.IssuedAt != nil {
+			issuedAt = claims.IssuedAt.Time
+		}
+		if sessionCheck != nil {
+			switch sessionCheck(claims.UserID, claims.ID, issuedAt) {
+			case pkg.SessionRevoked:
+				pkg.Fail(c, http.StatusUnauthorized, pkg.CodeUnauthorized, "会话已失效，请重新登录")
+				c.Abort()
+				return
+			case pkg.SessionUnavailable:
+				// 吊销存储不可用 ≠ 没有吊销。放行等于「把 Redis 打挂就能让所有登出与
+				// 禁用记录集体失效」，正是要堵的那条绕过（#38）。用 503 而非 401，是为了
+				// 让 Redis 抖动不必把全体在线管理员踢成重新登录。
+				pkg.Fail(c, http.StatusServiceUnavailable, pkg.CodeInternalError, "登录状态校验暂时不可用，请稍后重试")
+				c.Abort()
+				return
+			}
 		}
 
 		c.Set("user_id", claims.UserID)

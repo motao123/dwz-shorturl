@@ -69,9 +69,9 @@ type authService struct {
 	// limiter backs account-level failure counting. Nil disables lockout so
 	// unit tests and a Redis-less deployment keep working.
 	limiter *pkg.RateLimiter
-	// tokenBlacklisted reports whether a jti was revoked at logout. Nil is
-	// treated as "nothing revoked".
-	tokenBlacklisted func(jti string) bool
+	// sessionCheck reports whether a token is still usable (logout blacklist +
+	// per-user revocation watermark). Nil is treated as "nothing revoked".
+	sessionCheck pkg.SessionChecker
 }
 
 // NewAuthService returns the concrete service so callers can chain options
@@ -82,11 +82,13 @@ func NewAuthService(userRepo repository.UserRepo, roleRepo repository.RoleRepo) 
 
 // WithLoginLimiter enables account-level lockout on the service. Passing nil
 // leaves the login path unchanged.
-// WithTokenBlacklist wires the revocation check used by Refresh, so a logged-out
-// refresh token cannot be exchanged for a fresh access token (#7). A nil check
-// keeps the service usable in tests and without Redis.
-func (s *authService) WithTokenBlacklist(fn func(jti string) bool) *authService {
-	s.tokenBlacklisted = fn
+// WithSessionCheck wires the revocation check used by Refresh, so a logged-out
+// refresh token cannot be exchanged for a fresh access token (#7), and so a
+// disabled / role-changed / password-reset account cannot mint a new session
+// from a refresh token minted before that change (#42). A nil check keeps the
+// service usable in tests and without Redis.
+func (s *authService) WithSessionCheck(fn pkg.SessionChecker) *authService {
+	s.sessionCheck = fn
 	return s
 }
 
@@ -215,8 +217,18 @@ func (s *authService) Refresh(refreshToken string) (*LoginResult, error) {
 	// #7: honour logout for refresh tokens too. Without this, blacklisting the
 	// access jti at logout still let the (unrevoked) refresh token mint a new
 	// access token for the rest of its 7-day lifetime.
-	if s.tokenBlacklisted != nil && claims.ID != "" && s.tokenBlacklisted(claims.ID) {
-		return nil, errors.New("refresh_token 无效或已过期")
+	// #42: the same call also carries the per-user watermark, so a refresh token
+	// minted before a disable/role-change/password-reset is refused as well.
+	// #38: an unavailable revocation store is treated as revoked here — a session
+	// that cannot be checked must not be used to mint a longer-lived credential.
+	if s.sessionCheck != nil {
+		var issuedAt time.Time
+		if claims.IssuedAt != nil {
+			issuedAt = claims.IssuedAt.Time
+		}
+		if s.sessionCheck(claims.UserID, claims.ID, issuedAt) != pkg.SessionActive {
+			return nil, errors.New("refresh_token 无效或已过期")
+		}
 	}
 
 	user, err := s.userRepo.FindByID(claims.UserID)

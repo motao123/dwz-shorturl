@@ -1014,7 +1014,7 @@ func validatePartitionName(name string) error {
 // only split the rows that are actually stored in p_future, so a month that
 // predates the first existing partition could only be created empty, and rows
 // already sitting in an older month partition cannot be moved without a data
-// rebuild (documented in docs/partition-maintenance.md).
+// rebuild (see the maintainer's local partition-maintenance notes, not shipped).
 func pendingPartitionMonths(latest time.Time, now time.Time, ahead int) []string {
 	if ahead <= 0 {
 		ahead = partitionAheadMonths

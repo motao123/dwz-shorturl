@@ -9,16 +9,16 @@ import (
 	"dwz-admin/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-redis/redis/v8"
 )
 
 type AuthHandler struct {
 	svc service.AuthService
-	rdb *redis.Client
+	// rev 是登出的吊销出口（键名与 TTL 只在 service 里定义一次）。
+	rev *service.SessionRevocation
 }
 
-func NewAuthHandler(svc service.AuthService, rdb *redis.Client) *AuthHandler {
-	return &AuthHandler{svc: svc, rdb: rdb}
+func NewAuthHandler(svc service.AuthService, rev *service.SessionRevocation) *AuthHandler {
+	return &AuthHandler{svc: svc, rev: rev}
 }
 
 type LoginRequest struct {
@@ -70,16 +70,12 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 
 func (h *AuthHandler) Logout(c *gin.Context) {
 	// P1-4: revoke the current access token by blacklisting its jti until it
-	// would naturally expire. The Auth middleware rejects blacklisted jtis.
-	if h.rdb != nil {
+	// would naturally expire. The Auth middleware rejects revoked jtis.
+	if h.rev != nil {
 		jti := c.GetString("token_jti")
-		if jti != "" {
-			if exp, ok := c.Get("token_exp"); ok {
-				if t, ok2 := exp.(time.Time); ok2 {
-					if ttl := time.Until(t); ttl > 0 {
-						h.rdb.Set(c.Request.Context(), "jwt:blacklist:"+jti, 1, ttl)
-					}
-				}
+		if exp, ok := c.Get("token_exp"); ok && jti != "" {
+			if t, ok2 := exp.(time.Time); ok2 {
+				_ = h.rev.BlacklistToken(c.Request.Context(), jti, t)
 			}
 		}
 	}
@@ -88,10 +84,10 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	// logged-out session able to mint a brand-new access token from the refresh
 	// token for up to refresh_expiry (7 days by default) — "log out" did not log
 	// the session out.
-	if h.rdb != nil {
+	if h.rev != nil {
 		if rt := c.Query("refresh_token"); rt != "" {
 			if jti, ttl, err := pkg.RefreshTokenIdentity(rt); err == nil && jti != "" && ttl > 0 {
-				h.rdb.Set(c.Request.Context(), "jwt:blacklist:"+jti, 1, ttl)
+				_ = h.rev.BlacklistToken(c.Request.Context(), jti, time.Now().Add(ttl))
 			}
 		}
 	}
