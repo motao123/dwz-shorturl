@@ -30,6 +30,12 @@ export interface ShortUrlQuery extends PageParams {
   keyword?: string
   status?: ShortUrlStatus | ''
   category_id?: number | ''
+  /** 按绑定域名筛选（#43：后端一直支持，此前前端没有可发的字段） */
+  domain_id?: number | ''
+  /** 按所属会员筛选 */
+  member_id?: number | ''
+  /** 按创建者（管理员）筛选 */
+  created_by?: number | ''
   date_from?: string
   date_to?: string
   sort?: string

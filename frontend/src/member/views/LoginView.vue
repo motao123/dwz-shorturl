@@ -5,18 +5,19 @@ import { ElMessage } from 'element-plus/es/components/message/index'
 import type { FormRules, FormInstance } from 'element-plus'
 import { Sunny, Moon } from '@element-plus/icons-vue'
 import { useThemeStore } from '@/stores/theme'
+import { resolveSiteRedirect } from '@/utils/redirect'
 import { login, register, requestPasswordReset, sendVerification } from '../api'
 
 const router = useRouter()
 const route = useRoute()
 const themeStore = useThemeStore()
 
-// 登录成功后跳回 redirect 参数指定的页面（仅允许站内路径），否则进入会员中心
-const redirectTo = computed(() => {
-  const r = route.query.redirect
-  if (typeof r === 'string' && r.startsWith('/') && !r.startsWith('//')) return r
-  return '/'
-})
+// 登录成功后跳回 redirect 参数指定的页面（仅允许站内路径），否则进入会员中心。
+// 解析与开放重定向防护见 utils/redirect.ts：除根路径外也接受相对值，因为静态首页在
+// 子目录部署（/short/）里拼不出正确的根绝对路径（#48）。本 SPA 固定挂在
+// <root>/member/ 下，所以站点根就是 baseURI 的上两级。
+const siteRoot = new URL('..', document.baseURI).href
+const redirectTo = computed(() => resolveSiteRedirect(route.query.redirect, siteRoot, '/'))
 
 const loading = ref(false)
 const mode = ref<'login' | 'register' | 'forgot'>('login')

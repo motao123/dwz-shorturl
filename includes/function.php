@@ -812,28 +812,53 @@ function password_unlock_ok($uid) {
     return hash_equals(password_unlock_token($uid, $expiry), $raw);
 }
 
+/**
+ * 站点当前是否走 HTTPS。反向代理终止 TLS 时 $_SERVER['HTTPS'] 是空的，必须再看
+ * X-Forwarded-Proto，否则 cookie 拿不到 Secure 标记（#35）。
+ * 判定与 includes/auth.php 的会话 cookie 保持一致，两处共用本函数。
+ */
+function dwz_is_https() {
+    if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') return true;
+    foreach (array('X_FORWARDED_PROTO', 'HTTP_X_FORWARDED_PROTO') as $k) {
+        $v = isset($_SERVER[$k]) ? strtolower(trim((string)$_SERVER[$k])) : '';
+        // 只认首段：多级代理时该头是逗号分隔的链，最左才是客户端用到的协议。
+        if (strpos($v, ',') !== false) $v = trim(explode(',', $v)[0]);
+        if ($v === 'https') return true;
+    }
+    return false;
+}
+
 function set_password_unlock_cookie($uid) {
     $expiry = time() + 30 * 86400;
-    $secure = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
-    setcookie('dwz_plink_' . (string)$uid, password_unlock_token($uid, $expiry), $expiry, '/', '', $secure, true);
+    // 这枚 cookie 是「已解锁」的凭据本身，泄露即等同密码已破：必须带 Secure + SameSite。
+    // 30 天有效期让它比会话 cookie 更值得加固（#35）。
+    setcookie('dwz_plink_' . (string)$uid, password_unlock_token($uid, $expiry), array(
+        'expires'  => $expiry,
+        'path'     => '/',
+        'secure'   => dwz_is_https(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ));
 }
 
 function password_page_html($uid, $err = '') {
     $title = $err !== '' ? $err : '请输入访问密码';
-    $msg = $err !== '' ? '<p style="color:#c0392b;font-size:13px;margin:0 0 14px;">' . htmlspecialchars($err, ENT_QUOTES) . '</p>' : '';
-    $uid = htmlspecialchars((string)$uid, ENT_QUOTES);
+    // 错误文案改由主题变量着色：#c0392b 在浅底是 5.44（达标）、在暗底只有 3.06（不达标），
+    // 而这个提示恰恰在两种主题下都会出现——写死一个色值必然修坏另一头（#54）。
+    $msg = $err !== '' ? '<p class="err">' . htmlspecialchars($err, ENT_QUOTES) . '</p>' : '';
     return '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
         . '<meta name="viewport" content="width=device-width,initial-scale=1">'
         . '<title>' . htmlspecialchars($title, ENT_QUOTES) . '</title>'
         . '<style>'
         // 使用 CSS 变量定义主题，并跟随系统 prefers-color-scheme，
         // 避免暗色环境下密码页仍是刺眼的白底（与全站暗色适配保持一致）。
-        . ':root{--pw-page:#f2f5f7;--pw-card:#fff;--pw-line:#e4ecee;--pw-text:#16292b;--pw-dim:#6b7f86;--pw-input:#d3e0e3;--pw-brand:#0e6e75;--pw-brand-hover:#0a5a60}'
-        . '@media (prefers-color-scheme:dark){:root{--pw-page:#0d1b20;--pw-card:#122027;--pw-line:#23343b;--pw-text:#e6edf0;--pw-dim:#9aa9ae;--pw-input:#31454d;--pw-brand:#12909a;--pw-brand-hover:#0e6e75}}'
+        . ':root{--pw-page:#f2f5f7;--pw-card:#fff;--pw-line:#e4ecee;--pw-text:#16292b;--pw-dim:#5b6f76;--pw-error:#b02a1f;--pw-input:#d3e0e3;--pw-brand:#0e6e75;--pw-brand-hover:#0a5a60}'
+        . '@media (prefers-color-scheme:dark){:root{--pw-page:#0d1b20;--pw-card:#122027;--pw-line:#23343b;--pw-text:#e6edf0;--pw-dim:#9aa9ae;--pw-error:#f4a09a;--pw-input:#31454d;--pw-brand:#12909a;--pw-brand-hover:#0e6e75}}'
         . '*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--pw-page);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--pw-text)}'
         . '.card{width:min(92vw,360px);background:var(--pw-card);border:1px solid var(--pw-line);border-radius:14px;padding:28px 24px;box-shadow:0 8px 30px rgba(14,110,117,.08)}'
         . '.lock{font-size:34px;text-align:center;margin:0 0 6px}h1{font-size:17px;text-align:center;margin:0 0 6px;font-weight:700}'
         . '.sub{font-size:12.5px;text-align:center;color:var(--pw-dim);margin:0 0 18px}'
+        . '.err{font-size:13px;text-align:center;color:var(--pw-error);margin:0 0 14px}'
         . 'input{width:100%;padding:11px 12px;border:1px solid var(--pw-input);border-radius:8px;font-size:15px;outline:none;background:var(--pw-card);color:var(--pw-text)}'
         . 'input:focus{border-color:var(--pw-brand);box-shadow:0 0 0 3px rgba(14,110,117,.12)}'
         . 'button{width:100%;margin-top:12px;padding:11px;background:var(--pw-brand);color:#fff;border:0;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}'
@@ -841,12 +866,15 @@ function password_page_html($uid, $err = '') {
         // 与 Go 侧 renderPasswordPage 保持同一品牌入口，避免两条跳转路径观感不一致。
         . '.brand{display:block;margin-top:16px;text-align:center;font-size:12.5px;color:var(--pw-dim);text-decoration:none}'
         . '.brand:hover{color:var(--pw-brand)}'
-        . '</style></head><body><form class="card" method="post" action="/' . $uid . '">'
+        // 表单提交到"当前 URL"而不是拼出来的 /<uid>：密码页就是在短链自身的路径上
+        // 渲染的，留空 action 让浏览器自己解析，子目录部署（/short/ab12cd）才不会
+        // 提交到根路径 404、导致该短链永久解不开（#48）。「返回首页」同理用 ./。
+        . '</style></head><body><form class="card" method="post" action="">'
         . '<p class="lock">🔒</p><h1>此链接受密码保护</h1><p class="sub">请输入访问密码以继续</p>'
         . $msg
         . '<input type="password" name="password" placeholder="访问密码" required autofocus autocomplete="off">'
         . '<button type="submit">解锁访问</button>'
-        . '<a class="brand" href="/">← 返回短网址首页</a>'
+        . '<a class="brand" href="./">← 返回短网址首页</a>'
         . '</form></body></html>';
 }
 ?>

@@ -546,6 +546,22 @@ func parseShortUrlFilters(c *gin.Context) repository.ShortUrlFilters {
 		}
 	}
 
+	// 归属维度（#43）：repo 层早就支持按创建者/所属会员筛，但 handler 从不解析，
+	// 「看某管理员 / 某会员名下的短链」这个治理动作因此只能改数据库来做。
+	if cb := c.Query("created_by"); cb != "" {
+		v, err := strconv.ParseUint(cb, 10, 64)
+		if err == nil {
+			filters.CreatedBy = &v
+		}
+	}
+
+	if mid := c.Query("member_id"); mid != "" {
+		v, err := strconv.ParseUint(mid, 10, 64)
+		if err == nil {
+			filters.MemberID = &v
+		}
+	}
+
 	if df := c.Query("date_from"); df != "" {
 		t, err := time.Parse("2006-01-02", df)
 		if err == nil {

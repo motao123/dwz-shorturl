@@ -17,7 +17,7 @@ func TestParseShortUrlFiltersReadsEveryFilter(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodGet,
-		"/admin/api/short-urls?keyword=abc&status=1&category_id=7&domain_id=3"+
+		"/admin/api/short-urls?keyword=abc&status=1&category_id=7&domain_id=3&member_id=4&created_by=9"+
 			"&date_from=2026-01-02&date_to=2026-03-04&include_deleted=1&sort=clicks&order=asc", nil)
 
 	f := parseShortUrlFilters(c)
@@ -32,6 +32,13 @@ func TestParseShortUrlFiltersReadsEveryFilter(t *testing.T) {
 	}
 	if f.DomainID == nil || *f.DomainID != 3 {
 		t.Errorf("domain_id 未解析: %v", f.DomainID)
+	}
+	// #43：归属筛选。repo 层早就支持，此前 handler 从不解析。
+	if f.MemberID == nil || *f.MemberID != 4 {
+		t.Errorf("member_id 未解析: %v", f.MemberID)
+	}
+	if f.CreatedBy == nil || *f.CreatedBy != 9 {
+		t.Errorf("created_by 未解析: %v", f.CreatedBy)
 	}
 	if !f.IncludeDeleted {
 		t.Error("include_deleted 未解析")

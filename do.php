@@ -129,7 +129,7 @@ function redirect_error($status, $message) {
         . '<meta name="robots" content="noindex">'
         . '<meta name="referrer" content="no-referrer">'
         . '<style>'
-        . ':root{--ep-page:#f2f5f7;--ep-card:#fff;--ep-line:#e4ecee;--ep-text:#16292b;--ep-dim:#6b7f86;--ep-brand:#0e6e75;--ep-brand-hover:#0a5a60}'
+        . ':root{--ep-page:#f2f5f7;--ep-card:#fff;--ep-line:#e4ecee;--ep-text:#16292b;--ep-dim:#5b6f76;--ep-brand:#0e6e75;--ep-brand-hover:#0a5a60}'
         . '@media (prefers-color-scheme:dark){:root{--ep-page:#0d1b20;--ep-card:#122027;--ep-line:#23343b;--ep-text:#e6edf0;--ep-dim:#9aa9ae;--ep-brand:#12909a;--ep-brand-hover:#0e6e75}}'
         . '*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--ep-page);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:var(--ep-text)}'
         . '.card{width:min(92vw,400px);background:var(--ep-card);border:1px solid var(--ep-line);border-radius:14px;padding:32px 26px;text-align:center;box-shadow:0 8px 30px rgba(14,110,117,.08)}'

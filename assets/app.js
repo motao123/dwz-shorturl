@@ -377,7 +377,7 @@
       // 输入内容先落 sessionStorage，登录回来自动回填，避免整页跳转丢失粘贴的列表
       saveBatchDraft();
       announce('批量生成需要登录，正在跳转…', true);
-      window.location.href = '/member/login?redirect=' + encodeURIComponent('/#batch');
+      window.location.href = 'member/login?redirect=' + encodeURIComponent(location.pathname + '#batch');
       return;
     }
     var lines = getBatchLines();
@@ -647,7 +647,7 @@
         credentials: 'same-origin'
       });
     } catch (e) { /* 忽略 */ }
-    window.location.href = '/member/login';
+    window.location.href = 'member/login';
   }
 
   memberLogoutBtn.addEventListener('click', function (event) { event.preventDefault(); handleLogout(); });
@@ -692,24 +692,29 @@
     }
   }
 
-  // 真实在线状态：请求 /health，失败时把头部状态点标记为「维护中」
+  // 真实在线状态：请求 /health。三种结果必须分开——把「没装 Go 后端」报成
+  // 「维护中」是纯 PHP 部署下最常见的自我拆台：站点完全健康，页头却永远红着
+  // （#51）。.htaccess 与 nginx.example.conf 都支持不含后端的形态，且它们对
+  // /health 返回的正是 502/404。
   function checkHealth() {
     var note = document.querySelector('.header-note');
     if (!note) return;
     // 用显式 .status-label 定位，取代依赖「最后一个是文本节点」的脆弱契约
     var label = note.querySelector('.status-label');
+    function setState(state, text) {
+      note.classList.toggle('is-down', state === 'down');
+      note.dataset.state = state;
+      // 未部署后端时整块隐藏：灯不亮不代表服务有问题，藏起来比误报更诚实。
+      note.hidden = state === 'unknown';
+      if (label) label.textContent = text;
+    }
     fetch('./health', { method: 'GET', cache: 'no-store' })
-      .then(function (r) { return r.ok; })
-      .then(function (ok) {
-        note.classList.toggle('is-down', !ok);
-        note.dataset.state = ok ? 'up' : 'down';
-        if (label) label.textContent = ok ? '在线' : '维护中';
+      .then(function (r) {
+        if (r.ok) return setState('up', '在线');
+        if (r.status === 502 || r.status === 404) return setState('unknown', '');
+        return setState('down', '维护中');
       })
-      .catch(function () {
-        note.classList.add('is-down');
-        note.dataset.state = 'down';
-        if (label) label.textContent = '维护中';
-      });
+      .catch(function () { setState('down', '维护中'); });
   }
 
   // Cookie 告知横幅：未记忆过选择时显示；同意写入 localStorage。
@@ -757,7 +762,7 @@
       if (sent) return;
       sent = true;
       try {
-        navigator.sendBeacon('/rum.php', new Blob([JSON.stringify({
+        navigator.sendBeacon('./rum.php', new Blob([JSON.stringify({
           m: 'cwv',
           lcp: vitals.lcp,
           cls: vitals.cls,
