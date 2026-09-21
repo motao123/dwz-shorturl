@@ -27,7 +27,9 @@ func (s *memberRepoStub) FindByID(uint64) (*model.Member, error) {
 	}
 	return s.member, nil
 }
-func (s *memberRepoStub) FindByEmail(string) (*model.Member, error)  { return nil, gorm.ErrRecordNotFound }
+func (s *memberRepoStub) FindByEmail(string) (*model.Member, error) {
+	return nil, gorm.ErrRecordNotFound
+}
 func (s *memberRepoStub) FindByResetToken(string) (*model.Member, error) {
 	return nil, gorm.ErrRecordNotFound
 }
@@ -40,12 +42,12 @@ func (s *memberRepoStub) SetVerifyToken(uint64, string, *time.Time) error { retu
 func (s *memberRepoStub) FindByVerifyToken(string) (*model.Member, error) {
 	return nil, gorm.ErrRecordNotFound
 }
-func (s *memberRepoStub) MarkVerified(uint64) error                     { return nil }
+func (s *memberRepoStub) MarkVerified(uint64) error { return nil }
 func (s *memberRepoStub) List(int, int, string, *int8) ([]model.Member, int64, error) {
 	return nil, 0, nil
 }
-func (s *memberRepoStub) UpdateStatus(uint64, int8) error           { return nil }
-func (s *memberRepoStub) ResetPassword(uint64, string) error        { return nil }
+func (s *memberRepoStub) UpdateStatus(uint64, int8) error    { return nil }
+func (s *memberRepoStub) ResetPassword(uint64, string) error { return nil }
 func (s *memberRepoStub) Delete(uint64) error {
 	if s.deleteErr != nil {
 		return s.deleteErr

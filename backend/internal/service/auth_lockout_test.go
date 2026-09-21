@@ -46,23 +46,23 @@ func (f *fakeUserRepo) FindByUsername(string) (*model.User, error) {
 	return f.user, nil
 }
 func (f *fakeUserRepo) FindByEmail(string) (*model.User, error) { return nil, errors.New("not found") }
-func (f *fakeUserRepo) FindByID(uint64) (*model.User, error)     { return f.user, nil }
-func (f *fakeUserRepo) Create(*model.User) error                 { return nil }
-func (f *fakeUserRepo) Update(*model.User) error                 { return nil }
+func (f *fakeUserRepo) FindByID(uint64) (*model.User, error)    { return f.user, nil }
+func (f *fakeUserRepo) Create(*model.User) error                { return nil }
+func (f *fakeUserRepo) Update(*model.User) error                { return nil }
 func (f *fakeUserRepo) List(int, int, string) ([]model.User, int64, error) {
 	return nil, 0, nil
 }
-func (f *fakeUserRepo) UpdateLastLogin(uint64, string) error    { return nil }
-func (f *fakeUserRepo) UpdatePassword(uint64, string) error     { return nil }
-func (f *fakeUserRepo) SoftDelete(uint64) error                 { return nil }
-func (f *fakeUserRepo) GetRoles(uint64) ([]model.Role, error)   { return f.roles, nil }
-func (f *fakeUserRepo) SetRoles(uint64, []uint64) error         { return nil }
+func (f *fakeUserRepo) UpdateLastLogin(uint64, string) error  { return nil }
+func (f *fakeUserRepo) UpdatePassword(uint64, string) error   { return nil }
+func (f *fakeUserRepo) SoftDelete(uint64) error               { return nil }
+func (f *fakeUserRepo) GetRoles(uint64) ([]model.Role, error) { return f.roles, nil }
+func (f *fakeUserRepo) SetRoles(uint64, []uint64) error       { return nil }
 func (f *fakeUserRepo) FindRoleByID(uint64) (*model.Role, error) {
 	return nil, errors.New("not found")
 }
-func (f *fakeUserRepo) LoadRoles(users ...*model.User) error { return nil }
+func (f *fakeUserRepo) LoadRoles(users ...*model.User) error              { return nil }
 func (f *fakeUserRepo) GetPermissions(uint64) ([]model.Permission, error) { return nil, nil }
-func (f *fakeUserRepo) RemoveAllRoles(uint64) error         { return nil }
+func (f *fakeUserRepo) RemoveAllRoles(uint64) error                       { return nil }
 
 type fakeRoleRepo struct{}
 

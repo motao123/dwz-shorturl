@@ -42,9 +42,9 @@ func TestMetricsEndpointExpositionFormat(t *testing.T) {
 	for _, want := range []string{
 		"# TYPE dwz_up gauge",
 		"dwz_up 1",
-		"dwz_db_up 0",           // nil db -> unavailable
+		"dwz_db_up 0",            // nil db -> unavailable
 		"dwz_redis_configured 0", // not configured
-		"dwz_redis_up 0",        // nil redis -> unavailable
+		"dwz_redis_up 0",         // nil redis -> unavailable
 		"dwz_click_queue_capacity 8",
 		"# TYPE dwz_clicks_dropped_total counter",
 	} {

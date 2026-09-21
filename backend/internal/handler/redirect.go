@@ -21,8 +21,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
-	"golang.org/x/crypto/bcrypt"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -39,17 +39,17 @@ type ClickEvent struct {
 
 // ClickQueue is a buffered, non-blocking channel-backed click event queue.
 type ClickQueue struct {
-	ch          chan ClickEvent
-	db          *gorm.DB
-	logger      *zap.Logger
-	geoCountry  func(ip string) string // optional GeoIP country (ISO alpha-2)
-	geoCache    sync.Map               // ip → country, bounded by geoCacheCap
-	wg          sync.WaitGroup
-	stopCtx     context.Context
-	cancel      context.CancelFunc
-	pending     int64 // atomically tracked count of queued events
-	mu          sync.Mutex
-	onClick     func(uid string) // optional webhook callback per click
+	ch         chan ClickEvent
+	db         *gorm.DB
+	logger     *zap.Logger
+	geoCountry func(ip string) string // optional GeoIP country (ISO alpha-2)
+	geoCache   sync.Map               // ip → country, bounded by geoCacheCap
+	wg         sync.WaitGroup
+	stopCtx    context.Context
+	cancel     context.CancelFunc
+	pending    int64 // atomically tracked count of queued events
+	mu         sync.Mutex
+	onClick    func(uid string) // optional webhook callback per click
 
 	// Counters exposed through /metrics. They are the ones an operator actually
 	// needs to alert on: a rising drop count means the queue is saturated (and
@@ -571,7 +571,7 @@ a.btn.ghost{background:transparent;color:var(--ep-brand);border:1px solid var(--
 // Health returns detailed system health information.
 func (h *RedirectHandler) Health(c *gin.Context) {
 	status := gin.H{
-		"status":    "ok",
+		"status":     "ok",
 		"goroutines": runtime.NumGoroutine(),
 		"time":       time.Now().UTC().Format(time.RFC3339),
 	}
@@ -581,10 +581,10 @@ func (h *RedirectHandler) Health(c *gin.Context) {
 	if err == nil && sqlDB != nil {
 		dbStats := sqlDB.Stats()
 		status["db"] = gin.H{
-			"healthy":        true,
-			"open_conns":     dbStats.OpenConnections,
-			"in_use":         dbStats.InUse,
-			"idle":           dbStats.Idle,
+			"healthy":    true,
+			"open_conns": dbStats.OpenConnections,
+			"in_use":     dbStats.InUse,
+			"idle":       dbStats.Idle,
 		}
 	} else {
 		status["db"] = gin.H{"healthy": false}

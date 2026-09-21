@@ -14,9 +14,9 @@ import (
 )
 
 var (
-	ErrDomainInvalid    = errors.New("domain is invalid")
-	ErrDomainExists     = errors.New("domain already exists")
-	ErrDomainNotFound   = errors.New("domain not found")
+	ErrDomainInvalid     = errors.New("domain is invalid")
+	ErrDomainExists      = errors.New("domain already exists")
+	ErrDomainNotFound    = errors.New("domain not found")
 	ErrNoDomainAvailable = errors.New("no available domain in the pool")
 )
 

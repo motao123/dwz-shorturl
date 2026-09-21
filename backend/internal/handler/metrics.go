@@ -42,18 +42,18 @@ import (
 //   - dwz_up == 0                          → process down
 //   - dwz_db_up == 0 for 1m                → admin DB unreachable
 type MetricsHandler struct {
-	db         *gorm.DB
-	publicDB   *gorm.DB
-	rdb        *redis.Client
+	db       *gorm.DB
+	publicDB *gorm.DB
+	rdb      *redis.Client
 	// redisConfigured distinguishes "Redis was intentionally not configured"
 	// from "Redis is configured but unreachable" (#58). Before this, the
 	// dwz_redis_up gauge read 0 in both cases, so the RedisDown alert fired
 	// permanently on deployments without Redis — alert fatigue that trains
 	// operators to ignore the rule (and the real outage hides behind it).
 	redisConfigured bool
-	clickQueue *ClickQueue
-	startedAt  time.Time
-	scrapes    int64
+	clickQueue      *ClickQueue
+	startedAt       time.Time
+	scrapes         int64
 }
 
 func NewMetricsHandler(db, publicDB *gorm.DB, rdb *redis.Client, redisConfigured bool, clickQueue *ClickQueue) *MetricsHandler {

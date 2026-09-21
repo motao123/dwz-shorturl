@@ -23,8 +23,8 @@ type MemberService interface {
 
 type memberService struct {
 	memberRepo repository.MemberRepo
-	purgeRepo repository.MemberPurgeRepo
-	logger    *zap.Logger
+	purgeRepo  repository.MemberPurgeRepo
+	logger     *zap.Logger
 }
 
 func NewMemberService(memberRepo repository.MemberRepo) *memberService {

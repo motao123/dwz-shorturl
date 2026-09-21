@@ -64,9 +64,9 @@ type violationRuleSet struct {
 }
 
 var (
-	rulesOnce sync.Once
-	rulesMu   sync.Mutex
-	rulesCur  *violationRuleSet
+	rulesOnce      sync.Once
+	rulesMu        sync.Mutex
+	rulesCur       *violationRuleSet
 	rulesMTime     time.Time
 	rulesCheckedAt time.Time
 	rulesErr       error

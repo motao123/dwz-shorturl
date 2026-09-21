@@ -1,0 +1,42 @@
+# 编辑器格式基线。这里的每个值都是量出来的，不是偏好：
+#   *.go   120/120 文件用 Tab（gofmt 强制）
+#   前端   42/42 个 .vue/.ts 文件最小缩进为 2 空格（0 个用 4）
+#   *.php  基准 4 空格（1161 行的最小正缩进为 4）
+#   *.sh   基准 2 空格；*.sql 基准 2 空格
+#   assets/*.js  基准 4 空格（前台单文件脚本，与前端工程不同源）
+# 目的是让新文件、以及别人的编辑器不再各自为政；已存在的文件不借这个提交去改。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.go]
+indent_style = tab
+# 缩进与对齐一律交给 gofmt，编辑器不要插手。
+
+[*.{ts,vue,css,html,json}]
+indent_size = 2
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.sh]
+indent_size = 2
+
+[*.sql]
+indent_size = 2
+
+[assets/*.js]
+indent_size = 4
+
+[*.md]
+# Markdown 行尾两个空格是"硬换行"语法，裁掉会改变渲染结果。
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
