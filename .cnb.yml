@@ -74,7 +74,7 @@
             done
             bash --version | head -1
             shellcheck --version | grep -E '^version:'
-            for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
+            for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy/check_internal_docs.sh deploy.sh ops/one_click_migrate.sh; do
               echo "--- bash -n $f"
               bash -n "$f"
               echo "--- shellcheck $f"
@@ -490,24 +490,17 @@
         # .gitignore 里的 docs/ 只能拦住"新增文件"，拦不住改名、换目录、
         # 或从别的仓库把文档合并进来，所以这里再补一道独立的门禁。
         #
-        # 只按文件名模式判断（不看内容），因此不会因为文档措辞而误判，
-        # 也不会把 docs/ 之类的正常发布文档拦下。
+        # 判定规则与双向自测见 deploy/check_internal_docs.sh：只命中 docs/ 下的文件，
+        # 以及路径含敏感词的文档类后缀。不要拿关键词去扫 git ls-files 全集 ——
+        # 后台本身有"操作审计日志"功能，audit.go / AuditLogList.vue 会被一起误伤，
+        # 结果就是这道门禁在自己的主干上直接红。
         - name: 内部文档入库检查
           image: alpine:3.20
           script: |
             set -e
-            # 受控文件名：内部审计 / 分析 / 扫描 / 验证记录与交接说明。
-            # 新增受控模式时改这一行即可，两处 stage 共用同一表达。
-            pattern='(AUDIT|ANALYSIS|SECURITY_SCAN|THREAT_MODEL|PENTEST|VERIFICATION|FINDINGS|HANDOVER|AUDIT_REPORT)'
-            hits=$(git ls-files | grep -iE "\$pattern" || true)
-            if [ -n "$hits" ]; then
-              echo "发现内部审计/分析类文档被纳入版本管理："
-              echo "$hits"
-              echo "这类文件含逐条缺陷与可利用路径，不得入库（见 SECURITY.md）。"
-              echo "如需长期保存请放仓库外；如需公开请改写为按能力分组的说明。"
-              exit 1
-            fi
-            echo "内部文档入库检查通过"
+            # 判定只写一份：deploy/check_internal_docs.sh。两处 stage 调同一个脚本，
+            # 否则哪天只改了一处，另一处就悄悄放宽了（上一版正是复制粘贴的产物）。
+            sh deploy/check_internal_docs.sh
 
         # --- 前端：单测 + 构建 -----------------------------------------------
         # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
@@ -579,7 +572,7 @@ master:
             done
             bash --version | head -1
             shellcheck --version | grep -E '^version:'
-            for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy.sh ops/one_click_migrate.sh; do
+            for f in deploy/backup.sh deploy/restore.sh deploy/check_manifest.sh deploy/check_internal_docs.sh deploy.sh ops/one_click_migrate.sh; do
               echo "--- bash -n $f"
               bash -n "$f"
               echo "--- shellcheck $f"
@@ -966,24 +959,17 @@ master:
         # .gitignore 里的 docs/ 只能拦住"新增文件"，拦不住改名、换目录、
         # 或从别的仓库把文档合并进来，所以这里再补一道独立的门禁。
         #
-        # 只按文件名模式判断（不看内容），因此不会因为文档措辞而误判，
-        # 也不会把 docs/ 之类的正常发布文档拦下。
+        # 判定规则与双向自测见 deploy/check_internal_docs.sh：只命中 docs/ 下的文件，
+        # 以及路径含敏感词的文档类后缀。不要拿关键词去扫 git ls-files 全集 ——
+        # 后台本身有"操作审计日志"功能，audit.go / AuditLogList.vue 会被一起误伤，
+        # 结果就是这道门禁在自己的主干上直接红。
         - name: 内部文档入库检查
           image: alpine:3.20
           script: |
             set -e
-            # 受控文件名：内部审计 / 分析 / 扫描 / 验证记录与交接说明。
-            # 新增受控模式时改这一行即可，两处 stage 共用同一表达。
-            pattern='(AUDIT|ANALYSIS|SECURITY_SCAN|THREAT_MODEL|PENTEST|VERIFICATION|FINDINGS|HANDOVER|AUDIT_REPORT)'
-            hits=$(git ls-files | grep -iE "\$pattern" || true)
-            if [ -n "$hits" ]; then
-              echo "发现内部审计/分析类文档被纳入版本管理："
-              echo "$hits"
-              echo "这类文件含逐条缺陷与可利用路径，不得入库（见 SECURITY.md）。"
-              echo "如需长期保存请放仓库外；如需公开请改写为按能力分组的说明。"
-              exit 1
-            fi
-            echo "内部文档入库检查通过"
+            # 判定只写一份：deploy/check_internal_docs.sh。两处 stage 调同一个脚本，
+            # 否则哪天只改了一处，另一处就悄悄放宽了（上一版正是复制粘贴的产物）。
+            sh deploy/check_internal_docs.sh
 
         # --- 前端：单测 + 构建 -----------------------------------------------
         # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。

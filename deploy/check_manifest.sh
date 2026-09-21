@@ -184,6 +184,62 @@ if [ -f "$BACKUP_SH" ] && [ -f "$DRILL_DOCKERFILE" ]; then
   fi
 fi
 
+# --- 内部文档入库门禁的自证（防它被改松、也防它误伤源码） ---------------------
+# 这道门禁自己就是"曾经形同虚设"的受害者：上一版把关键词 pattern 直接作用于
+# git ls-files 全集，结果后台"操作审计日志"功能的 audit.go / AuditLogList.vue
+# 全部命中，门禁在自己的主干上直接红。所以正反两个方向都要断言，缺一个都不算修好。
+DOCS_GUARD="$ROOT/deploy/check_internal_docs.sh"
+CNB_YML="$ROOT/.cnb.yml"
+
+if [ ! -f "$DOCS_GUARD" ]; then
+  echo "缺少内部文档入库门禁脚本：$DOCS_GUARD" >&2
+  fail=1
+elif [ ! -f "$CNB_YML" ]; then
+  echo "找不到 $CNB_YML，无法断言门禁已接线" >&2
+  fail=1
+else
+  # 只数"作为命令被调用"的那一行。用子串匹配会把 shellcheck 文件清单、
+  # 以及注释里提到脚本名的地方一起算进来（实测：子串匹配数出 4，真调用只有 2）。
+  calls=$(grep -c '^[[:space:]]*sh deploy/check_internal_docs\.sh[[:space:]]*$' "$CNB_YML" || true)
+  if [ "$calls" -ne 2 ]; then
+    echo "内部文档门禁应在 .cnb.yml 的两处 stage 被调用，实际 $calls 处：" >&2
+    echo "  只接一处 = 另一条流水线照常放行。" >&2
+    fail=1
+  fi
+
+  # 反向：当前仓库真值必须通过。
+  if ! sh "$DOCS_GUARD" >/dev/null 2>&1; then
+    echo "内部文档门禁在**当前仓库自身**上失败，说明它开始误伤正常文件：" >&2
+    sh "$DOCS_GUARD" >&2 || true
+    fail=1
+  fi
+
+  # 正向：受控文档必须被拒。少拒一个 = 门禁静默失效，而 CI 仍然全绿。
+  for leaked in \
+    "docs/AUDIT_2026-09.md" \
+    "AUDIT_REPORT.md" \
+    "notes/verification-2026-09.md" \
+    "site/SECURITY_SCAN.txt" \
+    "x/THREAT_MODEL.pdf"
+  do
+    if printf '%s\n' "$leaked" | sh "$DOCS_GUARD" - >/dev/null 2>&1; then
+      echo "内部文档门禁放过了应被拒绝的路径：$leaked" >&2
+      fail=1
+    fi
+  done
+
+  # 误伤回归：源码与公开公告文档必须放行（这几个文件的存在本身就是门禁的用途）。
+  if ! printf '%s\n' \
+      "backend/internal/handler/audit.go" \
+      "backend/internal/service/audit_test.go" \
+      "frontend/src/views/audit/AuditLogList.vue" \
+      "SECURITY.md" "CHANGELOG.md" "README.md" \
+      | sh "$DOCS_GUARD" - >/dev/null 2>&1; then
+    echo "内部文档门禁误伤了源码/公开文档（它只该管 docs/ 与含敏感词的文档类后缀）" >&2
+    fail=1
+  fi
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "部署门禁检查失败" >&2
   exit 1
