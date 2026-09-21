@@ -20,5 +20,7 @@ deploy/.env
 # Database backups produced by ops/one_click_migrate.sh
 backups/
 
-# 文档只在本地维护，不分发到远端仓库
+# 逐条列出缺陷与修法的内部审计记录不入库（见 SECURITY.md 的披露方式说明）。
+# 这条规则是刻意的：本项目曾因把审计索引提交进公开仓库而泄露攻击面，
+# 事后从历史里抹掉并不能收回已经公开的那段时间。要写公开文档请放别处目录。
 docs/

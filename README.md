@@ -135,7 +135,8 @@ DWZ 短网址平台是一套 **PHP 前台 + Go 核心 + Vue3 管理台** 的三�
 只需填 4 个密码，起来就能用 —— **不需要建两个数据库，也不需要跑 setup.php**：
 
 ```bash
-git clone https://github.com/motao123/dwz-shorturl.git
+# 生产部署请固定到发布标签（见下方「版本与升级」），不要直接跑 master
+git clone --branch v1.0.0 https://github.com/motao123/dwz-shorturl.git
 cd dwz-shorturl
 cp .env.example .env      # 填 MYSQL_ROOT_PASSWORD / DB_PASSWORD / ADMIN_PASSWORD / REDIS_PASSWORD
 docker compose up -d
@@ -194,7 +195,7 @@ SMTP_SSL=true
 ### Docker Compose 分库部署
 
 ```bash
-git clone https://github.com/motao123/dwz-shorturl.git
+git clone --branch v1.0.0 https://github.com/motao123/dwz-shorturl.git
 cd dwz-shorturl
 cp deploy/.env.example deploy/.env   # 填写数据库/Redis/JWT 配置
 docker compose -f deploy/docker-compose.yml up -d
@@ -269,7 +270,7 @@ DWZ_SERVER=your.host DWZ_USER=root DWZ_PASS='密码' ./deploy.sh
 | 路径 | Web Server | 前台 PHP | 管理台 / 会员中心接口 | 说明 |
 |---|---|---|---|---|
 | **Docker**（推荐） | 容器内 nginx | ✅ | ✅ 开箱可用 | `docker compose up -d` 已配好全部反代，见上文 |
-| **nginx / 宝塔** | nginx | ✅ | ⚠️ **需手工配 4 段反代** | 未配则接口全 404，见 `docs/deploy-baota.md`（本地文档）|
+| **nginx / 宝塔** | nginx | ✅ | ⚠️ **需手工配 4 段反代** | 未配则接口全 404，规则见仓库根 `nginx.example.conf` |
 | **Apache** | Apache + .htaccess | ✅ | ⚠️ **需启用 mod_rewrite** | 默认走 `api_proxy.php` 兜底，开箱可用 |
 
 #### Apache 部署（含共享虚拟主机）
@@ -409,6 +410,37 @@ php migrations/build_assets.php --check
 
 ---
 
+## 🏷️ 版本与升级
+
+本项目按 [SemVer](https://semver.org/lang/zh-CN/) 用 git tag 发布，**`master` 不是发布渠道**：
+它随时可能包含未走完验证的中间提交，而数据库迁移是向前不可逆的。
+
+| 你想要的 | 应该做什么 |
+|---|---|
+| 生产部署 | `git clone --branch vX.Y.Z`，或已有仓库 `git fetch --tags && git checkout vX.Y.Z` |
+| 跟进修复 | 只跟随**已发布的 tag**，升级前读 [CHANGELOG.md](CHANGELOG.md) 对应条目 |
+| 开发/贡献 | 基于 `master`，PR 里说明验证方式 |
+
+升级三步（顺序不能颠倒，迁移必须先于重启）：
+
+```bash
+git fetch --tags && git checkout v1.0.0
+bash ops/one_click_migrate.sh --dry-run   # 先看会执行什么，不落库
+bash ops/one_click_migrate.sh             # 迁移自带 GET_LOCK 串行保护，可与在线服务共存
+```
+
+想逐条核对每个迁移文件的状态，用迁移二进制（配置读 `backend/configs/config.yaml`）：
+
+```bash
+cd backend && go build -o migrate ./cmd/migrate && ./migrate -status
+```
+
+- 迁移是**幂等且只向前**的：升级不需要 dump/restore，但**降级不被支持** —— 打了新迁移的库不要退回旧 tag 运行。
+- 备份请在升级前单独做一次：`bash deploy/backup.sh`，恢复演练脚本 `deploy/restore.sh`。
+- 安全修复**只随 tag 发布**。如果你在用旧版本而无法升级，请通过 [SECURITY.md](SECURITY.md) 的渠道联系，说明你受影响的版本号。
+
+---
+
 ## 📖 文档
 
 | 文档 | 说明 |
@@ -416,8 +448,8 @@ php migrations/build_assets.php --check
 | [📘 API 文档](api.html) | 前台接口完整说明 + 错误码 + curl 示例 |
 | [🖥️ 项目官网](https://motao123.github.io/dwz-shorturl/) | GitHub Pages 宣传站（由 Actions 自动构建，Vercel 极简浅色设计语言，见 site/DESIGN.md） |
 
-> 后台设计、功能路线图、部署与管理台手册、备份恢复、分区维护、安全扫描与逐批验收记录等文档
-> 在 `docs/` 目录下本地维护，不随仓库分发；文中出现的 `docs/...` 路径仅在本机有效。
+> 面向运营的部署与使用手册、审计与逐批验收记录等内部文档不在本仓库分发。
+> 需要安全问题时请走 [SECURITY.md](SECURITY.md) 里的私下披露渠道；版本与变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -442,7 +474,8 @@ php migrations/build_assets.php --check
 - **依赖自动升级** `.github/dependabot.yml`：每周对 Go / npm minor+patch 分组提 PR（major 需人工评估）；
 - **仓库级扫描降噪** `.scanignore` + `.cnb/security/code_scan_config.yml`：排除第三方代码、构建产物、示例配置等确定无攻击面路径。
 
-> 设计取舍与存量告警分类见 `docs/SECURITY_SCAN.md`（本地文档）。
+> 降噪范围见 `.scanignore` 与 `.cnb/security/code_scan_config.yml` 内的注释；
+> 存量告警如何分类、以及"为什么某类告警只记录不阻断"的判断标准见 [SECURITY.md](SECURITY.md)。
 > `dependency-risk-check` 对所有分支的 PR 生效（含 `master` 与 `auto/*` 特性分支）。
 
 ### 本地自查
@@ -474,7 +507,7 @@ php -l api.php && php migrations/build_assets.php --check   # 提交前校验
 - 💡 提需求：说明业务场景 + 期望效果
 - 🔀 提交代码：Fork → 分支 → PR，遵循既有代码风格
 - ✅ 提交前自检：跑通上面的 [本地自查](#本地自查) 命令，PR 描述里说明验证方式
-- 📚 改动约定：架构/迁移/分区等机制性变更，请同步更新 README 与 `docs/` 对应文档
+- 📚 改动约定：架构/迁移/分区等机制性变更，请同步更新 README 与 [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
