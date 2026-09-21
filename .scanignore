@@ -29,5 +29,10 @@ backend/configs/config.example.yaml
 **/*.sample.*
 
 # ---------- 文档与静态站（无运行时代码）----------
+# 内部文档（审计/分析/验收类）不入库，敏感词真源见 deploy/internal_docs_pattern；
+# 这里只需排除仓库内可能存在的文档目录与静态站。
+# 注意：本文件是"扫描范围"而非"入库门禁"，放宽它不会让敏感文档进仓库，
+# 入库由 .gitignore + deploy/check_internal_docs.sh 把关。
 docs/
+**/docs/
 site/

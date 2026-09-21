@@ -14,13 +14,32 @@
 # backend/internal/handler/audit.go 这类源码不是文档，拿关键词扫全部路径会全员误伤
 # （这正是上一版把 pattern 直接作用于 git ls-files 的后果）。
 #
+# 敏感词不写在这里，从 deploy/internal_docs_pattern 读（唯一真源）：
+# 同一份 pattern 还要被 .gitignore / .dockerignore / .scanignore 用，
+# 各处各写一份必然漂移（本次泄露的根因之一）。
+#
 # 用法：
 #   sh deploy/check_internal_docs.sh                                  # 检查当前仓库被跟踪文件
 #   printf '%s\n' a.md b.md | sh deploy/check_internal_docs.sh -      # 从 stdin 读清单（自测用）
 
 set -e
 
-PATTERN='AUDIT|ANALYSIS|SECURITY_SCAN|THREAT_MODEL|PENTEST|VERIFICATION|FINDINGS|HANDOVER'
+# 相对本脚本定位 pattern 文件，调用方 cd 到哪都不影响。
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PATTERN_FILE="$SCRIPT_DIR/internal_docs_pattern"
+
+if [ ! -f "$PATTERN_FILE" ]; then
+    echo "缺少敏感词真源文件：$PATTERN_FILE" >&2
+    echo "它为 .gitignore / .dockerignore / .scanignore / 本门禁共用，不能缺。" >&2
+    exit 1
+fi
+
+# 单行扩展正则：跳过注释行与空行后取第一行。
+PATTERN=$(grep -vE '^[[:space:]]*(#|$)' "$PATTERN_FILE" | head -n 1)
+if [ -z "$PATTERN" ]; then
+    echo "敏感词真源 $PATTERN_FILE 没有有效的 pattern 行" >&2
+    exit 1
+fi
 
 if [ "$1" = "-" ]; then
     files=$(cat)

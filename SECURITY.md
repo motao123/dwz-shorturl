@@ -69,8 +69,11 @@ git cat-file -p FETCH_HEAD:path/to/secret.md | wc -l   # 非 0 即仍可读
 1. `git filter-repo` 重写全部 `refs/heads/*` 与 `refs/tags/*`，把文件从每一次提交里拔掉；
 2. 强推分支与 tag，并逐条确认重写后各分支的最终 SHA 是预期值——**不要**顺手重新发布 tag，
    已发布的 tag 被重写会让下游的校验失败；
-3. 把文件名模式补进 `.gitignore` 与 `.cnb.yml` 的「内部文档入库检查」门禁，
-   防止同类文档再次进入版本管理。
+3. 把文件名敏感词补进 `deploy/internal_docs_pattern`（**唯一真源**），
+   让 `.gitignore` 与 CI 的「内部文档入库检查」门禁都从它取词——
+   防止同类文档再次进入版本管理。**只写 `docs/` 是不够的**：改名或换目录即可绕过，
+   这正是当初的泄露形状。真源加词后 `deploy/check_manifest.sh` 会断言
+   `.gitignore` 对「每个敏感词 × 每个文档后缀」都有对应 glob，改一处不同步就红。
 
 **只能由平台侧做的（客户端与 CI 凭据都做不到，已实测穷尽）：**
 

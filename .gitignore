@@ -20,7 +20,58 @@ deploy/.env
 # Database backups produced by ops/one_click_migrate.sh
 backups/
 
-# 逐条列出缺陷与修法的内部审计记录不入库（见 SECURITY.md 的披露方式说明）。
-# 这条规则是刻意的：本项目曾因把审计索引提交进公开仓库而泄露攻击面，
-# 事后从历史里抹掉并不能收回已经公开的那段时间。要写公开文档请放别处目录。
+# ============================================================
+# 内部文档（审计/分析/验收类）不入库 —— 见 SECURITY.md 的披露方式说明。
+#
+# 敏感词必须与 deploy/internal_docs_pattern 逐字一致（唯一真源）；
+# deploy/check_manifest.sh 会断言两者同步，改一处不同步就会红。
+#
+# 为什么不只是 `docs/`：本项目曾因把审计索引提交进公开仓库泄露攻击面，
+# 而当时的绕过路径正是"改名/换目录"——只写 `docs/` 拦不住它。
+# 因此按"文件名含敏感词 + 文档类后缀"兜底（与 CI 门禁同一判定口径）。
+# 刻意不带裸关键词：后台有"操作审计日志"功能，只按关键词会把
+# audit.go / AuditLogList.vue 这类源码一起忽略掉（上一版踩过这个坑）。
+# ============================================================
 docs/
+
+# docs/ 之外的同类文档（改名换目录也拦得住；仅限文档后缀）
+*[Aa][Uu][Dd][Ii][Tt]*.md
+*[Aa][Uu][Dd][Ii][Tt]*.txt
+*[Aa][Uu][Dd][Ii][Tt]*.rst
+*[Aa][Uu][Dd][Ii][Tt]*.pdf
+*[Aa][Uu][Dd][Ii][Tt]*.docx
+*[Aa][Nn][Aa][Ll][Yy][Ss][Ii][Ss]*.md
+*[Aa][Nn][Aa][Ll][Yy][Ss][Ii][Ss]*.txt
+*[Aa][Nn][Aa][Ll][Yy][Ss][Ii][Ss]*.rst
+*[Aa][Nn][Aa][Ll][Yy][Ss][Ii][Ss]*.pdf
+*[Aa][Nn][Aa][Ll][Yy][Ss][Ii][Ss]*.docx
+*[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]_[Ss][Cc][Aa][Nn]*.md
+*[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]_[Ss][Cc][Aa][Nn]*.txt
+*[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]_[Ss][Cc][Aa][Nn]*.rst
+*[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]_[Ss][Cc][Aa][Nn]*.pdf
+*[Ss][Ee][Cc][Uu][Rr][Ii][Tt][Yy]_[Ss][Cc][Aa][Nn]*.docx
+*[Tt][Hh][Rr][Ee][Aa][Tt]_[Mm][Oo][Dd][Ee][Ll]*.md
+*[Tt][Hh][Rr][Ee][Aa][Tt]_[Mm][Oo][Dd][Ee][Ll]*.txt
+*[Tt][Hh][Rr][Ee][Aa][Tt]_[Mm][Oo][Dd][Ee][Ll]*.rst
+*[Tt][Hh][Rr][Ee][Aa][Tt]_[Mm][Oo][Dd][Ee][Ll]*.pdf
+*[Tt][Hh][Rr][Ee][Aa][Tt]_[Mm][Oo][Dd][Ee][Ll]*.docx
+*[Pp][Ee][Nn][Tt][Ee][Ss][Tt]*.md
+*[Pp][Ee][Nn][Tt][Ee][Ss][Tt]*.txt
+*[Pp][Ee][Nn][Tt][Ee][Ss][Tt]*.rst
+*[Pp][Ee][Nn][Tt][Ee][Ss][Tt]*.pdf
+*[Pp][Ee][Nn][Tt][Ee][Ss][Tt]*.docx
+*[Vv][Ee][Rr][Ii][Ff][Ii][Cc][Aa][Tt][Ii][Oo][Nn]*.md
+*[Vv][Ee][Rr][Ii][Ff][Ii][Cc][Aa][Tt][Ii][Oo][Nn]*.txt
+*[Vv][Ee][Rr][Ii][Ff][Ii][Cc][Aa][Tt][Ii][Oo][Nn]*.rst
+*[Vv][Ee][Rr][Ii][Ff][Ii][Cc][Aa][Tt][Ii][Oo][Nn]*.pdf
+*[Vv][Ee][Rr][Ii][Ff][Ii][Cc][Aa][Tt][Ii][Oo][Nn]*.docx
+*[Ff][Ii][Nn][Dd][Ii][Nn][Gg][Ss]*.md
+*[Ff][Ii][Nn][Dd][Ii][Nn][Gg][Ss]*.txt
+*[Ff][Ii][Nn][Dd][Ii][Nn][Gg][Ss]*.rst
+*[Ff][Ii][Nn][Dd][Ii][Nn][Gg][Ss]*.pdf
+*[Ff][Ii][Nn][Dd][Ii][Nn][Gg][Ss]*.docx
+*[Hh][Aa][Nn][Dd][Oo][Vv][Ee][Rr]*.md
+*[Hh][Aa][Nn][Dd][Oo][Vv][Ee][Rr]*.txt
+*[Hh][Aa][Nn][Dd][Oo][Vv][Ee][Rr]*.rst
+*[Hh][Aa][Nn][Dd][Oo][Vv][Ee][Rr]*.pdf
+*[Hh][Aa][Nn][Dd][Oo][Vv][Ee][Rr]*.docx

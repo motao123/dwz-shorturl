@@ -1,0 +1,13 @@
+# 内部文档（审计/分析/验收类）文件名敏感词 —— 唯一真源。
+#
+# 谁在读它：
+#   1) deploy/check_internal_docs.sh —— CI 入库门禁（.cnb.yml 两处 stage 调它）
+#   2) deploy/check_manifest.sh      —— 断言 .gitignore / .dockerignore / .scanignore
+#                                        的敏感文档块与本文件逐字一致
+# 为什么要单一真源：这份 pattern 曾在 4 个地方各写一份（门禁脚本 / .gitignore /
+# .dockerignore / .scanignore），其中 .gitignore 只写了 `docs/`，比门禁窄——
+# 于是"把 docs/ 里的文件改名挪到根目录"这条路径本地不拦、只有 CI 事后发现。
+# 排查本次泄露时正是踩了这个形状（改名/换目录即绕过），所以这里收成一份。
+#
+# 格式：单行 grep -E 扩展正则（大写敏感词，用 | 分隔）。以 `#` 开头的行是注释。
+AUDIT|ANALYSIS|SECURITY_SCAN|THREAT_MODEL|PENTEST|VERIFICATION|FINDINGS|HANDOVER

@@ -54,6 +54,8 @@ Thumbs.db
 *~
 
 # --- 测试与文档（运行时不需要） ---
+# 文档类不进镜像：公开文档与内部文档运行时都不需要。
+# 内部文档的敏感词真源见 deploy/internal_docs_pattern（.gitignore 与 CI 门禁同源）。
 **/*_test.go
 frontend/src/**/__tests__
 docs
