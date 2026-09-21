@@ -483,6 +483,32 @@
             bash deploy/restore.sh --admin-only --check
             echo "残档已被跳过，演练用的是完整 dump"
 
+        # --- 内部文档入库门禁 ------------------------------------------------
+        # 为什么需要：本仓库的审计/分析类文档里逐条写着缺陷与可利用路径，
+        # 曾经被提交进公开仓库，导致从任何一条 ref 都能匿名读到攻击面清单；
+        # 事后用 git-filter-repo 重写历史也收不回已经公开的时间窗。
+        # .gitignore 里的 docs/ 只能拦住"新增文件"，拦不住改名、换目录、
+        # 或从别的仓库把文档合并进来，所以这里再补一道独立的门禁。
+        #
+        # 只按文件名模式判断（不看内容），因此不会因为文档措辞而误判，
+        # 也不会把 docs/ 之类的正常发布文档拦下。
+        - name: 内部文档入库检查
+          image: alpine:3.20
+          script: |
+            set -e
+            # 受控文件名：内部审计 / 分析 / 扫描 / 验证记录与交接说明。
+            # 新增受控模式时改这一行即可，两处 stage 共用同一表达。
+            pattern='(AUDIT|ANALYSIS|SECURITY_SCAN|THREAT_MODEL|PENTEST|VERIFICATION|FINDINGS|HANDOVER|AUDIT_REPORT)'
+            hits=$(git ls-files | grep -iE "\$pattern" || true)
+            if [ -n "$hits" ]; then
+              echo "发现内部审计/分析类文档被纳入版本管理："
+              echo "$hits"
+              echo "这类文件含逐条缺陷与可利用路径，不得入库（见 SECURITY.md）。"
+              echo "如需长期保存请放仓库外；如需公开请改写为按能力分组的说明。"
+              exit 1
+            fi
+            echo "内部文档入库检查通过"
+
         # --- 前端：单测 + 构建 -----------------------------------------------
         # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
         - name: 前端单测与构建
@@ -932,6 +958,32 @@ master:
             touch "$BACKUP_DIR/dwz_admin-20990101-000000.sql.gz"
             bash deploy/restore.sh --admin-only --check
             echo "残档已被跳过，演练用的是完整 dump"
+
+        # --- 内部文档入库门禁 ------------------------------------------------
+        # 为什么需要：本仓库的审计/分析类文档里逐条写着缺陷与可利用路径，
+        # 曾经被提交进公开仓库，导致从任何一条 ref 都能匿名读到攻击面清单；
+        # 事后用 git-filter-repo 重写历史也收不回已经公开的时间窗。
+        # .gitignore 里的 docs/ 只能拦住"新增文件"，拦不住改名、换目录、
+        # 或从别的仓库把文档合并进来，所以这里再补一道独立的门禁。
+        #
+        # 只按文件名模式判断（不看内容），因此不会因为文档措辞而误判，
+        # 也不会把 docs/ 之类的正常发布文档拦下。
+        - name: 内部文档入库检查
+          image: alpine:3.20
+          script: |
+            set -e
+            # 受控文件名：内部审计 / 分析 / 扫描 / 验证记录与交接说明。
+            # 新增受控模式时改这一行即可，两处 stage 共用同一表达。
+            pattern='(AUDIT|ANALYSIS|SECURITY_SCAN|THREAT_MODEL|PENTEST|VERIFICATION|FINDINGS|HANDOVER|AUDIT_REPORT)'
+            hits=$(git ls-files | grep -iE "\$pattern" || true)
+            if [ -n "$hits" ]; then
+              echo "发现内部审计/分析类文档被纳入版本管理："
+              echo "$hits"
+              echo "这类文件含逐条缺陷与可利用路径，不得入库（见 SECURITY.md）。"
+              echo "如需长期保存请放仓库外；如需公开请改写为按能力分组的说明。"
+              exit 1
+            fi
+            echo "内部文档入库检查通过"
 
         # --- 前端：单测 + 构建 -----------------------------------------------
         # npm run build 内含 vue-tsc --noEmit，因此这一阶段同时覆盖类型检查。
