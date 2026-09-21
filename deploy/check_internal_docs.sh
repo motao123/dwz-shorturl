@@ -25,7 +25,7 @@
 set -e
 
 # 相对本脚本定位 pattern 文件，调用方 cd 到哪都不影响。
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 PATTERN_FILE="$SCRIPT_DIR/internal_docs_pattern"
 
 if [ ! -f "$PATTERN_FILE" ]; then
