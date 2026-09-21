@@ -238,6 +238,14 @@
             set -e
             go version
             cd backend
+            # 格式基线由 CI 守，不靠人自觉：本次规范化之前有 32/120 个文件不合 gofmt，
+            # 全部是历史累积——因为没有这道检查，谁都不知道它已经漂了。
+            unformatted=$(gofmt -l .)
+            if [ -n "$unformatted" ]; then
+              echo "以下 Go 文件未通过 gofmt（本地执行 gofmt -w <file> 即可修）："
+              echo "$unformatted"
+              exit 1
+            fi
             go vet ./...
             go build ./...
             go test ./...
@@ -710,6 +718,14 @@ master:
             set -e
             go version
             cd backend
+            # 格式基线由 CI 守，不靠人自觉：本次规范化之前有 32/120 个文件不合 gofmt，
+            # 全部是历史累积——因为没有这道检查，谁都不知道它已经漂了。
+            unformatted=$(gofmt -l .)
+            if [ -n "$unformatted" ]; then
+              echo "以下 Go 文件未通过 gofmt（本地执行 gofmt -w <file> 即可修）："
+              echo "$unformatted"
+              exit 1
+            fi
             go vet ./...
             go build ./...
             go test ./...

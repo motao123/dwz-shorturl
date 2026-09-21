@@ -141,8 +141,8 @@ func Init(path string) error {
 		v.SetDefault("log.format", "console")
 
 		v.AutomaticEnv()
-	v.SetEnvPrefix("DWZ")
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+		v.SetEnvPrefix("DWZ")
+		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 		if err = v.ReadInConfig(); err != nil {
 			return

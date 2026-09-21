@@ -41,6 +41,12 @@ jobs:
       - name: go vet / build / test
         working-directory: backend
         run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "以下 Go 文件未通过 gofmt（本地执行 gofmt -w <file> 即可修）："
+            echo "$unformatted"
+            exit 1
+          fi
           go vet ./...
           go build ./...
           go test ./...

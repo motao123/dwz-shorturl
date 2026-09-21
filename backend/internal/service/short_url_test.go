@@ -177,13 +177,13 @@ func (m *mockShortRepo) BatchDeleteWithDomainCount(urls []model.ShortUrl) error 
 func (m *mockShortRepo) List(page, perPage int, f repository.ShortUrlFilters) ([]model.ShortUrl, int64, error) {
 	return nil, 0, nil
 }
-func (m *mockShortRepo) Count() (int64, error)                    { return int64(len(m.records)), nil }
-func (m *mockShortRepo) CountByStatus(int8) (int64, error)        { return 0, nil }
-func (m *mockShortRepo) CountByMember(uint64) (int64, error)     { return m.memberCount, nil }
-func (m *mockShortRepo) CountToday() (int64, error)               { return 0, nil }
-func (m *mockShortRepo) BatchCreate(urls []model.ShortUrl) error  { return nil }
-func (m *mockShortRepo) IncrementClicks(uint64) error             { return nil }
-func (m *mockShortRepo) UpdatesByID(uint64, map[string]interface{}) error        { return nil }
+func (m *mockShortRepo) Count() (int64, error)                            { return int64(len(m.records)), nil }
+func (m *mockShortRepo) CountByStatus(int8) (int64, error)                { return 0, nil }
+func (m *mockShortRepo) CountByMember(uint64) (int64, error)              { return m.memberCount, nil }
+func (m *mockShortRepo) CountToday() (int64, error)                       { return 0, nil }
+func (m *mockShortRepo) BatchCreate(urls []model.ShortUrl) error          { return nil }
+func (m *mockShortRepo) IncrementClicks(uint64) error                     { return nil }
+func (m *mockShortRepo) UpdatesByID(uint64, map[string]interface{}) error { return nil }
 func (m *mockShortRepo) FindTopN(int, *time.Time, *time.Time) ([]model.ShortUrl, error) {
 	return nil, nil
 }

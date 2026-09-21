@@ -1,0 +1,31 @@
+# 行尾与文本属性基线。
+#
+# 为什么需要：这套代码在 Windows 上维护，而仓库此前只有 core.autocrlf=input 这一层
+# —— 那是**每个克隆者本机**的设置，不是仓库属性。谁没设，提交就会带进 CRLF，
+# 同一行代码于是能在两个平台上 diff 出整文件差异。行尾规则必须由仓库自己声明。
+#
+# 写的时候注意 .gitattributes 是**后匹配的规则覆盖先匹配的**，所以"例外"要放在通用规则之后。
+
+* text eol=lf
+
+# 换行归一化会直接破坏的内容
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.pdf   binary
+*.gz    binary
+*.br    binary
+
+# 生成物与第三方库：内容不动，只在 code review 里折叠起来。
+# assets/*.min.css|js 由 php migrations/build_assets.php 生成，手改会被 --check 判为漂移；
+# assets/qrcode.min.js 是外部 vendored 库，不随本项目格式化。
+*.min.js linguist-generated
+*.min.css linguist-generated
+assets/qrcode.min.js linguist-documentation

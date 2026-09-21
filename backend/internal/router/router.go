@@ -15,22 +15,22 @@ import (
 )
 
 type Handlers struct {
-	Auth     *handler.AuthHandler
-	ShortUrl *handler.ShortUrlHandler
-	User     *handler.UserHandler
-	Role     *handler.RoleHandler
-	Stats    *handler.StatsHandler
-	Config   *handler.ConfigHandler
-	Audit    *handler.AuditHandler
-	ApiKey   *handler.ApiKeyHandler
-	Redirect *handler.RedirectHandler
-	Domain   *handler.DomainHandler
-	Member   *handler.MemberHandler
+	Auth      *handler.AuthHandler
+	ShortUrl  *handler.ShortUrlHandler
+	User      *handler.UserHandler
+	Role      *handler.RoleHandler
+	Stats     *handler.StatsHandler
+	Config    *handler.ConfigHandler
+	Audit     *handler.AuditHandler
+	ApiKey    *handler.ApiKeyHandler
+	Redirect  *handler.RedirectHandler
+	Domain    *handler.DomainHandler
+	Member    *handler.MemberHandler
 	Violation *handler.ViolationHandler
-	Monitor  *handler.MonitorHandler
-	Webhook  *handler.WebhookHandler
+	Monitor   *handler.MonitorHandler
+	Webhook   *handler.WebhookHandler
 	MemberApi *handler.MemberApiHandler
-	Metrics *handler.MetricsHandler
+	Metrics   *handler.MetricsHandler
 }
 
 func Setup(engine *gin.Engine, h *Handlers, permFunc func(uint64) ([]string, error), logger *zap.Logger, cfg *config.Config, apiKeyRepo repository.ApiKeyRepo, rateLimiter *pkg.RateLimiter, memberRepo repository.MemberRepo, runtimeCfg *service.RuntimeConfig) {

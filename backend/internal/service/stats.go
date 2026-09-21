@@ -31,14 +31,14 @@ type TrendPoint struct {
 
 // LinkStatsResult is per-link click analytics for the admin console.
 type LinkStatsResult struct {
-	UID           string           `json:"uid"`
-	Total         int64            `json:"total"`
-	Trend         []TrendPoint     `json:"trend"`
-	Referrers     []TrendPoint     `json:"referrers"`
-	ReferrerTypes []TrendPoint     `json:"referrer_types"`
-	Devices       []TrendPoint     `json:"devices"`
-	Browsers      []TrendPoint     `json:"browsers"`
-	Countries     []TrendPoint     `json:"countries"`
+	UID           string       `json:"uid"`
+	Total         int64        `json:"total"`
+	Trend         []TrendPoint `json:"trend"`
+	Referrers     []TrendPoint `json:"referrers"`
+	ReferrerTypes []TrendPoint `json:"referrer_types"`
+	Devices       []TrendPoint `json:"devices"`
+	Browsers      []TrendPoint `json:"browsers"`
+	Countries     []TrendPoint `json:"countries"`
 }
 
 type StatsService interface {

@@ -7,10 +7,10 @@ import (
 
 // Referer types used across stats aggregation.
 const (
-	RefererDirect  = "直接访问"
-	RefererSearch  = "搜索引擎"
-	RefererSocial  = "社交媒体"
-	RefererOther   = "其他网站"
+	RefererDirect = "直接访问"
+	RefererSearch = "搜索引擎"
+	RefererSocial = "社交媒体"
+	RefererOther  = "其他网站"
 )
 
 // searchDomains are hostname substrings that identify search-engine referrers.

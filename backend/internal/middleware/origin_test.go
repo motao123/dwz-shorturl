@@ -71,9 +71,9 @@ func TestRequireSameSiteOriginBlocksCrossSite(t *testing.T) {
 	r := originEngine("")
 
 	cases := map[string]string{
-		"外站 Origin":            "http://evil.test",
+		"外站 Origin":   "http://evil.test",
 		"后缀伪装成本站的恶意域": "https://links.test.evil.test",
-		"端口不符":                "http://links.test:9999",
+		"端口不符":        "http://links.test:9999",
 	}
 	for name, origin := range cases {
 		if w := post(r, "/member/api/links", origin, "", "text/plain"); w.Code != http.StatusForbidden {

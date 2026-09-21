@@ -33,17 +33,17 @@ import (
 // layer rejected the input, e.g. a user typed a bad URL and got
 // "url host not allowed" while the surrounding UI was entirely Chinese.
 var (
-	ErrURLInvalid       = errors.New("链接格式不正确，请输入完整的 http(s) 地址")
-	ErrURLTooLong       = errors.New("链接过长，请缩短后重试")
-	ErrSSRFBlocked      = errors.New("该地址不允许被缩短（内网/本机/云元数据地址）")
-	ErrDNSResolve       = errors.New("该域名暂时无法解析，请稍后重试")
+	ErrURLInvalid         = errors.New("链接格式不正确，请输入完整的 http(s) 地址")
+	ErrURLTooLong         = errors.New("链接过长，请缩短后重试")
+	ErrSSRFBlocked        = errors.New("该地址不允许被缩短（内网/本机/云元数据地址）")
+	ErrDNSResolve         = errors.New("该域名暂时无法解析，请稍后重试")
 	ErrCustomCodeFormat   = errors.New("自定义短码格式不正确：需为 6-8 位小写字母或数字")
 	ErrCustomCodeDisabled = errors.New("管理员已关闭自定义短码功能")
 	// ErrExpireDaysNotAllowed carries the permitted values so the message stays
 	// accurate when an operator edits the whitelist.
 	ErrExpireDaysNotAllowed = errors.New("有效期不在管理员允许的范围内")
-	ErrCustomCodeTaken  = errors.New("自定义短码已被占用")
-	ErrCodeCollision    = errors.New("短码生成冲突，请重试")
+	ErrCustomCodeTaken      = errors.New("自定义短码已被占用")
+	ErrCodeCollision        = errors.New("短码生成冲突，请重试")
 	// ErrMemberQuotaExceeded is the per-member live-link cap (#41). It counts
 	// against a limit an operator can raise in the config catalog, so the message
 	// points there instead of sounding like a hard error.

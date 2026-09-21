@@ -39,7 +39,7 @@ func NewIp2Region(path string) (*Ip2Region, error) {
 		data:          b,
 		firstIndexPtr: first,
 		lastIndexPtr:  last,
-		totalBlocks:   (last - first)/12 + 1,
+		totalBlocks:   (last-first)/12 + 1,
 	}, nil
 }
 

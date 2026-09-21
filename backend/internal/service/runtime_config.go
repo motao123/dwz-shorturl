@@ -53,11 +53,11 @@ const (
 	// load issues several calls), while still bounding an authenticated client
 	// that loops the create endpoint. Operators can tune both from the config
 	// page; 0 in api_rate_max disables the limit.
-	defaultMemberRateMax    = 120
+	defaultMemberRateMax = 120
 	// defaultMemberMaxLinks is the per-member live-link cap when the operator
 	// hasn't set member.max_links (#41). Finite on purpose: "unlimited by
 	// default" is what let fresh registrations mass-produce phishing links.
-	defaultMemberMaxLinks = 1000
+	defaultMemberMaxLinks   = 1000
 	defaultMemberRateWindow = 60
 	minMemberRateWindow     = 1
 	maxMemberRateWindow     = 3600
@@ -76,8 +76,8 @@ const (
 	KeyAllowedExpireDays   = "short_url.allowed_expire_days"
 	KeyMemberRateMax       = "member.api_rate_max"
 	// KeyMemberMaxLinks caps how many live links one member account may hold (#41).
-	KeyMemberMaxLinks      = "member.max_links"
-	KeyMemberRateWindow    = "member.api_rate_window"
+	KeyMemberMaxLinks   = "member.max_links"
+	KeyMemberRateWindow = "member.api_rate_window"
 )
 
 // NewRuntimeConfig builds a resolver. A nil repo yields defaults for everything,
