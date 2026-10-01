@@ -38,7 +38,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 配置 Pages 环境
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: 构建静态站（复制 site/ → _site/）
         run: |
